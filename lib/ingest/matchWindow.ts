@@ -18,7 +18,17 @@ export function isMatchWindowOpen(
 
   if (relevant.some((f) => IN_PLAY_STATUSES.includes(f.status))) return true;
 
-  const times = relevant.map((f) => new Date(f.kickoffUtc).getTime());
+  // Filter out fixtures with unparseable kickoff times; one NaN would poison
+  // Math.min/max and break the guard for all other fixtures. The DB column
+  // is `timestamptz not null`, so this shouldn't happen, but the function is
+  // exported and pure — defensive filtering is appropriate here.
+  const parseable = relevant.filter((f) => {
+    const t = new Date(f.kickoffUtc).getTime();
+    return !Number.isNaN(t);
+  });
+  if (parseable.length === 0) return false;
+
+  const times = parseable.map((f) => new Date(f.kickoffUtc).getTime());
   const earliest = Math.min(...times);
   const latest = Math.max(...times);
   const t = now.getTime();

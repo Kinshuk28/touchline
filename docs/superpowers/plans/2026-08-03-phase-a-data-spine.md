@@ -2080,6 +2080,39 @@ describe('isMatchWindowOpen', () => {
     ];
     expect(isMatchWindowOpen(f, at('2026-08-21T14:30:00Z'))).toBe(false);
   });
+
+  it('poisoning case: a genuinely in-window TIMED fixture plus an unparseable date still opens the window', () => {
+    const f = [
+      { status: 'TIMED' as const, kickoffUtc: '2026-08-21T14:00:00Z' },
+      { status: 'TIMED' as const, kickoffUtc: 'not-a-date' },
+    ];
+    expect(isMatchWindowOpen(f, at('2026-08-21T13:46:00Z'))).toBe(true);
+  });
+
+  it('in-play short-circuit survives an unparseable date on the same fixture', () => {
+    const f = [{ status: 'IN_PLAY' as const, kickoffUtc: 'not-a-date' }];
+    expect(isMatchWindowOpen(f, at('2026-08-21T20:00:00Z'))).toBe(true);
+  });
+
+  it('all rows unparseable returns false', () => {
+    const f = [
+      { status: 'TIMED' as const, kickoffUtc: 'not-a-date' },
+      { status: 'TIMED' as const, kickoffUtc: 'also-not-a-date' },
+    ];
+    expect(isMatchWindowOpen(f, at('2026-08-21T14:00:00Z'))).toBe(false);
+  });
+
+  it('a bad date does not widen the window: in-window fixture alone vs with bad date', () => {
+    const goodFixture = [{ status: 'TIMED' as const, kickoffUtc: '2026-08-21T14:00:00Z' }];
+    const withBadDate = [
+      { status: 'TIMED' as const, kickoffUtc: '2026-08-21T14:00:00Z' },
+      { status: 'TIMED' as const, kickoffUtc: 'not-a-date' },
+    ];
+    expect(isMatchWindowOpen(goodFixture, at('2026-08-21T13:46:00Z'))).toBe(true);
+    expect(isMatchWindowOpen(withBadDate, at('2026-08-21T13:46:00Z'))).toBe(true);
+    expect(isMatchWindowOpen(goodFixture, at('2026-08-21T10:00:00Z'))).toBe(false);
+    expect(isMatchWindowOpen(withBadDate, at('2026-08-21T10:00:00Z'))).toBe(false);
+  });
 });
 ```
 
@@ -2111,7 +2144,17 @@ export function isMatchWindowOpen(
 
   if (relevant.some((f) => IN_PLAY_STATUSES.includes(f.status))) return true;
 
-  const times = relevant.map((f) => new Date(f.kickoffUtc).getTime());
+  // Filter out fixtures with unparseable kickoff times; one NaN would poison
+  // Math.min/max and break the guard for all other fixtures. The DB column
+  // is `timestamptz not null`, so this shouldn't happen, but the function is
+  // exported and pure — defensive filtering is appropriate here.
+  const parseable = relevant.filter((f) => {
+    const t = new Date(f.kickoffUtc).getTime();
+    return !Number.isNaN(t);
+  });
+  if (parseable.length === 0) return false;
+
+  const times = parseable.map((f) => new Date(f.kickoffUtc).getTime());
   const earliest = Math.min(...times);
   const latest = Math.max(...times);
   const t = now.getTime();

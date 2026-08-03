@@ -51,4 +51,44 @@ describe('isMatchWindowOpen', () => {
     ];
     expect(isMatchWindowOpen(f, at('2026-08-21T14:30:00Z'))).toBe(false);
   });
+
+  it('poisoning case: a genuinely in-window TIMED fixture plus an unparseable date still opens the window', () => {
+    const f = [
+      { status: 'TIMED' as const, kickoffUtc: '2026-08-21T14:00:00Z' },
+      { status: 'TIMED' as const, kickoffUtc: 'not-a-date' },
+    ];
+    // At 13:46 (14 minutes before kickoff), window should be open regardless of the bad date
+    expect(isMatchWindowOpen(f, at('2026-08-21T13:46:00Z'))).toBe(true);
+  });
+
+  it('in-play short-circuit survives an unparseable date on the same fixture', () => {
+    const f = [{ status: 'IN_PLAY' as const, kickoffUtc: 'not-a-date' }];
+    // IN_PLAY should keep the window open even with an unparseable date
+    expect(isMatchWindowOpen(f, at('2026-08-21T20:00:00Z'))).toBe(true);
+  });
+
+  it('all rows unparseable returns false', () => {
+    const f = [
+      { status: 'TIMED' as const, kickoffUtc: 'not-a-date' },
+      { status: 'TIMED' as const, kickoffUtc: 'also-not-a-date' },
+    ];
+    // No valid kickoff times, window closed
+    expect(isMatchWindowOpen(f, at('2026-08-21T14:00:00Z'))).toBe(false);
+  });
+
+  it('a bad date does not widen the window: in-window fixture alone vs with bad date', () => {
+    const goodFixture = [{ status: 'TIMED' as const, kickoffUtc: '2026-08-21T14:00:00Z' }];
+    const withBadDate = [
+      { status: 'TIMED' as const, kickoffUtc: '2026-08-21T14:00:00Z' },
+      { status: 'TIMED' as const, kickoffUtc: 'not-a-date' },
+    ];
+
+    // Inside the window: both should be true
+    expect(isMatchWindowOpen(goodFixture, at('2026-08-21T13:46:00Z'))).toBe(true);
+    expect(isMatchWindowOpen(withBadDate, at('2026-08-21T13:46:00Z'))).toBe(true);
+
+    // Outside the window: both should be false
+    expect(isMatchWindowOpen(goodFixture, at('2026-08-21T10:00:00Z'))).toBe(false);
+    expect(isMatchWindowOpen(withBadDate, at('2026-08-21T10:00:00Z'))).toBe(false);
+  });
 });
