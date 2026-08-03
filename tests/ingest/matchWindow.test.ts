@@ -44,10 +44,28 @@ describe('isMatchWindowOpen', () => {
     expect(isMatchWindowOpen(f, at('2026-08-22T22:00:00Z'))).toBe(false);
   });
 
-  it('ignores postponed and cancelled fixtures when deciding to open', () => {
+  it('ignores postponed and cancelled fixtures (but not suspended) when deciding to open', () => {
     const f = [
       { status: 'POSTPONED' as const, kickoffUtc: '2026-08-21T14:00:00Z' },
       { status: 'CANCELLED' as const, kickoffUtc: '2026-08-21T14:00:00Z' },
+    ];
+    expect(isMatchWindowOpen(f, at('2026-08-21T14:30:00Z'))).toBe(false);
+  });
+
+  it('a lone SUSPENDED fixture in-window opens the window (suspended matches can resume)', () => {
+    const f = [{ status: 'SUSPENDED' as const, kickoffUtc: '2026-08-21T14:00:00Z' }];
+    expect(isMatchWindowOpen(f, at('2026-08-21T13:46:00Z'))).toBe(true);
+  });
+
+  it('a lone SUSPENDED fixture far outside the window closes it (treated as scheduled)', () => {
+    const f = [{ status: 'SUSPENDED' as const, kickoffUtc: '2026-08-21T14:00:00Z' }];
+    expect(isMatchWindowOpen(f, at('2026-08-19T12:00:00Z'))).toBe(false);
+  });
+
+  it('postponed and cancelled together in-window still closes', () => {
+    const f = [
+      { status: 'POSTPONED' as const, kickoffUtc: '2026-08-21T14:00:00Z' },
+      { status: 'CANCELLED' as const, kickoffUtc: '2026-08-21T15:00:00Z' },
     ];
     expect(isMatchWindowOpen(f, at('2026-08-21T14:30:00Z'))).toBe(false);
   });
@@ -90,5 +108,17 @@ describe('isMatchWindowOpen', () => {
     // Outside the window: both should be false
     expect(isMatchWindowOpen(goodFixture, at('2026-08-21T10:00:00Z'))).toBe(false);
     expect(isMatchWindowOpen(withBadDate, at('2026-08-21T10:00:00Z'))).toBe(false);
+  });
+
+  it('boundary: opens exactly 15 minutes before kickoff (pins >=)', () => {
+    const f = [{ status: 'TIMED' as const, kickoffUtc: '2026-08-21T14:00:00Z' }];
+    // Exactly 15 minutes before: 14:00:00 - 15min = 13:45:00
+    expect(isMatchWindowOpen(f, at('2026-08-21T13:45:00Z'))).toBe(true);
+  });
+
+  it('boundary: closes exactly 150 minutes after the last kickoff (pins <=)', () => {
+    const f = [{ status: 'FINISHED' as const, kickoffUtc: '2026-08-21T14:00:00Z' }];
+    // Exactly 150 minutes after: 14:00:00 + 150min = 16:30:00
+    expect(isMatchWindowOpen(f, at('2026-08-21T16:30:00Z'))).toBe(true);
   });
 });

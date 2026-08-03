@@ -5,7 +5,13 @@ export interface WindowFixture {
   kickoffUtc: string;
 }
 
-const DEAD_STATUSES: FixtureStatus[] = ['POSTPONED', 'CANCELLED', 'SUSPENDED'];
+// POSTPONED and CANCELLED are truly dead — fixtures will not resume.
+// SUSPENDED is not dead: a match halted mid-play by floodlight failure, weather, or crowd trouble
+// can resume as IN_PLAY on the very next poll. Treating it as dead would close the ingestion
+// window while a real, resumable match is live, silently stopping live scores for all leagues.
+// Keeping SUSPENDED "relevant" means its kickoff time contributes to the window bounds like SCHEDULED,
+// ensuring the window stays open through the suspension and any resumption.
+const DEAD_STATUSES: FixtureStatus[] = ['POSTPONED', 'CANCELLED'];
 
 export function isMatchWindowOpen(
   fixtures: WindowFixture[],
