@@ -73,4 +73,18 @@ describe('FplClient.getPlayers', () => {
       'https://resources.premierleague.com/premierleague/photos/players/250x250/p226597.png',
     );
   });
+
+  it('returns 0 rather than null when expected_goals is present and zero', async () => {
+    // Fixture element id 1 (David Raya Martín) has expected_goals: "0.00".
+    // This guards against the regression xg || null, which would turn 0 into null.
+    const raw = bootstrap.elements.find((e: { id: number }) => e.id === 1);
+    expect(raw).toBeDefined();
+    expect(raw!.expected_goals).toBe('0.00');
+
+    const players = await clientFor(bootstrap).getPlayers();
+    const raya = players.find((p) => p.fplId === 1)!;
+    expect(raya).toBeDefined();
+    expect(raya.expectedGoals).toBe(0);
+    expect(raya.expectedGoals).not.toBeNull();
+  });
 });
