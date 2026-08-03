@@ -3,6 +3,7 @@ import { serviceClient } from '@/lib/db/client';
 import { upsertLeagues, getLeagueIdMap } from '@/lib/db/repositories/leagues';
 import { upsertTeams, getTeamIdMap } from '@/lib/db/repositories/teams';
 import { upsertFixtures } from '@/lib/db/repositories/fixtures';
+import { upsertNewsItems } from '@/lib/db/repositories/news';
 import { startRun, finishRun } from '@/lib/db/repositories/runs';
 import { upsertPlayersByFdId, getPlayerIdByFdId, type PlayerRow } from '@/lib/db/repositories/players';
 
@@ -74,6 +75,77 @@ d('repositories against a real Supabase project', () => {
     const id = await startRun('test-job');
     await finishRun(id, 'ok', null, 3);
     expect(id).toBeGreaterThan(0);
+  });
+
+  it('upserts news items and returns count of newly inserted only', async () => {
+    const db = serviceClient();
+
+    // Step 1: Insert 2 fresh news items → assert return value is 2
+    const batch1 = [
+      {
+        source: 'test-rss',
+        title: 'Fresh News 1',
+        summary: 'Summary 1',
+        url: 'https://example.com/news1',
+        imageUrl: null,
+        publishedAt: new Date().toISOString(),
+        categories: [],
+        contentHash: 'zz-test-news-1',
+      },
+      {
+        source: 'test-rss',
+        title: 'Fresh News 2',
+        summary: 'Summary 2',
+        url: 'https://example.com/news2',
+        imageUrl: null,
+        publishedAt: new Date().toISOString(),
+        categories: [],
+        contentHash: 'zz-test-news-2',
+      },
+    ];
+    const inserted1 = await upsertNewsItems(batch1);
+    expect(inserted1).toBe(2);
+
+    // Step 2: Insert 1 of those same 2 again + 1 genuinely new one → assert return value is 1, not 2
+    const batch2 = [
+      batch1[0]!, // reinsert the first one
+      {
+        source: 'test-rss',
+        title: 'Fresh News 3',
+        summary: 'Summary 3',
+        url: 'https://example.com/news3',
+        imageUrl: null,
+        publishedAt: new Date().toISOString(),
+        categories: [],
+        contentHash: 'zz-test-news-3',
+      },
+    ];
+    const inserted2 = await upsertNewsItems(batch2);
+    expect(inserted2).toBe(1); // only the new one counted, not the duplicate
+
+    // Step 3: Insert only already-seen items → assert return value is 0
+    const batch3 = [batch1[0]!, batch1[1]!];
+    const inserted3 = await upsertNewsItems(batch3);
+    expect(inserted3).toBe(0);
+
+    // Step 4: Assert total row count for synthetic items is 3, proving duplicates were ignored
+    const { count, error } = await db
+      .from('news_items')
+      .select('*', { count: 'exact', head: true })
+      .like('content_hash', 'zz-test-%');
+    expect(error).toBeNull();
+    expect(count).toBe(3);
+
+    // Cleanup: delete the synthetic rows
+    await db.from('news_items').delete().like('content_hash', 'zz-test-%');
+
+    // Verify cleanup succeeded
+    const { count: countAfter, error: errorAfter } = await db
+      .from('news_items')
+      .select('*', { count: 'exact', head: true })
+      .like('content_hash', 'zz-test-%');
+    expect(errorAfter).toBeNull();
+    expect(countAfter).toBe(0);
   });
 });
 

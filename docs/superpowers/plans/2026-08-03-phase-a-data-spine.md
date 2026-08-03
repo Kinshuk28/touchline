@@ -2817,11 +2817,12 @@ d('getPlayerIdByFdId beyond the 1,000-row PostgREST cap', () => {
 RUN_DB_TESTS=1 node --env-file=.env.local node_modules/vitest/vitest.mjs run tests/db/repositories.integration.test.ts
 ```
 
-Expected: PASS, 5 tests (4 from the general repository suite, plus the
-1,100-row pagination-cap test). Without `RUN_DB_TESTS=1` they skip, which is
-what keeps CI free of live calls. Both `describe` blocks clean up their own
-synthetic rows in `afterAll` — including deleting the 1,100 seeded players and
-asserting the count is back to 0 — so no manual SQL cleanup step is needed.
+Expected: PASS, 6 tests (4 from the general repository suite, 1 for news-item
+upsert count semantics, plus the 1,100-row pagination-cap test). Without
+`RUN_DB_TESTS=1` they skip, which is what keeps CI free of live calls. All
+`describe` blocks clean up their own synthetic rows in `afterAll` — including
+deleting the seeded players/news items and asserting the count is back to 0 —
+so no manual SQL cleanup step is needed.
 
 - [ ] **Step 8: Commit**
 
