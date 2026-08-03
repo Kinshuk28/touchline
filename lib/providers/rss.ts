@@ -7,20 +7,46 @@ export const FEEDS: Array<{ source: string; url: string }> = [
   { source: 'Sky Sports', url: 'https://www.skysports.com/rss/12040' },
 ];
 
+// Multi-word phrases below are checked as plain substrings of the lowercased title: a
+// real headline is very unlikely to contain a several-word phrase like "agree deal" or
+// "ruled out" by accident, so no extra care is needed there. Single-word tokens (no
+// internal space) are different — a short or common word can appear as a *substring
+// inside an unrelated word* and fire a false positive, e.g. bare "acl" inside
+// "spectacle"/"miracle"/"debacle"/"oracle", bare "signing" inside
+// "resigning"/"designing"/"consigning" (a manager resigning is not a transfer), bare
+// "knock" inside "knockout" (Champions League "knockout stages" is a very common
+// football phrase), or bare "operation" inside "cooperation". To avoid that whole class
+// of trap, every single-word keyword is matched with word boundaries (`\bword\b`)
+// instead of a raw substring test. The trade-off: a bare plural like "transfers" or
+// "injuries" no longer matches through its singular root ("transfer"/"injury") — in
+// practice those headlines still carry other signal (another keyword, or the word
+// elsewhere in the title), so the small recall loss is worth the precision gained.
 const TRANSFER_WORDS = [
-  'transfer', 'signing', 'signs', 'sign ', 'move to', 'joins', 'deal for',
-  'bid for', 'agree deal', 'medical', 'loan', 'fee', 'complete',
+  'transfer', 'signing', 'signs for', 'signs with', 'set to join', 'joins',
+  'move to', 'move for', 'deal for', 'bid for', 'agree deal', 'agrees deal',
+  'agreed deal', 'medical', 'loan', 'release clause', 'transfer fee',
+  'record fee', 'swap deal', 'contract', 'complete signing', 'complete move',
 ];
 const INJURY_WORDS = [
   'injury', 'injured', 'ruled out', 'sidelined', 'hamstring', 'acl',
-  'surgery', 'setback', 'out for', 'fitness',
+  'cruciate', 'surgery', 'operation', 'strain', 'knock', 'out until',
+  'doubtful', 'fitness doubt',
 ];
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function matchesKeyword(t: string, term: string): boolean {
+  if (term.includes(' ')) return t.includes(term);
+  return new RegExp(`\\b${escapeRegExp(term)}\\b`).test(t);
+}
 
 export function classify(title: string): string[] {
   const t = title.toLowerCase();
   const out: string[] = [];
-  if (TRANSFER_WORDS.some((w) => t.includes(w))) out.push('transfer');
-  if (INJURY_WORDS.some((w) => t.includes(w))) out.push('injury');
+  if (TRANSFER_WORDS.some((w) => matchesKeyword(t, w))) out.push('transfer');
+  if (INJURY_WORDS.some((w) => matchesKeyword(t, w))) out.push('injury');
   return out;
 }
 

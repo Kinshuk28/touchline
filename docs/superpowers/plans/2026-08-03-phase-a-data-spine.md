@@ -1495,6 +1495,45 @@ describe('classify', () => {
   it('is case-insensitive', () => {
     expect(classify('CHELSEA COMPLETE SIGNING OF STRIKER')).toContain('transfer');
   });
+  it('does not tag ordinary match-report language as transfer or injury (fixed false positives)', () => {
+    // Bare "complete" used to fire on any "complete a comeback/the double" match report.
+    // It has been dropped in favour of specific phrases ("complete signing", "complete move").
+    expect(classify('Arsenal complete comeback win over Spurs')).toEqual([]);
+    expect(classify('Liverpool complete the double over Everton')).toEqual([]);
+    // Bare "fee" used to fire on any unrelated "fee" story. Replaced by "transfer fee" /
+    // "record fee".
+    expect(classify('Referee fee dispute overshadows derby')).toEqual([]);
+    // Bare "setback" used to fire on non-injury setbacks (a title race, a takeover bid).
+    // Dropped entirely from INJURY_WORDS.
+    expect(classify('Title race setback for City')).toEqual([]);
+    // Bare "out for" used to fire on "out for revenge/blood/the win". Dropped in favour
+    // of "ruled out", which already covers the real injury phrasing.
+    expect(classify('United out for revenge in the derby')).toEqual([]);
+    // Bare "fitness" used to fire on ordinary fitness-level commentary. Replaced by the
+    // specific phrase "fitness doubt".
+    expect(classify('Guardiola praises squad fitness levels')).toEqual([]);
+  });
+  it('does not let the short "acl" token match as a substring of unrelated words', () => {
+    expect(classify('A spectacle at the Bernabeu')).toEqual([]);
+    expect(classify('Miracle comeback stuns the champions')).toEqual([]);
+  });
+  it('tags realistic transfer headlines', () => {
+    expect(classify('Arsenal complete signing of midfielder')).toContain('transfer');
+    expect(classify('Real Madrid agree deal for winger')).toContain('transfer');
+    expect(classify('Chelsea complete £60m move for striker')).toContain('transfer');
+    expect(classify('Wirtz set to join Bayern in £70m transfer')).toContain('transfer');
+    expect(classify('Rice signs for Arsenal')).toContain('transfer');
+  });
+  it('tags realistic injury headlines', () => {
+    expect(classify('Haaland ruled out for six weeks with hamstring injury')).toContain('injury');
+    expect(classify('Saka faces surgery on knee')).toContain('injury');
+    expect(classify('Rodri sidelined with cruciate ligament damage')).toContain('injury');
+  });
+  it('tags both transfer and injury when a headline carries both signals', () => {
+    const tags = classify('Injured striker completes loan move to Roma');
+    expect(tags).toContain('injury');
+    expect(tags).toContain('transfer');
+  });
 });
 
 describe('contentHash', () => {
@@ -1553,20 +1592,46 @@ export const FEEDS: Array<{ source: string; url: string }> = [
   { source: 'Sky Sports', url: 'https://www.skysports.com/rss/12040' },
 ];
 
+// Multi-word phrases below are checked as plain substrings of the lowercased title: a
+// real headline is very unlikely to contain a several-word phrase like "agree deal" or
+// "ruled out" by accident, so no extra care is needed there. Single-word tokens (no
+// internal space) are different — a short or common word can appear as a *substring
+// inside an unrelated word* and fire a false positive, e.g. bare "acl" inside
+// "spectacle"/"miracle"/"debacle"/"oracle", bare "signing" inside
+// "resigning"/"designing"/"consigning" (a manager resigning is not a transfer), bare
+// "knock" inside "knockout" (Champions League "knockout stages" is a very common
+// football phrase), or bare "operation" inside "cooperation". To avoid that whole class
+// of trap, every single-word keyword is matched with word boundaries (`\bword\b`)
+// instead of a raw substring test. The trade-off: a bare plural like "transfers" or
+// "injuries" no longer matches through its singular root ("transfer"/"injury") — in
+// practice those headlines still carry other signal (another keyword, or the word
+// elsewhere in the title), so the small recall loss is worth the precision gained.
 const TRANSFER_WORDS = [
-  'transfer', 'signing', 'signs', 'sign ', 'move to', 'joins', 'deal for',
-  'bid for', 'agree deal', 'medical', 'loan', 'fee', 'complete',
+  'transfer', 'signing', 'signs for', 'signs with', 'set to join', 'joins',
+  'move to', 'move for', 'deal for', 'bid for', 'agree deal', 'agrees deal',
+  'agreed deal', 'medical', 'loan', 'release clause', 'transfer fee',
+  'record fee', 'swap deal', 'contract', 'complete signing', 'complete move',
 ];
 const INJURY_WORDS = [
   'injury', 'injured', 'ruled out', 'sidelined', 'hamstring', 'acl',
-  'surgery', 'setback', 'out for', 'fitness',
+  'cruciate', 'surgery', 'operation', 'strain', 'knock', 'out until',
+  'doubtful', 'fitness doubt',
 ];
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function matchesKeyword(t: string, term: string): boolean {
+  if (term.includes(' ')) return t.includes(term);
+  return new RegExp(`\\b${escapeRegExp(term)}\\b`).test(t);
+}
 
 export function classify(title: string): string[] {
   const t = title.toLowerCase();
   const out: string[] = [];
-  if (TRANSFER_WORDS.some((w) => t.includes(w))) out.push('transfer');
-  if (INJURY_WORDS.some((w) => t.includes(w))) out.push('injury');
+  if (TRANSFER_WORDS.some((w) => matchesKeyword(t, w))) out.push('transfer');
+  if (INJURY_WORDS.some((w) => matchesKeyword(t, w))) out.push('injury');
   return out;
 }
 
@@ -1656,7 +1721,7 @@ function extractImage(item: Record<string, unknown>): string | null {
 - [ ] **Step 5: Run the tests**
 
 Run: `npm test -- tests/providers/rss.test.ts`
-Expected: PASS, 10 tests
+Expected: PASS, 18 tests
 
 - [ ] **Step 6: Commit**
 

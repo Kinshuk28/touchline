@@ -23,15 +23,44 @@ describe('classify', () => {
   it('is case-insensitive', () => {
     expect(classify('CHELSEA COMPLETE SIGNING OF STRIKER')).toContain('transfer');
   });
-  it('documents a false-positive risk: "complete" also fires on non-transfer match reports', () => {
-    // "complete" is in TRANSFER_WORDS for recall on phrases like "complete a move/signing",
-    // but it also appears in ordinary match-report language ("complete a comeback",
-    // "complete a hat-trick", "complete the job"). This test pins the actual behaviour
-    // rather than silently accepting or silently patching the word list.
-    expect(classify('Arsenal complete comeback win over Spurs')).toContain('transfer');
-    // "fee" is meant to catch transfer-fee stories but also matches unrelated "fee" usage,
-    // e.g. a disciplinary/administrative fee story about a referee.
-    expect(classify('Referee handed fee dispute over missed penalty call')).toContain('transfer');
+  it('does not tag ordinary match-report language as transfer or injury (fixed false positives)', () => {
+    // Bare "complete" used to fire on any "complete a comeback/the double" match report.
+    // It has been dropped in favour of specific phrases ("complete signing", "complete move").
+    expect(classify('Arsenal complete comeback win over Spurs')).toEqual([]);
+    expect(classify('Liverpool complete the double over Everton')).toEqual([]);
+    // Bare "fee" used to fire on any unrelated "fee" story. Replaced by "transfer fee" /
+    // "record fee".
+    expect(classify('Referee fee dispute overshadows derby')).toEqual([]);
+    // Bare "setback" used to fire on non-injury setbacks (a title race, a takeover bid).
+    // Dropped entirely from INJURY_WORDS.
+    expect(classify('Title race setback for City')).toEqual([]);
+    // Bare "out for" used to fire on "out for revenge/blood/the win". Dropped in favour
+    // of "ruled out", which already covers the real injury phrasing.
+    expect(classify('United out for revenge in the derby')).toEqual([]);
+    // Bare "fitness" used to fire on ordinary fitness-level commentary. Replaced by the
+    // specific phrase "fitness doubt".
+    expect(classify('Guardiola praises squad fitness levels')).toEqual([]);
+  });
+  it('does not let the short "acl" token match as a substring of unrelated words', () => {
+    expect(classify('A spectacle at the Bernabeu')).toEqual([]);
+    expect(classify('Miracle comeback stuns the champions')).toEqual([]);
+  });
+  it('tags realistic transfer headlines', () => {
+    expect(classify('Arsenal complete signing of midfielder')).toContain('transfer');
+    expect(classify('Real Madrid agree deal for winger')).toContain('transfer');
+    expect(classify('Chelsea complete £60m move for striker')).toContain('transfer');
+    expect(classify('Wirtz set to join Bayern in £70m transfer')).toContain('transfer');
+    expect(classify('Rice signs for Arsenal')).toContain('transfer');
+  });
+  it('tags realistic injury headlines', () => {
+    expect(classify('Haaland ruled out for six weeks with hamstring injury')).toContain('injury');
+    expect(classify('Saka faces surgery on knee')).toContain('injury');
+    expect(classify('Rodri sidelined with cruciate ligament damage')).toContain('injury');
+  });
+  it('tags both transfer and injury when a headline carries both signals', () => {
+    const tags = classify('Injured striker completes loan move to Roma');
+    expect(tags).toContain('injury');
+    expect(tags).toContain('transfer');
   });
 });
 
