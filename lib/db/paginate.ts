@@ -1,4 +1,11 @@
-const PAGE_SIZE = 1000;
+// Deliberately below PostgREST's 1,000-row `max-rows` default, not equal to
+// it. At exactly 1,000, a server-side drop of `max-rows` to (say) 500 would
+// make every page come back short of `pageSize`, so the `page.length <
+// pageSize` termination check would fire on the very first page and quietly
+// truncate every result — reintroducing the exact data-loss bug this module
+// was written to fix. 500 leaves headroom under any `max-rows` value this
+// project is likely to run against.
+const PAGE_SIZE = 500;
 
 interface PageResult<T> {
   data: T[] | null;

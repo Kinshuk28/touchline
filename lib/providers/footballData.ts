@@ -1,39 +1,114 @@
 import type { RateLimiter } from '@/lib/ingest/rateLimiter';
-import type {
-  LeagueCode, FixtureStatus, RawFixture, RawStanding,
-  RawSquadMember, RawScorer, RawTeam,
+import {
+  LEAGUE_CODES,
+  type LeagueCode, type FixtureStatus, type RawFixture, type RawStanding,
+  type RawSquadMember, type RawScorer, type RawTeam,
 } from '@/lib/providers/types';
 
 const BASE = 'https://api.football-data.org/v4';
+
+// Max attempts per request: the first try plus up to two retries. A 429
+// means every key sharing this rate limit is contending for the same 10
+// req/min ceiling (see lib/ingest/rateLimiter.ts) — a couple of retries,
+// backed off per the provider's own reset hint, is enough to ride out a
+// burst without turning a single flaky request into a long stall.
+const MAX_ATTEMPTS = 3;
+
+// Fallback wait when the provider doesn't send a usable reset hint. The
+// window is 60s (see RateLimiter), so this is enough to guarantee at least
+// one full refill before retrying again.
+const FALLBACK_BACKOFF_MS = 60_000;
+
+const defaultSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 export interface FootballDataOptions {
   apiKey: string;
   limiter: RateLimiter;
   fetchImpl?: typeof fetch;
+  sleep?: (ms: number) => Promise<void>;
+}
+
+function isRetryableStatus(status: number): boolean {
+  // 429 (rate limited) and 5xx (provider-side failure) are worth retrying.
+  // Every other 4xx — most importantly 403, which the squads/backfill scripts
+  // rely on to detect "this club isn't reachable on the free tier" — must
+  // fail on the first attempt so that signal isn't delayed or masked.
+  return status === 429 || (status >= 500 && status < 600);
 }
 
 export class FootballDataClient {
   private readonly apiKey: string;
   private readonly limiter: RateLimiter;
   private readonly fetchImpl: typeof fetch;
+  private readonly sleep: (ms: number) => Promise<void>;
 
   constructor(opts: FootballDataOptions) {
     this.apiKey = opts.apiKey;
     this.limiter = opts.limiter;
     this.fetchImpl = opts.fetchImpl ?? fetch;
+    this.sleep = opts.sleep ?? defaultSleep;
+  }
+
+  /**
+   * Backoff for a retryable (429/5xx) response. For 429 specifically, the
+   * provider's `X-RequestCounter-Reset` header gives the number of seconds
+   * until its own counter resets — honouring that is far more accurate than
+   * guessing, since a shared key (see the matchday 429 cascade this retry
+   * logic exists to survive) may have been exhausted by a completely
+   * different workflow moments ago. When the header is absent or
+   * unparseable, fall back to a full window's wait so we don't hammer a
+   * provider that's still over budget for reasons we can't see.
+   */
+  private backoffMs(res: Response, attempt: number): number {
+    if (res.status === 429) {
+      const raw = res.headers.get('X-RequestCounter-Reset');
+      const resetSeconds = raw !== null ? Number.parseInt(raw, 10) : NaN;
+      if (!Number.isNaN(resetSeconds) && resetSeconds >= 0) {
+        return (resetSeconds + 1) * 1000;
+      }
+      return FALLBACK_BACKOFF_MS;
+    }
+    // 5xx: no reset semantics apply — a short, linearly increasing backoff
+    // is enough to ride out a transient provider blip.
+    return 1000 * attempt;
   }
 
   private async get<T>(path: string): Promise<T> {
-    await this.limiter.acquire();
-    const res = await this.fetchImpl(`${BASE}${path}`, {
-      headers: { 'X-Auth-Token': this.apiKey },
-    });
-    this.limiter.syncFromHeaders(res.headers);
-    if (!res.ok) {
-      const body = await res.text();
-      throw new Error(`football-data.org ${res.status} for ${path}: ${body.slice(0, 200)}`);
+    let lastStatus = 0;
+    let lastBody = '';
+
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      await this.limiter.acquire();
+      const res = await this.fetchImpl(`${BASE}${path}`, {
+        headers: { 'X-Auth-Token': this.apiKey },
+      });
+      // Feed the limiter from every response, including failed ones — a 429
+      // itself carries the most up-to-date view of how exhausted the shared
+      // key currently is.
+      this.limiter.syncFromHeaders(res.headers);
+
+      if (res.ok) {
+        return (await res.json()) as T;
+      }
+
+      lastStatus = res.status;
+      lastBody = await res.text();
+
+      if (!isRetryableStatus(res.status) || attempt === MAX_ATTEMPTS) {
+        throw new Error(
+          `football-data.org ${res.status} for ${path} (attempt ${attempt}/${MAX_ATTEMPTS}): ${lastBody.slice(0, 200)}`,
+        );
+      }
+
+      await this.sleep(this.backoffMs(res, attempt));
     }
-    return (await res.json()) as T;
+
+    // Unreachable: every loop iteration above either returns or throws. This
+    // satisfies strict-mode control-flow analysis, which can't statically
+    // prove that of a bounded `for` loop.
+    throw new Error(
+      `football-data.org ${lastStatus} for ${path}: exhausted ${MAX_ATTEMPTS} attempts: ${lastBody.slice(0, 200)}`,
+    );
   }
 
   async getMatches(code: LeagueCode, season: number): Promise<RawFixture[]> {
@@ -41,6 +116,45 @@ export class FootballDataClient {
       `/competitions/${code}/matches?season=${season}`,
     );
     return (data.matches ?? []).map((m) => mapFixture(m as FdMatch, code, season));
+  }
+
+  /**
+   * Matches across every tracked league in one request, for the live-polling
+   * job. `GET /v4/matches` (unlike `/competitions/{code}/matches`) accepts a
+   * comma-separated `competitions` filter plus a `dateFrom`/`dateTo` window
+   * and returns matches for all of them together — confirmed live on the
+   * free tier, 2026-08-03: `?competitions=PL,PD,SA,BL1,FL1&dateFrom=...&dateTo=...`
+   * returned 200 with matches tagged by `competition.code` across four of
+   * the five codes requested (the fifth simply had no fixtures in that
+   * window). This is what turns the live job's per-poll cost from 5 requests
+   * (one full-season `getMatches` per league) into 1.
+   *
+   * The provider caps the `dateFrom`..`dateTo` span at 10 days — confirmed
+   * live via a 400 `"Specified period must not exceed 10 days."` on a wider
+   * probe — so callers must keep the window at or under that.
+   *
+   * Each match's league is resolved from its own `competition.code` rather
+   * than assumed from the request, since a single response mixes leagues. A
+   * code the response tags that isn't one of ours is skipped rather than
+   * guessed at — defensive against the provider ever adding an unrelated
+   * competition to a broad response.
+   */
+  async getMatchesAcrossLeagues(
+    codes: LeagueCode[],
+    dateFrom: string,
+    dateTo: string,
+    season: number,
+  ): Promise<RawFixture[]> {
+    const data = await this.get<{ matches?: FdMatchWithCompetition[] }>(
+      `/matches?competitions=${codes.join(',')}&dateFrom=${dateFrom}&dateTo=${dateTo}`,
+    );
+    const out: RawFixture[] = [];
+    for (const m of data.matches ?? []) {
+      const code = m.competition?.code;
+      if (code === undefined || !(LEAGUE_CODES as string[]).includes(code)) continue;
+      out.push(mapFixture(m, code as LeagueCode, season));
+    }
+    return out;
   }
 
   async getStandings(code: LeagueCode, season: number): Promise<RawStanding[]> {
@@ -163,6 +277,9 @@ interface FdMatch {
   score?: { fullTime?: { home: number | null; away: number | null };
             halfTime?: { home: number | null; away: number | null } };
   lastUpdated?: string;
+}
+interface FdMatchWithCompetition extends FdMatch {
+  competition?: { code?: string };
 }
 interface FdStandingGroup {
   type: string;

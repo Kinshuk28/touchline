@@ -2,8 +2,22 @@ name: ingest-core
 on:
   schedule: [{ cron: '0 * * * *' }]
   workflow_dispatch:
+# Shared with ingest-live and ingest-squads: all three call football-data.org,
+# and the free-tier rate limit (10 req/min) is per API KEY, not per workflow.
+# Five workflows used to run under five different concurrency groups, so
+# ingest-core and ingest-live could execute in parallel — on a matchday that
+# meant core's 15 requests and live's 5-per-poll could land in the same
+# provider minute, well past the 10/min ceiling, producing 429s with no
+# retry and a red run during the exact hours people are watching (the
+# "matchday 429 cascade"). Putting these three on one `football-data-api`
+# group with cancel-in-progress: false serializes them — a run that would
+# otherwise overlap waits in the queue and still executes, rather than being
+# dropped. Do NOT split this back into per-workflow groups; that is the
+# specific regression this comment exists to prevent. ingest-news and
+# ingest-players stay on their own groups: they call FPL and RSS, which are
+# unmetered and never touch this key.
 concurrency:
-  group: ingest-core
+  group: football-data-api
   cancel-in-progress: false
 jobs:
   run:
@@ -18,5 +32,4 @@ jobs:
         env:
           FOOTBALL_DATA_KEY: ${{ secrets.FOOTBALL_DATA_KEY }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}

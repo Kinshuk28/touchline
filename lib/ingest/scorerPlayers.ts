@@ -1,4 +1,4 @@
-import { slugify } from '@/lib/db/slug';
+import { slugWithFdId } from '@/lib/db/slug';
 import { upsertPlayersByFdId, type PlayerRow } from '@/lib/db/repositories/players';
 import type { RawScorer } from '@/lib/providers/types';
 
@@ -45,7 +45,7 @@ export function newPlayersFromScorers(
       fd_id: sc.playerFdId,
       fpl_id: null,
       team_id: teamIds.get(sc.teamFdId) ?? null,
-      slug: `${slugify(sc.playerName)}-${sc.playerFdId}`,
+      slug: slugWithFdId(sc.playerName, sc.playerFdId),
       name: sc.playerName,
       position: sc.position,
       nationality: sc.nationality,

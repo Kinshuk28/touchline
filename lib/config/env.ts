@@ -10,7 +10,12 @@ const schema = z.object({
       (u) => /^https:\/\/[a-z0-9]+\.supabase\.co$/.test(u),
       'SUPABASE_URL must be the project API URL (https://<ref>.supabase.co), not the dashboard URL',
     ),
-  SUPABASE_ANON_KEY: z.string().min(20),
+  // Optional: no code path reads this today (`serviceClient()` only ever
+  // uses the service-role key below). Kept in the schema — rather than
+  // deleted outright — so it's still validated/typed if a future Phase B
+  // client-side path starts consuming it, but `loadEnv` must not fail in a
+  // context (e.g. a workflow) that never had a reason to hold it.
+  SUPABASE_ANON_KEY: z.string().min(20).optional(),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(20),
 });
 

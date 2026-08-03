@@ -2,8 +2,12 @@ name: ingest-squads
 on:
   schedule: [{ cron: '0 4 * * 1' }]
   workflow_dispatch:
+# Shared with ingest-core and ingest-live — see ingest-core.yml's
+# concurrency comment for why: all three call football-data.org against a
+# 10 req/min free-tier limit that is per API key, not per workflow, so they
+# must not run in parallel. Do NOT split this back into its own group.
 concurrency:
-  group: ingest-squads
+  group: football-data-api
   cancel-in-progress: false
 jobs:
   run:
@@ -18,5 +22,4 @@ jobs:
         env:
           FOOTBALL_DATA_KEY: ${{ secrets.FOOTBALL_DATA_KEY }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}

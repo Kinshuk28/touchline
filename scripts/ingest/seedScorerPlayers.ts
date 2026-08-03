@@ -54,7 +54,8 @@ try {
     const leagueId = leagueIds.get(s.code);
     if (leagueId === undefined) throw new Error(`league ${s.code} missing — run backfill first`);
 
-    const scorers = await fd.getScorers(s.code, PREVIOUS_SEASON); requests++;
+    requests++;
+    const scorers = await fd.getScorers(s.code, PREVIOUS_SEASON);
 
     const newPlayers = await createMissingScorerPlayers(scorers, teamIds, playerIds);
     if (newPlayers > 0) playerIds = await getPlayerIdByFdId();

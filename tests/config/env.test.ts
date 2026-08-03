@@ -29,4 +29,10 @@ describe('loadEnv', () => {
       loadEnv({ ...valid, SUPABASE_URL: 'https://abcdefghijklmnopqrst.supabase.co/' }),
     ).toThrow(/trailing slash/);
   });
+
+  it('does not require SUPABASE_ANON_KEY — no code path reads it, and workflows/scripts that only hold the service-role key must still load', () => {
+    const { SUPABASE_ANON_KEY, ...rest } = valid;
+    expect(() => loadEnv(rest)).not.toThrow();
+    expect(loadEnv(rest).SUPABASE_ANON_KEY).toBeUndefined();
+  });
 });

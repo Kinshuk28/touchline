@@ -361,3 +361,166 @@ describe('FootballDataClient error handling', () => {
     await expect(client.getMatches('PL', 2026)).rejects.toThrow(/403.*nope/s);
   });
 });
+
+describe('FootballDataClient retry with backoff', () => {
+  function retryClientFor(
+    responses: Array<{ status: number; body: unknown; headers?: Record<string, string> }>,
+  ) {
+    let callIndex = 0;
+    const calls: string[] = [];
+    const fetchImpl = (async (url: string | URL | Request) => {
+      calls.push(String(url));
+      const r = responses[Math.min(callIndex, responses.length - 1)]!;
+      callIndex++;
+      return new Response(JSON.stringify(r.body), { status: r.status, headers: r.headers ?? {} });
+    }) as unknown as typeof fetch;
+    const sleepCalls: number[] = [];
+    const sleep = async (ms: number) => { sleepCalls.push(ms); };
+    // A fake clock for the limiter itself, distinct from the client's own
+    // `sleep` above: a 429 can report `x-requests-available-minute: 0`
+    // (see the "feeds the limiter" test below), which drives the limiter's
+    // *own* internal acquire() into its wait loop. With a real clock and a
+    // no-op sleep that loop would busy-spin for a genuine 60 real seconds
+    // before refilling — exactly what a fake, instantly-advancing clock
+    // (the same pattern tests/ingest/rateLimiter.test.ts uses) avoids.
+    let limiterClock = 0;
+    const limiter = new RateLimiter({
+      capacity: 10,
+      windowMs: 60_000,
+      now: () => limiterClock,
+      sleep: async (ms: number) => { limiterClock += ms; },
+    });
+    const client = new FootballDataClient({ apiKey: 'k', limiter, fetchImpl, sleep });
+    return { client, calls, sleepCalls, limiter, callCount: () => callIndex };
+  }
+
+  it('retries once on a 429 then succeeds on the following 200 — the matchday cascade case', async () => {
+    const raw = snap('fd-matches-pl');
+    const { client, calls, sleepCalls } = retryClientFor([
+      { status: 429, body: { message: 'rate limited' }, headers: { 'X-RequestCounter-Reset': '5' } },
+      { status: 200, body: raw },
+    ]);
+
+    const out = await client.getMatches('PL', 2026);
+    expect(out.length).toBeGreaterThan(300);
+    expect(calls.length).toBe(2);
+    // Honoured the X-RequestCounter-Reset hint (5s) rather than the 60s
+    // fallback: waited (5 + 1) * 1000 = 6000ms.
+    expect(sleepCalls).toEqual([6000]);
+  });
+
+  it('falls back to a full window wait when X-RequestCounter-Reset is absent on a 429', async () => {
+    const raw = snap('fd-matches-pl');
+    const { client, sleepCalls } = retryClientFor([
+      { status: 429, body: { message: 'rate limited' } },
+      { status: 200, body: raw },
+    ]);
+
+    await client.getMatches('PL', 2026);
+    expect(sleepCalls).toEqual([60_000]);
+  });
+
+  it('retries a 5xx with a short linear backoff, not the 429 reset logic', async () => {
+    const raw = snap('fd-matches-pl');
+    const { client, calls, sleepCalls } = retryClientFor([
+      { status: 503, body: { message: 'down' } },
+      { status: 200, body: raw },
+    ]);
+
+    await client.getMatches('PL', 2026);
+    expect(calls.length).toBe(2);
+    expect(sleepCalls).toEqual([1000]);
+  });
+
+  it('feeds the limiter from a failed attempt, not just the eventual success', async () => {
+    const raw = snap('fd-matches-pl');
+    const { client, limiter } = retryClientFor([
+      { status: 429, body: { message: 'rate limited' }, headers: { 'x-requests-available-minute': '0' } },
+      { status: 200, body: raw, headers: { 'x-requests-available-minute': '9' } },
+    ]);
+
+    await client.getMatches('PL', 2026);
+    // The limiter should have been synced from BOTH responses in order —
+    // the final observed value comes from the successful second response.
+    expect(limiter.available).toBe(9);
+  });
+
+  it('does not retry a 403 — the squads/backfill 403-detection path must fail on the first attempt', async () => {
+    const { client, calls } = retryClientFor([
+      { status: 403, body: { message: 'forbidden' } },
+      { status: 200, body: snap('fd-matches-pl') },
+    ]);
+
+    await expect(client.getMatches('PL', 2026)).rejects.toThrow(/403.*forbidden/s);
+    expect(calls.length).toBe(1);
+  });
+
+  it('gives up after exhausting all attempts on a persistent 429, throwing with full context', async () => {
+    const { client, calls } = retryClientFor([
+      { status: 429, body: { message: 'still limited' } },
+      { status: 429, body: { message: 'still limited' } },
+      { status: 429, body: { message: 'still limited' } },
+    ]);
+
+    await expect(client.getMatches('PL', 2026)).rejects.toThrow(/429.*still limited/s);
+    expect(calls.length).toBe(3); // MAX_ATTEMPTS, no more
+  });
+
+  it('gives up after exhausting all attempts on a persistent 5xx', async () => {
+    const { client, calls } = retryClientFor([
+      { status: 500, body: { message: 'boom' } },
+      { status: 500, body: { message: 'boom' } },
+      { status: 500, body: { message: 'boom' } },
+    ]);
+
+    await expect(client.getMatches('PL', 2026)).rejects.toThrow(/500.*boom/s);
+    expect(calls.length).toBe(3);
+  });
+});
+
+describe('FootballDataClient.getMatchesAcrossLeagues', () => {
+  function multiClientFor(body: unknown) {
+    const calls: string[] = [];
+    const fetchImpl = (async (url: string | URL | Request) => {
+      calls.push(String(url));
+      return new Response(JSON.stringify(body), { status: 200 });
+    }) as unknown as typeof fetch;
+    const limiter = new RateLimiter({ capacity: 10, windowMs: 60_000, sleep: async () => {} });
+    return { client: new FootballDataClient({ apiKey: 'k', limiter, fetchImpl }), calls };
+  }
+
+  it('hits /matches with a comma-separated competitions filter and the date window, no per-league request', async () => {
+    const body = { matches: [] };
+    const { client, calls } = multiClientFor(body);
+    await client.getMatchesAcrossLeagues(['PL', 'PD', 'SA', 'BL1', 'FL1'], '2026-08-14', '2026-08-21', 2026);
+    expect(calls.length).toBe(1);
+    expect(calls[0]).toContain('/matches?competitions=PL,PD,SA,BL1,FL1');
+    expect(calls[0]).toContain('dateFrom=2026-08-14');
+    expect(calls[0]).toContain('dateTo=2026-08-21');
+  });
+
+  it('resolves each match\'s league from its own competition.code, not the request', async () => {
+    const body = {
+      matches: [
+        { id: 1, utcDate: '2026-08-15T14:00:00Z', status: 'SCHEDULED', homeTeam: { id: 10 }, awayTeam: { id: 11 }, competition: { code: 'PD' } },
+        { id: 2, utcDate: '2026-08-15T16:00:00Z', status: 'SCHEDULED', homeTeam: { id: 20 }, awayTeam: { id: 21 }, competition: { code: 'PL' } },
+      ],
+    };
+    const { client } = multiClientFor(body);
+    const out = await client.getMatchesAcrossLeagues(['PL', 'PD'], '2026-08-14', '2026-08-21', 2026);
+    expect(out).toHaveLength(2);
+    expect(out.find((m) => m.fdId === 1)!.leagueCode).toBe('PD');
+    expect(out.find((m) => m.fdId === 2)!.leagueCode).toBe('PL');
+  });
+
+  it('skips a match tagged with a competition code we do not track, rather than guessing', async () => {
+    const body = {
+      matches: [
+        { id: 1, utcDate: '2026-08-15T14:00:00Z', status: 'SCHEDULED', homeTeam: { id: 10 }, awayTeam: { id: 11 }, competition: { code: 'CL' } },
+      ],
+    };
+    const { client } = multiClientFor(body);
+    const out = await client.getMatchesAcrossLeagues(['PL', 'PD'], '2026-08-14', '2026-08-21', 2026);
+    expect(out).toHaveLength(0);
+  });
+});

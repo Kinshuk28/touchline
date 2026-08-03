@@ -1,0 +1,65 @@
+-- 0003_lock_down_ingest_observability.sql
+--
+-- WHY THIS MIGRATION EXISTS
+-- -------------------------
+-- 0002_grants_and_rls.sql gave `anon`/`authenticated` SELECT on every table,
+-- including `ingest_run` and `ingest_budget` -- on the reasoning that "all
+-- nine tables hold public football data or pipeline-observability data --
+-- nothing here is secret". That reasoning undersold one detail:
+-- `lib/providers/footballData.ts` throws
+--   `football-data.org ${status} for ${path}: ${body.slice(0, 200)}`
+-- an unfiltered slice of the *upstream provider's own response body* -- and
+-- every ingestion script's catch block writes `err.message` straight into
+-- `ingest_run.message`. With anon SELECT granted, that column (and the
+-- upstream response fragment inside it) is world-readable through PostgREST
+-- the moment Phase B ships the anon key to the browser.
+--
+-- There is no evidence football-data.org ever echoes the caller's own
+-- `X-Auth-Token` back in an error body -- this is hardening against a risk
+-- that has not been observed, not a fix for a confirmed leak. But it costs
+-- nothing to close, so: close it.
+--
+-- SCOPE -- ONLY these two tables
+-- -------------------------------
+-- `ingest_run` and `ingest_budget` are pipeline-observability tables with no
+-- public-facing purpose; the `/status` page Phase B may want can read them
+-- server-side with the service-role key instead. Every other table (leagues,
+-- teams, players, fixtures, standings, player_season_stats, news_items)
+-- keeps the 0002 posture untouched -- those are exactly the public football
+-- data the site exists to serve, and `service_role` is completely unaffected
+-- either way (it bypasses RLS and these GRANTs target anon/authenticated
+-- only).
+--
+-- DO NOT modify 0001_init.sql or 0002_grants_and_rls.sql to "fold this in"
+-- -- both are already applied against the live database. Migrations are
+-- append-only from here.
+--
+-- THIS MIGRATION HAS NOT BEEN APPLIED YET
+-- ----------------------------------------
+-- Apply it via the Supabase dashboard -> SQL Editor -> New query -> paste
+-- this file's contents -> Run. The project owner must do this by hand (or
+-- via the Supabase CLI with credentials this agent does not have); it is
+-- not applied automatically as part of this change.
+--
+-- IDEMPOTENCY
+-- -----------
+-- REVOKE and DROP POLICY IF EXISTS are both safe to run more than once.
+
+-- 1. Remove the read-only policies that let anon/authenticated bypass RLS
+--    for a SELECT on these two tables.
+drop policy if exists ingest_run_select_all on ingest_run;
+drop policy if exists ingest_budget_select_all on ingest_budget;
+
+-- 2. Remove the underlying SELECT grant. Even if a future migration re-adds
+--    a broad `grant select on all tables in schema public to anon,
+--    authenticated`, RLS stays enabled on both tables (0002 already turned
+--    it on, and step 1 above only drops the *policy*, not RLS itself) with
+--    no permissive policy left -- so anon/authenticated would still be
+--    unable to read a single row.
+revoke select on ingest_run, ingest_budget from anon, authenticated;
+
+-- service_role is untouched: it bypasses RLS by design and its grants come
+-- from 0002's `grant all privileges on all tables ... to service_role`,
+-- which this migration does not revoke. Ingestion jobs and any server-side
+-- `/status` page reading via the service-role key continue to work exactly
+-- as before.

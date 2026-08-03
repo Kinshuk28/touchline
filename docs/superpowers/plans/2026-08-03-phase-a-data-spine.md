@@ -73,8 +73,17 @@ tests/
 **Interfaces:**
 - Consumes: nothing.
 - Produces: `loadEnv(source?: Record<string,string|undefined>): Env` where
-  `Env = { FOOTBALL_DATA_KEY: string; SUPABASE_URL: string; SUPABASE_ANON_KEY: string; SUPABASE_SERVICE_ROLE_KEY: string }`.
+  `Env = { FOOTBALL_DATA_KEY: string; SUPABASE_URL: string; SUPABASE_ANON_KEY?: string; SUPABASE_SERVICE_ROLE_KEY: string }`.
   Throws `Error` with a readable message listing every invalid field.
+
+**Amended 2026-08-03, post-branch-review:** `SUPABASE_ANON_KEY` is now
+`optional` in the schema (was `z.string().min(20)` required). No code path
+in this phase reads it — `lib/db/client.ts`'s `serviceClient()` only ever
+uses `SUPABASE_SERVICE_ROLE_KEY` — so requiring it made `loadEnv` throw in
+any context (e.g. a workflow after Task 11's amendment) that legitimately
+never held it. Still typed and validated (`z.string().min(20).optional()`)
+so a real value is still checked if one is present; still documented here
+and injected where actually used, for Phase B's eventual client-side need.
 
 - [ ] **Step 1: Initialise the project**
 
@@ -174,6 +183,11 @@ Expected: FAIL — `Cannot find module '@/lib/config/env'`
 
 - [ ] **Step 7: Implement `lib/config/env.ts`**
 
+> **SUPERSEDED 2026-08-03 (post-branch-review):** `SUPABASE_ANON_KEY` below is
+> `z.string().min(20)` (required). The actual schema uses
+> `z.string().min(20).optional()` — see the amendment above the "Interfaces"
+> block for this task.
+
 ```ts
 import { z } from 'zod';
 
@@ -222,12 +236,42 @@ git commit -m "feat: project scaffold and validated environment config"
 **Files:**
 - Create: `supabase/migrations/0001_init.sql`
 - Create: `supabase/migrations/0002_grants_and_rls.sql`
+- Create: `supabase/migrations/0003_lock_down_ingest_observability.sql` (added 2026-08-03, post-branch-review — see below)
 - Create: `lib/db/client.ts`
 - Create: `scripts/verify-schema.ts`
 
 **Interfaces:**
 - Consumes: `loadEnv` from Task 1.
 - Produces: `serviceClient(): SupabaseClient` — a Supabase client authenticated with the service role key, for use by all ingestion code.
+
+**Added 2026-08-03, post-branch-review — `0003_lock_down_ingest_observability.sql`:**
+`0002` gave `anon`/`authenticated` `SELECT` on all nine tables, including
+`ingest_run` and `ingest_budget`. The whole-branch review flagged that
+`lib/providers/footballData.ts` throws
+`` `football-data.org ${status} for ${path}: ${body.slice(0, 200)}` `` — an
+unfiltered slice of the upstream provider's own response body — and every
+ingestion script's catch block writes `err.message` straight into
+`ingest_run.message`. With `0002`'s grant in place, that column becomes
+world-readable through PostgREST once Phase B ships the anon key to the
+browser. There is no evidence football-data.org ever echoes the caller's
+`X-Auth-Token` back in an error body — this is hardening against an
+unobserved risk, not a confirmed leak — but it costs nothing to close.
+
+`0003` revokes the `SELECT` grant and drops the read-only RLS policy for
+`anon`/`authenticated` on exactly these two tables — every other table
+(leagues, teams, players, fixtures, standings, player_season_stats,
+news_items) keeps `0002`'s posture untouched, since those are the public
+football data the site exists to serve. `service_role` is unaffected either
+way (it bypasses RLS by design, and `0003` doesn't touch its grants). A
+future `/status` page can read `ingest_run`/`ingest_budget` server-side with
+the service-role key instead of through the anon-key PostgREST path.
+
+**Do not fold `0003` into `0001` or `0002`** — both are already applied
+against the live database; migrations are append-only from here. **This
+migration has not been applied yet** — it must be run by hand via the
+Supabase dashboard SQL Editor (or the Supabase CLI, with credentials this
+phase's automation does not have); it is not part of `scripts/verify-schema.ts`
+and nothing in CI applies it automatically.
 
 - [ ] **Step 1: Write the migration**
 
@@ -744,7 +788,48 @@ git commit -m "feat: token-bucket rate limiter with header self-correction"
 - Consumes: `RateLimiter` (Task 3).
 - Produces:
   - Types: `LeagueCode`, `FixtureStatus`, `RawFixture`, `RawStanding`, `RawSquadMember`, `RawScorer`
-  - `class FootballDataClient { constructor(opts: { apiKey: string; limiter: RateLimiter; fetchImpl?: typeof fetch }); getMatches(code: LeagueCode, season: number): Promise<RawFixture[]>; getStandings(code: LeagueCode, season: number): Promise<RawStanding[]>; getCompetitionTeams(code: LeagueCode): Promise<RawTeam[]>; getSquad(teamFdId: number): Promise<{ team: RawTeam; squad: RawSquadMember[] }>; getScorers(code: LeagueCode, season: number): Promise<RawScorer[]> }`
+  - `class FootballDataClient { constructor(opts: { apiKey: string; limiter: RateLimiter; fetchImpl?: typeof fetch; sleep?: (ms: number) => Promise<void> }); getMatches(code: LeagueCode, season: number): Promise<RawFixture[]>; getMatchesAcrossLeagues(codes: LeagueCode[], dateFrom: string, dateTo: string, season: number): Promise<RawFixture[]>; getStandings(code: LeagueCode, season: number): Promise<RawStanding[]>; getCompetitionTeams(code: LeagueCode): Promise<RawTeam[]>; getSquad(teamFdId: number): Promise<{ team: RawTeam; squad: RawSquadMember[] }>; getScorers(code: LeagueCode, season: number): Promise<RawScorer[]> }`
+
+**Amended 2026-08-03, closing the matchday 429 cascade found in the whole-branch
+review:** the original `get<T>()` did `await this.limiter.acquire()` once,
+then `if (!res.ok) throw` immediately on any non-2xx — no retry at all. The
+per-key rate limit (10 req/min) is shared across every workflow that touches
+`FOOTBALL_DATA_KEY` (`core`, `live`, `squads`, plus one-off scripts), and
+until Task 11's concurrency fix (below) `ingest-core` and `ingest-live` could
+run in the same provider minute. On a matchday that meant 10 (core) + 5
+(one `live` poll) = 15 requests inside a single 10/min ceiling — the 11th got
+a bare 429, which the old code turned straight into `status='error'` and a
+red run, silently stalling standings/scorers during the exact hours people
+are watching.
+
+The fix has three parts, and they must all stay in place together — removing
+any one reopens the cascade:
+
+1. **Retry with backoff in `get<T>()`.** Up to `MAX_ATTEMPTS = 3` attempts.
+   On `429` or `5xx`, wait and retry; on any other non-2xx (crucially `403`,
+   which `squads.ts`/`backfill.ts` rely on to detect a relegated club) fail
+   on the first attempt — retrying that would delay the exact signal those
+   scripts need. The `X-RequestCounter-Reset` response header (seconds until
+   the provider's own counter resets) drives the 429 backoff when present;
+   a missing/unparseable header falls back to a full 60s window. A 5xx gets
+   a short linear backoff (`1000ms * attempt`) since no reset semantics apply
+   to it. `limiter.syncFromHeaders(res.headers)` runs after **every**
+   response, success or failure — a 429's own headers are the freshest
+   signal of how exhausted the shared key currently is. Exhausting all
+   attempts throws with status, path, attempt count and response body, same
+   shape as the original error.
+2. **`getMatchesAcrossLeagues(codes, dateFrom, dateTo, season)`** — see
+   Task 10's amendment for why this exists and the live probe that confirmed
+   it works on the free tier.
+3. **Shared `concurrency.group` across `ingest-core`/`ingest-live`/`ingest-squads`**
+   — see Task 11's amendment.
+
+New constructor option: `sleep?: (ms: number) => Promise<void>`, defaulting
+to a real `setTimeout` wrapper, purely so tests can inject an instant no-op
+sleep and assert on the computed backoff durations without a test actually
+waiting. Tests: `tests/providers/footballData.test.ts`, describe blocks
+`FootballDataClient retry with backoff` and
+`FootballDataClient.getMatchesAcrossLeagues`.
 
 **Why `getCompetitionTeams` exists (added during backfill rework, 2026-08-03):**
 The original backfill discovered every club by walking last season's
@@ -1233,6 +1318,14 @@ Expected: FAIL — `Cannot find module '@/lib/providers/footballData'`
 
 - [ ] **Step 5: Implement `lib/providers/footballData.ts`**
 
+> **SUPERSEDED 2026-08-03 (post-branch-review):** the `get<T>` body below —
+> `await acquire()` once, `if (!res.ok) throw` immediately — is the exact
+> shape that caused the matchday 429 cascade (see the amendment note above
+> the "Interfaces" block for this task). The actual file now retries 429/5xx
+> up to 3 attempts with header-driven backoff, and adds
+> `getMatchesAcrossLeagues`. Do not restore this snippet verbatim; read
+> `lib/providers/footballData.ts` directly for the current implementation.
+
 ```ts
 import type { RateLimiter } from '@/lib/ingest/rateLimiter';
 import type {
@@ -1259,6 +1352,9 @@ export class FootballDataClient {
     this.fetchImpl = opts.fetchImpl ?? fetch;
   }
 
+  // ORIGINAL, PRE-FIX BODY — see the SUPERSEDED note above. No retry at all:
+  // a bare 429 or 5xx threw immediately, which is the mechanism behind the
+  // matchday 429 cascade this branch-review fix closes.
   private async get<T>(path: string): Promise<T> {
     await this.limiter.acquire();
     const res = await this.fetchImpl(`${BASE}${path}`, {
@@ -2194,8 +2290,36 @@ git commit -m "feat: RSS adapter with dedupe and transfer/injury classification"
 - Produces:
   - `interface WindowFixture { status: FixtureStatus; kickoffUtc: string }`
   - `function isMatchWindowOpen(fixtures: WindowFixture[], now: Date, leadMinutes?: number, trailMinutes?: number): boolean`
+  - `function isLiveRelevant(fixture: { status: FixtureStatus; kickoffUtc: string }, now: Date): boolean` — added during Task 10 (the live job needs a per-fixture "should this be upserted this poll" check; `isMatchWindowOpen` only answers "should the job run at all"). Not shown as a separate code block in this task originally — it lives in the same file and is exercised by the same test file.
 
 The guard opens 15 minutes before the earliest kickoff and stays open until 150 minutes after the latest kickoff, or while any fixture reports `IN_PLAY`/`PAUSED`. This is what stops the live job spending requests on an empty Tuesday.
+
+**Amended 2026-08-03, post-branch-review — `isLiveRelevant` disagreed with `isMatchWindowOpen` about SUSPENDED:**
+`isMatchWindowOpen` deliberately treats `SUSPENDED` as not dead (see the
+`DEAD_STATUSES` comment below — a suspension can resume as `IN_PLAY` on the
+next poll, so the window must stay open through it), but the original
+`isLiveRelevant` returned `false` for `SUSPENDED`. The two fixes disagreed:
+the live job kept polling through a suspension (burning requests, correctly,
+per `isMatchWindowOpen`) but never actually wrote the `SUSPENDED` status
+(incorrectly, per the old `isLiveRelevant`) — so the site kept showing the
+match as `IN_PLAY` until `core.ts`'s next hourly sweep corrected it. `AWARDED`
+(a match awarded to a team, e.g. after a forfeit) has the identical shape: a
+live-window transition the live job should be the fast writer for, not leave
+for the hourly job.
+
+Fix: `isLiveRelevant` now treats `SUSPENDED` and `AWARDED` as always relevant,
+regardless of kickoff time — the same bucket as `IN_PLAY`/`PAUSED`, not the
+trail-windowed `FINISHED` bucket. Both are rare, and both only ever arise on
+a fixture already inside the live-polling window (a match must have started
+to be suspended, or to be awarded after an abandonment), so there is no
+FINISHED-style long-tail write-volume risk from treating them as unconditionally
+relevant. Boundary tests (three weeks after kickoff, `isLiveRelevant` still
+`true`) were added for both in `tests/ingest/matchWindow.test.ts`.
+
+Also fixed in the same pass: `lib/ingest/matchWindow.ts` imported `RawFixture`
+from `@/lib/providers/types` and never used it (dead import) — removed. It
+had nothing to do with `WindowFixture`, which is this file's own, separate
+interface.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -2513,6 +2637,17 @@ Expected: PASS, 4 tests
 
 Create `lib/db/paginate.ts` first — the shared helper every id-map getter below
 uses to stay correct once its table crosses PostgREST's 1,000-row default cap:
+
+**Amended 2026-08-03, post-branch-review:** `PAGE_SIZE` below is `1000` —
+exactly PostgREST's `max-rows` default. The loop terminates on
+`page.length < pageSize`, so if `max-rows` is ever lowered server-side (a
+plausible ops change, not a code change), every page would come back shorter
+than `1000` and the very first page would look like "the last page" —
+silently truncating every paginated read again, the identical data-loss bug
+this module exists to fix, just moved one layer down. The actual code now
+uses `PAGE_SIZE = 500`, leaving headroom under any `max-rows` value this
+project is likely to run against. Use `500` if reproducing this file; do not
+copy the `1000` shown below.
 
 ```ts
 const PAGE_SIZE = 1000;
@@ -3171,6 +3306,35 @@ are resolved exactly once after *both* club-writing phases have run, and a
 403 on an individual club's squad fetch is caught, logged and counted
 rather than aborting the whole run:
 
+**Amended 2026-08-03, post-branch-review — two fixes to the code below:**
+
+1. **Team slugs now use `slugWithFdId(name, fdId)` (`lib/db/slug.ts`), not
+   plain `slugify(name)`.** The snippet below still shows
+   `slug: slugify(team.name)` / `slug: slugify(row.teamName)` in phases 2 and
+   3 — that is stale. `teams.slug` is `unique not null`, exactly like
+   `players.slug`, which already used a `${slugify(name)}-${fdId}` suffix for
+   this reason. No two of the current ~110 clubs collide today, but
+   promotion/relegation churn is not guaranteed to keep it that way, and a
+   collision would abort the *entire* `upsertTeams` batch (Postgres rejects
+   the whole upsert on a unique-constraint conflict), not just the
+   colliding row. Player slugs were already safe; team slugs were not — this
+   closes that gap.
+   **This changes existing slugs for already-backfilled clubs.** No separate
+   migration/repair script was written: `upsertTeams` conflicts on `fd_id`
+   and updates every column including `slug`, so simply re-running the
+   backfill (or, for currently-covered clubs, letting `ingest-squads` run
+   once — see Task 12's amendment, which now also calls `upsertTeams`) is a
+   complete, idempotent repair. Do not treat re-running backfill as
+   "unnecessary since the data already exists" — the slug column specifically
+   needs that re-write.
+2. **`requests++` moved before its paired `await fd.xxx(...)` call**, in
+   every phase below (2, 3, 5, 6). As written in the snippet, `requests++`
+   sits *after* the await — so a call that itself throws (a network error, or
+   after this branch review's retry logic in `FootballDataClient.get`, an
+   exhausted-retries throw) never increments `requests`, and `finishRun`'s
+   `requests_used` under-reports by exactly one in the case you most want an
+   accurate count for: the failure that ended the run.
+
 ```ts
 import 'dotenv/config';
 import { loadEnv } from '@/lib/config/env';
@@ -3428,6 +3592,39 @@ its first live re-run simply because season 2026 has 0 scorers everywhere
 against season 2025 is what actually exercises it (96 new La Liga players,
 97 new Serie A players, live-verified).
 
+**Amended 2026-08-03, post-branch-review — the matchday 429 cascade and its
+downstream fixes:** the whole-branch review traced a concrete failure mode:
+`core.ts` issues 3 requests × 5 leagues = 15 in its first ~20 seconds;
+`live.ts` (below, pre-fix) issued 5 requests per poll × 4 polls = 20 per run,
+every 5 minutes. Both hit the *same* `FOOTBALL_DATA_KEY` and its 10 req/min
+ceiling, and until Task 11's concurrency fix the two workflows could run in
+the same provider minute — 10 (core) + 5 (one live poll) = 15 against a
+10/min ceiling, and `FootballDataClient.get` (pre-fix, Task 4) threw on the
+first 429 with no retry. Result: red runs roughly every matchday hour,
+silently stalling standings/scorers during the exact hours people are
+watching. Three code changes below are corrections to what's shown further
+down in this task:
+
+1. **`core.ts`'s standings write no longer drops rows silently.** The
+   snippet below does `team_id: teamIds.get(r.teamFdId)!` followed by
+   `.filter(r => r.team_id !== undefined)` — the non-null assertion (`!`)
+   lies to the type checker (the map genuinely can produce `undefined` in
+   practice) and makes that filter read like dead code, so a club with no
+   `teams` row yet silently produced a short table with `status='ok'` and
+   nothing in the logs. `backfill.ts` phase 7 already handles the identical
+   case correctly (resolve explicitly, `console.warn` the club name and
+   `fd_id`, drop the row) — `core.ts` now matches that pattern exactly. Do
+   not "simplify" this back to the `!` + filter shape; that reintroduces the
+   silent drop.
+2. **`requests++` moved before its paired `await fd.xxx(...)` call**, same
+   reasoning as Task 9's amendment: counting after the call means a call
+   that itself throws is never counted, under-reporting `requests_used`
+   in exactly the failure case you'd want it most.
+3. **`live.ts` is substantially rewritten** — see the amendment right before
+   its own code block, further down this task. Do not implement the
+   `getMatches` × per-league × per-poll shape shown in the snippet below;
+   that is the 20-requests-per-run cost this fix removes.
+
 - [ ] **Step 1: Write `scripts/ingest/core.ts`**
 
 ```ts
@@ -3586,6 +3783,40 @@ try {
 
 Five-minute cron is the GitHub Actions minimum, so this job polls in a short internal loop to reach finer resolution during a match window.
 
+> **SUPERSEDED 2026-08-03 (post-branch-review):** the snippet below calls
+> `fd.getMatches(s.code, CURRENT_SEASON)` — a full-season fetch (~380
+> fixtures) — once per league per poll: 5 requests/poll × 4 polls = 20
+> requests per run, every 5 minutes during a match window. That is the
+> other half of the matchday 429 cascade (see Task 10's amendment above
+> core.ts). **Before changing this, the whole-branch-review fix verified
+> live, against the free-tier key, that `GET /v4/matches` accepts a
+> comma-separated `competitions` filter plus a `dateFrom`/`dateTo` window and
+> returns matches for all five leagues in one call** — confirmed 2026-08-03:
+> `?competitions=PL,PD,SA,BL1,FL1&dateFrom=2026-08-14&dateTo=2026-08-21`
+> returned `200`, 28 matches tagged across `PD`/`FL1`/`PL`/`SA` via each
+> match's own `competition.code` (the fifth, `BL1`, simply had no fixtures in
+> that particular window — not a sign the filter dropped it). Also confirmed:
+> the provider caps the date span at 10 days (`400 "Specified period must
+> not exceed 10 days."` on a wider probe), so any window passed to this
+> endpoint must stay at or under that.
+>
+> The actual `live.ts` now calls the new
+> `FootballDataClient.getMatchesAcrossLeagues(codes, dateFrom, dateTo, season)`
+> (Task 4's amendment) once per poll with a ±1 day window — comfortably
+> within the 10-day cap and generous enough for anything `isLiveRelevant`
+> cares about (in-play, or finished within `LIVE_RELEVANCE_TRAIL_MINUTES`) —
+> taking the job from 20 requests/run down to **4** (one per poll). Each
+> match's league is resolved from its own `leagueCode` (set by
+> `getMatchesAcrossLeagues` from the response's `competition.code`, not
+> assumed from a per-league loop), and `leagueIds.get(m.leagueCode)` is
+> checked explicitly with a thrown error message
+> (`` `league ${m.leagueCode} missing — run backfill first` ``) rather than
+> the `leagueIds.get(s.code)!` non-null assertion shown below — the same
+> inconsistency Task 10's `core.ts` already avoided by throwing a clear
+> message instead of letting a bad assertion surface as an opaque Postgres
+> not-null violation. Do not reintroduce the per-league loop shown next; it
+> is the exact shape this fix removes.
+
 ```ts
 import 'dotenv/config';
 import { loadEnv } from '@/lib/config/env';
@@ -3700,6 +3931,38 @@ jobs:
 
 No secrets are referenced, which guarantees CI makes no live provider calls.
 
+**Amended 2026-08-03, post-branch-review — shared concurrency group is the
+headline fix for the matchday 429 cascade (see Task 10's amendment):** the
+five ingest workflows below each got their own `concurrency.group`
+(`ingest-core`, `ingest-live`, `ingest-squads`, plus news/players), which
+meant GitHub Actions could run `ingest-core` and `ingest-live` at the same
+wall-clock time — the two workflows that shared `FOOTBALL_DATA_KEY` and its
+10 req/min ceiling could then both be mid-run in the same provider minute.
+
+**`ingest-core.yml`, `ingest-live.yml` and `ingest-squads.yml` now all use
+the identical `concurrency.group: football-data-api`** (with
+`cancel-in-progress: false` preserved, so a run that would have collided
+queues and still executes rather than being dropped) — this serializes every
+workflow that touches football-data.org, so at most one of them is ever
+mid-request against the shared key at a time. **`ingest-news.yml` and
+`ingest-players.yml` keep their own groups unchanged** — they call FPL and
+RSS respectively, neither of which is metered or touches
+`FOOTBALL_DATA_KEY`, so there is nothing for them to serialize against. Each
+of the three shared-group workflow files now carries a comment explaining
+why the group is shared, specifically so a future cleanup pass doesn't
+"tidy" them back apart into per-workflow groups — that would silently
+reopen the cascade this fix closes.
+
+Also fixed in the same pass, in every workflow's `env:` block below:
+**`SUPABASE_ANON_KEY` is removed.** No code path ever reads it —
+`lib/db/client.ts`'s `serviceClient()` only ever uses
+`SUPABASE_SERVICE_ROLE_KEY` — and Task 1's `loadEnv` schema now marks
+`SUPABASE_ANON_KEY` optional specifically so a workflow holding only the
+service-role key still loads successfully. The variable is still documented
+(here, and in `lib/config/env.ts`'s schema) for Phase B, which is expected to
+need it client-side; only the unused workflow wiring and the required-ness
+in the schema are removed.
+
 - [ ] **Step 2: Write a reusable ingest workflow — `.github/workflows/ingest-core.yml`**
 
 ```yaml
@@ -3707,8 +3970,10 @@ name: ingest-core
 on:
   schedule: [{ cron: '0 * * * *' }]
   workflow_dispatch:
+# Shared with ingest-live and ingest-squads — see the amendment above.
+# Do NOT split this back into its own `ingest-core` group.
 concurrency:
-  group: ingest-core
+  group: football-data-api
   cancel-in-progress: false
 jobs:
   run:
@@ -3723,7 +3988,6 @@ jobs:
         env:
           FOOTBALL_DATA_KEY: ${{ secrets.FOOTBALL_DATA_KEY }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
 ```
 
@@ -3750,9 +4014,12 @@ jobs:
         env:
           FOOTBALL_DATA_KEY: ${{ secrets.FOOTBALL_DATA_KEY }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
 ```
+
+(`concurrency.group: ingest-news` is unchanged by the 2026-08-03 amendment
+above — RSS is unmetered, so this workflow has nothing to serialize against.
+Only the unused `SUPABASE_ANON_KEY` line is removed.)
 
 - [ ] **Step 4: Write `.github/workflows/ingest-players.yml`**
 
@@ -3777,9 +4044,11 @@ jobs:
         env:
           FOOTBALL_DATA_KEY: ${{ secrets.FOOTBALL_DATA_KEY }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
 ```
+
+(`concurrency.group: ingest-players` is unchanged — FPL is unmetered. Only
+the unused `SUPABASE_ANON_KEY` line is removed.)
 
 - [ ] **Step 5: Write `.github/workflows/ingest-live.yml`**
 
@@ -3788,8 +4057,10 @@ name: ingest-live
 on:
   schedule: [{ cron: '*/5 * * * *' }]
   workflow_dispatch:
+# Shared with ingest-core and ingest-squads — see Task 11's amendment above
+# ingest-core.yml. Do NOT split this back into its own `ingest-live` group.
 concurrency:
-  group: ingest-live
+  group: football-data-api
   cancel-in-progress: false
 jobs:
   run:
@@ -3804,7 +4075,6 @@ jobs:
         env:
           FOOTBALL_DATA_KEY: ${{ secrets.FOOTBALL_DATA_KEY }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
 ```
 
@@ -3870,6 +4140,37 @@ Expected: rows for `news`, `players`, `core`, `live`, all with `status = 'ok'`.
 
 The August transfer window is when squads change most, so a squad list frozen at backfill time goes stale immediately. This costs 98 requests (one per club) and therefore runs weekly, never hourly.
 
+> **SUPERSEDED 2026-08-03 (post-branch-review), and already stale before
+> this pass:** the snippet below discovers clubs via a plain
+> `serviceClient().from('teams').select('fd_id')` — that was already replaced
+> during the backfill rework (see Task 4's `getCompetitionTeams` note) with
+> `fd.getCompetitionTeams(s.code)` per league, for the same reason the
+> backfill uses it: a plain `teams` select can't distinguish a current club
+> from a historical one, and a relegated club would otherwise get queued for
+> a pointless (and 403-guaranteed) squad fetch. The actual `scripts/ingest/squads.ts`
+> was already on `getCompetitionTeams` + a `Set<fdId>` before this review;
+> **this branch-review pass adds one more fix on top of that:**
+>
+> `getCompetitionTeams` returns full `RawTeam` records (crest, shortName,
+> tla, venue, founded, clubColors) but the pre-fix code kept only `.fdId` for
+> the `Set` and threw the rest away. Consequence: crest changes and renames
+> never reached `teams`, and — critically — **any club newly promoted into a
+> covered competition never got a `teams` row at all**, because nothing else
+> in the weekly schedule writes one. `core.ts`'s next run would then resolve
+> that club's fixtures with `home_team_id: null`. Fix: `squads.ts` now calls
+> `upsertTeams(currentTeams)` on the full `getCompetitionTeams` result
+> *before* the squad-fetching loop — zero extra requests, since the fetch
+> already happened for club discovery. Team slugs written here use
+> `slugWithFdId` (`lib/db/slug.ts`), matching the same fix in `backfill.ts`
+> (see Task 9's amendment) — not the plain `slugify(team.name)` this file
+> never actually had a code path for team slugs before (it only wrote player
+> slugs). `requests++` was also moved before its paired `await fd.getSquad(...)`
+> call, same reasoning as Tasks 9 and 10's amendments.
+>
+> Read `scripts/ingest/squads.ts` directly; the snippet below is retained
+> only as a historical record of Task 12's original shape and should not be
+> used as an implementation reference.
+
 - [ ] **Step 1: Write `scripts/ingest/squads.ts`**
 
 ```ts
@@ -3932,8 +4233,10 @@ name: ingest-squads
 on:
   schedule: [{ cron: '0 4 * * 1' }]
   workflow_dispatch:
+# Shared with ingest-core and ingest-live — see Task 11's amendment above
+# ingest-core.yml. Do NOT split this back into its own `ingest-squads` group.
 concurrency:
-  group: ingest-squads
+  group: football-data-api
   cancel-in-progress: false
 jobs:
   run:
@@ -3948,7 +4251,6 @@ jobs:
         env:
           FOOTBALL_DATA_KEY: ${{ secrets.FOOTBALL_DATA_KEY }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
 ```
 
@@ -3971,6 +4273,11 @@ git commit -m "feat: weekly squad refresh for the transfer window"
 - [ ] `player_season_stats` contains rows from **both** sources — `fpl` for Premier League depth and `football-data` for top scorers in the other four leagues — confirming no league has zero player statistics
 - [ ] `ingest-live` correctly skips during preseason, spending zero requests
 - [ ] Sustained request rate never exceeds 10/minute
+- [ ] **(Added 2026-08-03) `ingest-core.yml`, `ingest-live.yml` and `ingest-squads.yml` share `concurrency.group: football-data-api`** — verify in the Actions tab that a manual dispatch of one queues rather than runs concurrently with another
+- [ ] **(Added 2026-08-03) `FootballDataClient.get` retries 429/5xx with backoff** (`tests/providers/footballData.test.ts`, describe block `FootballDataClient retry with backoff`) and does not retry other 4xx (403 still fails on the first attempt)
+- [ ] **(Added 2026-08-03) `live.ts` uses `getMatchesAcrossLeagues` and costs 4 requests/run, not 20**
+- [ ] **(Added 2026-08-03) `squads.ts` writes full team metadata via `upsertTeams`, not just a discarded `Set<fdId>`**
+- [ ] **(Added 2026-08-03) `0003_lock_down_ingest_observability.sql` applied by the project owner** (not automated — see Task 2's amendment)
 
 ---
 
@@ -3979,3 +4286,16 @@ git commit -m "feat: weekly squad refresh for the transfer window"
 Phase B (the site) is a separate plan: `docs/superpowers/plans/2026-08-XX-phase-b-site.md`. It reads exclusively from the tables this phase populates and adds no provider dependencies.
 
 **Open item carried forward:** live-score latency is unmeasurable until 2026-08-16 (La Liga's first matchday). On that date, compare `fixtures.last_updated` against real kickoff events and record the observed delay in spec §2.4.
+
+**Also carried forward from the 2026-08-03 branch review (this pass fixed the
+pipeline-correctness half; a separate pass handles player identity and data
+honesty):**
+- Apply `supabase/migrations/0003_lock_down_ingest_observability.sql` by hand
+  (Supabase dashboard SQL Editor, or the CLI with real credentials) — this
+  agent cannot apply it.
+- On or after 2026-08-16, once real matchday traffic exists, confirm in
+  practice that the shared `football-data-api` concurrency group plus the
+  new retry logic actually eliminates the 429 cascade this pass fixed on
+  paper (verified via code review, the retry unit tests, and a live probe of
+  `getMatchesAcrossLeagues` — not yet observed against genuine concurrent
+  matchday load, since preseason has no in-play matches to trigger it).

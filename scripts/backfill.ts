@@ -3,7 +3,7 @@ import { loadEnv } from '@/lib/config/env';
 import { RateLimiter } from '@/lib/ingest/rateLimiter';
 import { FootballDataClient } from '@/lib/providers/footballData';
 import { LEAGUE_SEEDS, CURRENT_SEASON, PREVIOUS_SEASON } from '@/lib/ingest/leagueSeed';
-import { slugify } from '@/lib/db/slug';
+import { slugWithFdId } from '@/lib/db/slug';
 import { upsertLeagues, getLeagueIdMap } from '@/lib/db/repositories/leagues';
 import { upsertTeams, getTeamIdMap, type TeamRow } from '@/lib/db/repositories/teams';
 import { upsertPlayersByFdId } from '@/lib/db/repositories/players';
@@ -44,11 +44,17 @@ try {
   const currentTeams: TeamRow[] = [];
   const seenFdIds = new Set<number>();
   for (const s of LEAGUE_SEEDS) {
-    const teams = await fd.getCompetitionTeams(s.code); requests++;
+    requests++;
+    const teams = await fd.getCompetitionTeams(s.code);
     const leagueId = leagueIds.get(s.code)!;
     for (const team of teams) {
       currentTeams.push({
-        fd_id: team.fdId, league_id: leagueId, slug: slugify(team.name), name: team.name,
+        // `-${fdId}` suffix, matching the players.slug convention (see
+        // scripts/ingest/squads.ts): teams.slug is `unique not null`, and two
+        // clubs slugifying identically (no collision today across 110
+        // clubs, but promotion/relegation churn makes one live eventually)
+        // would otherwise abort this entire upsertTeams batch.
+        fd_id: team.fdId, league_id: leagueId, slug: slugWithFdId(team.name, team.fdId), name: team.name,
         short_name: team.shortName, tla: team.tla, crest_url: team.crestUrl,
         venue: team.venue, founded: team.founded, club_colors: team.clubColors,
       });
@@ -70,13 +76,16 @@ try {
   const historicalTeams: TeamRow[] = [];
   const standingsByLeague = new Map<string, RawStanding[]>();
   for (const s of LEAGUE_SEEDS) {
-    const table = await fd.getStandings(s.code, PREVIOUS_SEASON); requests++;
+    requests++;
+    const table = await fd.getStandings(s.code, PREVIOUS_SEASON);
     standingsByLeague.set(s.code, table);
     const leagueId = leagueIds.get(s.code)!;
     for (const row of table) {
       if (seenFdIds.has(row.teamFdId)) continue;
       historicalTeams.push({
-        fd_id: row.teamFdId, league_id: leagueId, slug: slugify(row.teamName), name: row.teamName,
+        // Same `-${fdId}` convention as currentTeams above — see that
+        // comment for why the plain slug is unsafe long-term.
+        fd_id: row.teamFdId, league_id: leagueId, slug: slugWithFdId(row.teamName, row.teamFdId), name: row.teamName,
         short_name: row.teamShortName, tla: row.teamTla, crest_url: row.teamCrestUrl,
         venue: null, founded: null, club_colors: null,
       });
@@ -102,7 +111,8 @@ try {
   const collectedSquads: Array<{ teamFdId: number; squad: Awaited<ReturnType<typeof fd.getSquad>>['squad'] }> = [];
   for (const team of currentTeams) {
     try {
-      const { squad } = await fd.getSquad(team.fd_id); requests++;
+      requests++;
+      const { squad } = await fd.getSquad(team.fd_id);
       collectedSquads.push({ teamFdId: team.fd_id, squad });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -118,7 +128,7 @@ try {
   await upsertPlayersByFdId(collectedSquads.flatMap(({ teamFdId, squad }) =>
     squad.map((p) => ({
       fd_id: p.fdId, fpl_id: null, team_id: teamIds.get(teamFdId) ?? null,
-      slug: `${slugify(p.name)}-${p.fdId}`, name: p.name, position: p.position,
+      slug: slugWithFdId(p.name, p.fdId), name: p.name, position: p.position,
       nationality: p.nationality, date_of_birth: p.dateOfBirth, photo_url: null,
     }))));
   console.log(`     ${collectedSquads.length}/${currentTeams.length} squads fetched, ${collectedSquads.reduce((n, c) => n + c.squad.length, 0)} players, ${squadSkips.length} skipped (403)`);
@@ -128,7 +138,8 @@ try {
   console.log('6/7  fixtures');
   for (const s of LEAGUE_SEEDS) {
     for (const season of [PREVIOUS_SEASON, CURRENT_SEASON]) {
-      const matches = await fd.getMatches(s.code, season); requests++;
+      requests++;
+      const matches = await fd.getMatches(s.code, season);
       await upsertFixtures(matches.map((m) => ({
         fd_id: m.fdId, league_id: leagueIds.get(s.code)!,
         home_team_id: teamIds.get(m.homeTeamFdId) ?? null,

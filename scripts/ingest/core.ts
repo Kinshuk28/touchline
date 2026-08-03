@@ -29,7 +29,8 @@ try {
     const leagueId = leagueIds.get(s.code);
     if (leagueId === undefined) throw new Error(`league ${s.code} missing — run backfill first`);
 
-    const matches = await fd.getMatches(s.code, CURRENT_SEASON); requests++;
+    requests++;
+    const matches = await fd.getMatches(s.code, CURRENT_SEASON);
     await upsertFixtures(matches.map((m) => ({
       fd_id: m.fdId, league_id: leagueId,
       home_team_id: teamIds.get(m.homeTeamFdId) ?? null,
@@ -40,21 +41,38 @@ try {
       last_updated: m.lastUpdated, updated_at: now(),
     })));
 
-    const table = await fd.getStandings(s.code, CURRENT_SEASON); requests++;
-    await upsertStandings(table
-      .map((r) => ({
-        league_id: leagueId, team_id: teamIds.get(r.teamFdId)!, season: CURRENT_SEASON,
+    requests++;
+    const table = await fd.getStandings(s.code, CURRENT_SEASON);
+    // Resolve team_id explicitly and drop (with a loud warning) any row whose
+    // club has no `teams` row yet, rather than the old `teamIds.get(...)!`
+    // + `.filter(team_id !== undefined)` combo — that `!` lied to the type
+    // checker (the map already produces `team_id: number | undefined` in
+    // practice) and made the filter look like unreachable dead code, so a
+    // missing club silently rendered a short table with status 'ok' and
+    // nothing in the logs. See scripts/backfill.ts phase 7 for the identical
+    // pattern this now matches.
+    const standingsRows = [];
+    for (const r of table) {
+      const teamId = teamIds.get(r.teamFdId);
+      if (teamId === undefined) {
+        console.warn(`     WARNING: unresolved club "${r.teamName}" (fd_id ${r.teamFdId}) in ${s.code} standings — row dropped`);
+        continue;
+      }
+      standingsRows.push({
+        league_id: leagueId, team_id: teamId, season: CURRENT_SEASON,
         position: r.position, played: r.played, won: r.won, drawn: r.drawn, lost: r.lost,
         goals_for: r.goalsFor, goals_against: r.goalsAgainst,
         goal_difference: r.goalDifference, points: r.points, form: r.form, updated_at: now(),
-      }))
-      .filter((r) => r.team_id !== undefined));
+      });
+    }
+    await upsertStandings(standingsRows);
 
     // Top scorers are the ONLY free source of goals/assists outside the
     // Premier League. Without this, four of the five leagues have players
     // with no statistics at all. Fields FPL provides and this does not
     // (minutes, xG) are written as null, never as zero.
-    const scorers = await fd.getScorers(s.code, CURRENT_SEASON); requests++;
+    requests++;
+    const scorers = await fd.getScorers(s.code, CURRENT_SEASON);
 
     // La Liga and Serie A get an empty squad array from getSquad for every
     // club, so this scorers list is the ONLY source of players those two

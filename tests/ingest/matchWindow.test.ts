@@ -165,9 +165,24 @@ describe('isLiveRelevant', () => {
     expect(isLiveRelevant(f, at('2026-08-21T14:30:00Z'))).toBe(false);
   });
 
-  it('SUSPENDED is never relevant', () => {
+  it('SUSPENDED is always relevant, regardless of kickoff time — the live job must be the fast writer for a suspension', () => {
     const f = { status: 'SUSPENDED' as const, kickoffUtc: '2026-08-21T14:00:00Z' };
-    expect(isLiveRelevant(f, at('2026-08-21T14:30:00Z'))).toBe(false);
+    expect(isLiveRelevant(f, at('2026-08-21T14:30:00Z'))).toBe(true);
+  });
+
+  it('SUSPENDED boundary: still relevant three weeks after kickoff, unlike FINISHED — matches isMatchWindowOpen treating it as never dead', () => {
+    const f = { status: 'SUSPENDED' as const, kickoffUtc: '2026-08-21T14:00:00Z' };
+    expect(isLiveRelevant(f, at('2026-09-11T14:00:00Z'))).toBe(true);
+  });
+
+  it('AWARDED is always relevant, regardless of kickoff time — the live job must be the fast writer for a forfeit decision', () => {
+    const f = { status: 'AWARDED' as const, kickoffUtc: '2026-08-21T14:00:00Z' };
+    expect(isLiveRelevant(f, at('2026-08-21T14:30:00Z'))).toBe(true);
+  });
+
+  it('AWARDED boundary: still relevant three weeks after kickoff, same as SUSPENDED', () => {
+    const f = { status: 'AWARDED' as const, kickoffUtc: '2026-08-21T14:00:00Z' };
+    expect(isLiveRelevant(f, at('2026-09-11T14:00:00Z'))).toBe(true);
   });
 
   it('CANCELLED is never relevant', () => {

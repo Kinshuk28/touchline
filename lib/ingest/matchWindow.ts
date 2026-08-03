@@ -1,4 +1,4 @@
-import { IN_PLAY_STATUSES, type FixtureStatus, type RawFixture } from '@/lib/providers/types';
+import { IN_PLAY_STATUSES, type FixtureStatus } from '@/lib/providers/types';
 
 export interface WindowFixture {
   status: FixtureStatus;
@@ -53,17 +53,30 @@ export function isMatchWindowOpen(
  * Determines whether a fixture should be upserted during the live polling window.
  *
  * IN_PLAY and PAUSED fixtures are always relevant — match state changes on every poll.
+ * SUSPENDED and AWARDED are also always relevant: these are exactly the transitions the
+ * live job needs to be the fast writer for. Before this fix, `isLiveRelevant` returned
+ * `false` for SUSPENDED even though `isMatchWindowOpen` deliberately keeps the polling
+ * window open through a suspension (see that function's doc comment) — the two fixes
+ * disagreed, so the live job kept polling (burning requests) but never actually wrote
+ * the SUSPENDED status, leaving the site showing a suspended match as still IN_PLAY
+ * until core.ts's next hourly sweep corrected it. AWARDED (a match awarded to a team,
+ * e.g. after a forfeit) has the identical shape: a live-window transition that must be
+ * written immediately, not left for the hourly job.
+ *
  * FINISHED fixtures are relevant only if they finished recently (within LIVE_RELEVANCE_TRAIL_MINUTES
  * of kickoff), to avoid re-upserts of hundreds of completed matches every five minutes
  * once the season progresses. A fixture that finished three weeks ago must not appear
  * in the live job's writes — that would cause a steadily growing database write volume
- * as the season accumulates finished matches.
+ * as the season accumulates finished matches. SUSPENDED/AWARDED are not given the same
+ * trail-window treatment: both are rare, and both only ever arise on a fixture already
+ * inside the live-polling window (a match must have started to be suspended, or to be
+ * awarded following an abandonment), so there is no equivalent long-tail growth risk.
  *
- * SCHEDULED/TIMED/POSTPONED/SUSPENDED/CANCELLED fixtures are never written by the live job.
+ * SCHEDULED/TIMED/POSTPONED/CANCELLED fixtures are never written by the live job.
  */
 export function isLiveRelevant(fixture: { status: FixtureStatus; kickoffUtc: string }, now: Date): boolean {
-  // In-play or paused: always relevant, regardless of kickoff time.
-  if (IN_PLAY_STATUSES.includes(fixture.status)) {
+  // In-play, paused, suspended, or awarded: always relevant, regardless of kickoff time.
+  if (IN_PLAY_STATUSES.includes(fixture.status) || fixture.status === 'SUSPENDED' || fixture.status === 'AWARDED') {
     return true;
   }
 
@@ -79,6 +92,6 @@ export function isLiveRelevant(fixture: { status: FixtureStatus; kickoffUtc: str
     return elapsedMs <= trailMs;
   }
 
-  // Everything else: not relevant (SCHEDULED, TIMED, POSTPONED, SUSPENDED, CANCELLED, AWARDED).
+  // Everything else: not relevant (SCHEDULED, TIMED, POSTPONED, CANCELLED).
   return false;
 }
