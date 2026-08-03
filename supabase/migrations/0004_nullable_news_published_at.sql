@@ -1,0 +1,69 @@
+-- 0004_nullable_news_published_at.sql
+--
+-- WHY THIS MIGRATION EXISTS
+-- -------------------------
+-- `lib/providers/rss.ts`'s `safePublishedAt` used to fall back to
+-- `new Date().toISOString()` -- i.e. *now* -- whenever a feed item's date was
+-- absent or unparseable, and that guess was stored as the item's real
+-- `published_at`. That is a fabrication in the one column `news_items` is
+-- sorted by (`news_published_idx on news_items (published_at desc)`): an
+-- article of genuinely unknown date pinned itself to the very top of the
+-- site's news feed, ahead of stories that really are new. The root cause of
+-- that fallback was `published_at timestamptz not null` in 0001_init.sql --
+-- there was nowhere honest to put "we don't know" other than a guess.
+--
+-- THE FIX
+-- -------
+-- `published_at` becomes nullable. `safePublishedAt` now returns `null` for
+-- an unusable date, and `null` is stored as-is -- honestly representing "date
+-- unknown" instead of a confident-looking timestamp. Nothing else about the
+-- column changes: real dates still parse and store exactly as before.
+--
+-- READ-PATH CONSEQUENCE FOR PHASE B
+-- ----------------------------------
+-- Once this column can hold `null`, any query that does
+-- `ORDER BY published_at DESC` must say so explicitly as
+-- `ORDER BY published_at DESC NULLS LAST` -- Postgres's default null
+-- ordering for a DESC sort is NULLS FIRST, which would otherwise put every
+-- undated story right back at the top of the feed, exactly the bug this
+-- migration fixes. `news_published_idx` itself does not need to change (a
+-- b-tree index still serves a NULLS LAST query, just via a different scan
+-- direction); this is purely a query-time concern for whatever Phase B route
+-- reads this table.
+--
+-- SCOPE -- ONLY this one column, on news_items
+-- ----------------------------------------------
+-- No other table or column is touched. `title`, `url`, `content_hash` etc.
+-- keep their existing constraints.
+--
+-- DO NOT modify 0001_init.sql, 0002_grants_and_rls.sql or
+-- 0003_lock_down_ingest_observability.sql to "fold this in" -- 0001 and 0002
+-- are already applied against the live database, and 0003 is queued ahead of
+-- this one but not yet applied either. Migrations are append-only from here;
+-- this file is 0004 for exactly that reason.
+--
+-- THIS MIGRATION HAS NOT BEEN APPLIED YET
+-- ----------------------------------------
+-- Apply it via the Supabase dashboard -> SQL Editor -> New query -> paste
+-- this file's contents -> Run (after 0003, in order). The project owner must
+-- do this by hand (or via the Supabase CLI with real credentials); it is not
+-- applied automatically as part of this change.
+--
+-- CODE ALREADY TOLERATES BOTH STATES
+-- ------------------------------------
+-- Until this migration is applied, the column is still `not null`, so an
+-- upsert containing a `null` `published_at` would violate that constraint --
+-- and, being one INSERT statement, would fail for the *whole* batch, not
+-- just the null-dated row. `lib/db/repositories/news.ts`'s `upsertNewsItems`
+-- already handles this: it detects the not-null-violation error code
+-- (`23502`) and retries once with the null-dated items dropped, logging that
+-- they were skipped. Applying this migration is what upgrades that
+-- behaviour from "skip the undated item" to "store its unknown date as
+-- null", with no further code change required either way.
+--
+-- IDEMPOTENCY
+-- -----------
+-- `ALTER COLUMN ... DROP NOT NULL` is safe to run more than once -- dropping
+-- a constraint that is already absent is a no-op, not an error.
+
+alter table news_items alter column published_at drop not null;

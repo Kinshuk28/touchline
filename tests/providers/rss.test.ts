@@ -178,11 +178,14 @@ describe('RssClient.fetchFeed', () => {
     expect(items[0]!.imageUrl).toBeNull();
   });
 
-  it('does not throw when an item carries an unparseable pubDate, and falls back to a valid timestamp', async () => {
+  it('does not throw when an item carries an unparseable pubDate, and stores a null date rather than guessing "now"', async () => {
     // Proves finding 1's per-item fix: a malformed date must not kill its own
     // feed's other items. Before the fix, `new Date('garbage-date').toISOString()`
     // threw an uncaught RangeError here, and fetchFeed's promise rejected instead
-    // of resolving to [] or to the parsed items.
+    // of resolving to [] or to the parsed items. A *later* fix replaced that crash
+    // with a `new Date().toISOString()` fallback -- itself a bug, since it stored
+    // a fabricated "now" as the article's real publication date. The correct
+    // behaviour is neither: publishedAt must be null, an honest "unknown".
     const body = feedXml([
       { title: 'Healthy item before the bad one', link: 'https://x.test/1' },
       { title: 'Item with an unparseable pubDate', link: 'https://x.test/2', pubDate: 'garbage-date' },
@@ -195,7 +198,17 @@ describe('RssClient.fetchFeed', () => {
     expect(titles).toContain('Item with an unparseable pubDate');
     expect(titles).toContain('Healthy item after the bad one');
     const bad = items.find((i) => i.title === 'Item with an unparseable pubDate')!;
-    expect(bad.publishedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    expect(bad.publishedAt).toBeNull();
+  });
+
+  it('stores a null published date, not a fabricated "now", when an item carries no date at all', async () => {
+    const xmlNoDate =
+      '<?xml version="1.0" encoding="UTF-8"?><rss version="2.0"><channel><title>Test Feed</title>' +
+      '<item><title><![CDATA[No date here]]></title><link>https://x.test/no-date</link></item>' +
+      '</channel></rss>';
+    const items = await new RssClient({ fetchImpl: fetchImplFor(xmlNoDate) }).fetchFeed('X', 'https://example.test/rss');
+    expect(items).toHaveLength(1);
+    expect(items[0]!.publishedAt).toBeNull();
   });
 });
 

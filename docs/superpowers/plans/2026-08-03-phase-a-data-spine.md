@@ -237,6 +237,7 @@ git commit -m "feat: project scaffold and validated environment config"
 - Create: `supabase/migrations/0001_init.sql`
 - Create: `supabase/migrations/0002_grants_and_rls.sql`
 - Create: `supabase/migrations/0003_lock_down_ingest_observability.sql` (added 2026-08-03, post-branch-review — see below)
+- Create: `supabase/migrations/0004_nullable_news_published_at.sql` (added 2026-08-03, player-identity/data-honesty pass — see below)
 - Create: `lib/db/client.ts`
 - Create: `scripts/verify-schema.ts`
 
@@ -272,6 +273,25 @@ migration has not been applied yet** — it must be run by hand via the
 Supabase dashboard SQL Editor (or the Supabase CLI, with credentials this
 phase's automation does not have); it is not part of `scripts/verify-schema.ts`
 and nothing in CI applies it automatically.
+
+**Added 2026-08-03, player-identity/data-honesty pass —
+`0004_nullable_news_published_at.sql`:** `news_items.published_at` was
+`not null`, and that constraint is what forced `lib/providers/rss.ts`'s
+`safePublishedAt` to fabricate `new Date().toISOString()` (i.e. *now*) as an
+article's publication date whenever a feed's date was absent or
+unparseable — a guess stored as fact in the one column the news feed sorts
+by. `0004` drops that `not null` constraint so the honest value, `null`,
+can be stored instead. See the `safePublishedAt` amendment in Task 6 for the
+full before/after and `lib/db/repositories/news.ts` for how the write path
+tolerates both migration states in the meantime (skips the undated item
+without crashing the batch until this migration is applied; stores `null`
+once it is). **This migration has not been applied yet either** — same
+by-hand process as `0003`, and it must be applied *after* `0003` (append-only
+ordering). Once applied, any future read query doing
+`ORDER BY published_at DESC` must say `DESC NULLS LAST` explicitly —
+Postgres's default null ordering for `DESC` is `NULLS FIRST`, which would
+otherwise put every undated story right back at the top of the feed. See the
+migration file's own comment for the full reasoning.
 
 - [ ] **Step 1: Write the migration**
 
@@ -1624,6 +1644,37 @@ describe('FplClient.getPlayers', () => {
 Run: `npm test -- tests/providers/fpl.test.ts`
 Expected: FAIL — `Cannot find module '@/lib/providers/fpl'`
 
+> **SUPERSEDED 2026-08-03 (post-branch-review, data-honesty pass):** the
+> snippet below defaults `position` to `'Unknown'` and `minutes`/`goals`/
+> `assists` to `0` when the field is absent from the payload
+> (`POSITIONS[e.element_type] ?? 'Unknown'`, `e.minutes ?? 0`, etc.). Both
+> defaults fabricate data the provider never sent: a missing minutes/goals/
+> assists field becomes an authoritative "this player has played 0
+> minutes / scored 0 goals" (the branch was already careful about this exact
+> failure mode for `expectedGoals` — see the test two steps below — and then
+> committed it for the other three fields), and `'Unknown'` invents a
+> position value even though `players.position` is nullable and `null` is
+> the honest answer.
+>
+> It also under-reacts to a real shape in the data: `bootstrap-static`'s
+> `elements` array carries a fifth `element_type` (5) for fantasy
+> **managers** in any season where manager scoring exists, which
+> `POSITIONS` has never mapped. Defaulting an unrecognised `element_type` to
+> `'Unknown'` would store a manager as a player with a guessed position;
+> the correct behaviour is to not create a player row for it at all.
+>
+> The actual `lib/providers/fpl.ts` fixes both: `FplPlayer.position` is
+> `string | null` (`?? null`, not `?? 'Unknown'`); `minutes`/`goals`/
+> `assists` are `number | null` (`?? null`, not `?? 0`) — a real reported `0`
+> still survives as `0`, only a genuinely absent field becomes `null`; and
+> `getBootstrap()` filters `elements` down to known playing-position
+> `element_type`s (1–4) before mapping, so a manager (or any future
+> non-playing type) is skipped entirely rather than stored. Read
+> `lib/providers/fpl.ts` and `tests/providers/fpl.test.ts` directly — the
+> snippet and test list below are retained only as a historical record of
+> what this task originally shipped (and the fabrication it committed), not
+> as the current test suite.
+
 - [ ] **Step 4: Implement `lib/providers/fpl.ts`**
 
 ```ts
@@ -2149,15 +2200,24 @@ export function classify(title: string): string[] {
   return out;
 }
 
-// A feed can carry a pubDate/isoDate that `new Date()` parses into an Invalid Date
-// (e.g. a malformed or non-standard string). Calling `.toISOString()` on an Invalid
-// Date throws RangeError — uncaught, that would previously blow up this item's whole
-// feed (and, via Promise.all in fetchAll, the other healthy feeds too). We choose to
-// fall back to "now" rather than skip the item, matching the existing intent of the
-// `published ? ... : new Date().toISOString()` fallback already used when no date is
-// present at all: a wrong-but-recent timestamp is more useful downstream than losing
-// the story entirely, and "now" is a safe, honest default for "we don't know when
-// this was published."
+// SUPERSEDED 2026-08-03 (post-branch-review, data-honesty pass): the comment and
+// implementation immediately below fall back to `new Date().toISOString()` -- i.e.
+// *now* -- when a date is absent or unparseable, and call that a "safe, honest
+// default." It is neither: it stores a fabricated guess as the article's real
+// publication date, in the exact column `news_items` is sorted by
+// (`news_published_idx on news_items (published_at desc)`). An article of genuinely
+// unknown date would pin itself to the very top of the feed, ahead of stories that
+// really are new -- the opposite of "safe." The honest value for "we don't know when
+// this was published" is `null`, not a confident-looking timestamp.
+//
+// The actual `lib/providers/rss.ts` returns `null` from `safePublishedAt` instead
+// (`NewsItem.publishedAt: string | null`), and migration `0004_nullable_news_
+// published_at.sql` makes the column nullable to receive it -- see Task 2's
+// migrations list and `lib/db/repositories/news.ts`'s `upsertNewsItems`, which
+// tolerates both migration states (stores `null` once applied; skips the undated
+// item without crashing the batch until then). Read those files directly; this
+// comment and the function below are retained only as a historical record of the
+// fabrication this task originally shipped.
 function safePublishedAt(published: string | undefined): string {
   if (published) {
     const d = new Date(published);
@@ -3732,6 +3792,74 @@ try {
 }
 ```
 
+> **SUPERSEDED 2026-08-03 (post-branch-review, player-identity pass):** the
+> snippet below always inserts a new row for every FPL player
+> (`upsertPlayersByFplId(...)` with `team_id: null`, no attempt to find an
+> existing row). That is the root of the two-disjoint-rows bug: football-data
+> and FPL each independently write a `players` row for the same Premier
+> League human being — football-data via `fd_id` (full squad + club, no
+> photo), FPL via `fpl_id` (deep stats + photo, no club of its own) — and
+> `onConflict: 'fpl_id'` can never match the football-data row because its
+> `fpl_id` is `NULL`, and Postgres treats `NULL` as distinct from every other
+> `NULL` in a unique index. Confirmed live against the project's own
+> database before the fix: 2,448 `players` rows, only 1,881 with a `team_id`
+> — the other 567 were the *entire* Premier League roster, present only via
+> `fpl_id`, floating with no club, no photo displayed anywhere a squad page
+> would query by `team_id`, and appearing a second time in name search
+> alongside their football-data twin (`players_name_trgm`).
+>
+> **The fix**, in `lib/ingest/playerIdentity.ts` (new), applied by the actual
+> `scripts/ingest/players.ts`:
+> 1. `matchFplTeamsToClubs` resolves each of FPL's 20 club ids onto this
+>    project's own `teams` rows for the Premier League, by normalised name
+>    plus a short-code fallback (football-data's `tla` vs FPL's
+>    `shortName` — the two providers don't share a full-name convention at
+>    all: FPL's `name` field is itself an informal nickname, e.g. "Spurs",
+>    "Man Utd", not "Tottenham Hotspur FC"/"Manchester United FC"). Verified
+>    live against this project's actual Premier League clubs: **19/20
+>    matched**; Nottingham Forest is the one honest miss (football-data's TLA
+>    `NOT` vs FPL's short name `NFO` — a genuine disagreement between the two
+>    providers' own codes, not a bug in the matcher).
+> 2. `matchPlayersTiered` (`lib/ingest/playerMatch.ts`) matches each FPL
+>    player onto an *existing* football-data player, scoped to its club, via
+>    a three-tier match — exact normalised full name, then FPL's `web_name`
+>    against the last token of a candidate's name, then `web_name` against
+>    any whole token — each tier only accepted if it narrows the within-club
+>    candidate pool to exactly one player. This superseded an earlier plain
+>    global exact-full-name join (`matchFplPlayersByName`, since removed)
+>    that only reached 253 of ~620 Premier League FPL players, because FPL's
+>    name is the player's full *legal* name while football-data stores the
+>    *display* name ("David Raya Martín" vs "David Raya"). Still not fuzzy
+>    matching, an alias table, or manual overrides — see that module's doc
+>    comment for the full reasoning and `.superpowers/sdd/final-fixes-b-report.md`
+>    for the exact tier-by-tier counts. A match updates that row's
+>    `fpl_id`/`photo_url` in place, leaving `fd_id`, `team_id` and `slug`
+>    untouched. A miss still inserts a new row (no FPL player is silently
+>    dropped), but now with `team_id` resolved from step 1 instead of always
+>    `null`.
+> 3. `player_season_stats` is written exactly as before, but the id lookup
+>    (`getPlayerIdByFplId`) now resolves correctly for both matched and
+>    newly-inserted players, since both carry `fpl_id` by the time it runs.
+>
+> Read `scripts/ingest/players.ts` directly for the real implementation; the
+> snippet below is retained only as a historical record of what this task
+> originally shipped (and the bug it contained) and must not be
+> reintroduced.
+>
+> **Repairing the 567 rows this bug already wrote in production:** a
+> one-shot script, `scripts/repair/mergeFplPlayers.ts` (same pattern as
+> `seedScorerPlayers.ts` — run once by hand, not on a schedule), applies the
+> same tiered matcher to the orphan rows already sitting in the database,
+> re-joining each orphan against the live `bootstrap-static` payload by
+> `fpl_id` to recover the `web_name` and club the stored row alone doesn't
+> carry: a matched orphan has its `player_season_stats` rows repointed onto
+> the football-data row's id (must happen *before* the orphan is deleted —
+> `player_season_stats.player_id` is a foreign key `on delete cascade`) and
+> is then deleted; an orphan with no football-data match gets `team_id` set
+> from the FPL team mapping instead, so it at least stops being teamless.
+> Run for real against the project's live database — see the Definition of
+> Done below for the observed before/after numbers.
+
 - [ ] **Step 3: Write `scripts/ingest/players.ts`**
 
 ```ts
@@ -4278,6 +4406,11 @@ git commit -m "feat: weekly squad refresh for the transfer window"
 - [ ] **(Added 2026-08-03) `live.ts` uses `getMatchesAcrossLeagues` and costs 4 requests/run, not 20**
 - [ ] **(Added 2026-08-03) `squads.ts` writes full team metadata via `upsertTeams`, not just a discarded `Set<fdId>`**
 - [ ] **(Added 2026-08-03) `0003_lock_down_ingest_observability.sql` applied by the project owner** (not automated — see Task 2's amendment)
+- [x] **(Added 2026-08-03, player-identity/data-honesty pass) Premier League players resolve to a single row.** `scripts/ingest/players.ts` matches FPL identity onto existing football-data rows (`lib/ingest/playerIdentity.ts` for the club match, `lib/ingest/playerMatch.ts` for the tiered player match) instead of inserting a parallel row; `scripts/repair/mergeFplPlayers.ts` repaired the 567 rows the old code had already written — see `.superpowers/sdd/final-fixes-b-report.md` for the exact before/after numbers, FPL-team match rate (19/20; Nottingham Forest's TLA/short-name disagreement is the one honest miss), and per-tier player name-match counts.
+- [x] **(Added 2026-08-04, tiered-match pass) Player match rate improved by scoping to club and adding `web_name` tiers.** The original exact-full-name join reached only 253/~620 Premier League FPL players, because FPL's name is the full legal name while football-data stores the display name. `matchPlayersTiered` (`lib/ingest/playerMatch.ts`, unit-tested in `tests/ingest/playerMatch.test.ts`) tries exact match, then `web_name` against a candidate's last name-token, then `web_name` against any whole token — each scoped to the FPL player's own club and only accepted if it narrows the candidate pool to exactly one player, never guessing at an ambiguous tier. Run for real against the live database: orphans went from 124 to 5 (all Nottingham Forest, the one club-level miss above), `players` rows with both `fd_id` and `fpl_id` went from 253 to 313. See `.superpowers/sdd/final-fixes-b-report.md` for the full before/after and the residual list (including two honest same-club ambiguities and two cross-league same-name pairs deliberately left unmerged).
+- [x] **(Added 2026-08-03) `lib/providers/fpl.ts` no longer fabricates `minutes`/`goals`/`assists`/`position`.** All four are `?? null`, not `?? 0` / `?? 'Unknown'`; a real reported `0` still survives as `0` (pinned regression tests in `tests/providers/fpl.test.ts`, mirroring the existing `expectedGoals` test). Elements whose `element_type` isn't a known playing position (e.g. a fantasy manager, type 5) are skipped rather than stored.
+- [x] **(Added 2026-08-03) `news_items.published_at` is no longer fabricated.** `safePublishedAt` returns `null`, not `new Date().toISOString()`, for an absent/unparseable date; `supabase/migrations/0004_nullable_news_published_at.sql` makes the column nullable (not yet applied — same by-hand process as `0003`); `lib/db/repositories/news.ts` tolerates both migration states (skips the undated item without crashing the batch until applied, stores `null` once it is).
+- [ ] **(Added 2026-08-03) `0004_nullable_news_published_at.sql` applied by the project owner** (not automated — see Task 2's amendment; must be applied after `0003`)
 
 ---
 
@@ -4287,15 +4420,36 @@ Phase B (the site) is a separate plan: `docs/superpowers/plans/2026-08-XX-phase-
 
 **Open item carried forward:** live-score latency is unmeasurable until 2026-08-16 (La Liga's first matchday). On that date, compare `fixtures.last_updated` against real kickoff events and record the observed delay in spec §2.4.
 
-**Also carried forward from the 2026-08-03 branch review (this pass fixed the
-pipeline-correctness half; a separate pass handles player identity and data
-honesty):**
+**Also carried forward from the 2026-08-03 branch review (that pass fixed the
+pipeline-correctness half; this pass — player identity and data honesty — is
+now done, see `.superpowers/sdd/final-fixes-b-report.md` for full numbers):**
 - Apply `supabase/migrations/0003_lock_down_ingest_observability.sql` by hand
   (Supabase dashboard SQL Editor, or the CLI with real credentials) — this
   agent cannot apply it.
+- Apply `supabase/migrations/0004_nullable_news_published_at.sql` the same
+  way, **after** `0003` — this agent cannot apply it either. Until it's
+  applied, an RSS item with an unusable date is skipped (not stored, not
+  guessed at) rather than crashing the news job; see `lib/db/repositories/
+  news.ts`.
 - On or after 2026-08-16, once real matchday traffic exists, confirm in
   practice that the shared `football-data-api` concurrency group plus the
   new retry logic actually eliminates the 429 cascade this pass fixed on
   paper (verified via code review, the retry unit tests, and a live probe of
   `getMatchesAcrossLeagues` — not yet observed against genuine concurrent
   matchday load, since preseason has no in-play matches to trigger it).
+- Player-identity matching is a tiered, club-scoped exact/last-token/
+  whole-token match, deliberately not fuzzy matching, an alias table, or
+  manual overrides (see `lib/ingest/playerIdentity.ts` for the club match
+  and `lib/ingest/playerMatch.ts` for the tiered player match). Nottingham
+  Forest's FPL team never matches (football-data's `tla` `NOT` vs FPL's
+  `short_name` `NFO` genuinely disagree), which is why all 5 remaining
+  fully-orphaned players are Nottingham Forest signings — a real minority of
+  Premier League players still won't match at all (an honest same-club
+  token ambiguity, e.g. two players both named "Gabriel ___"; a multi-token
+  `web_name` the tiers don't cover) and a few cross-league same-name pairs
+  exist in the full `players` table that were deliberately not merged (see
+  the report for the observed rate and every example). Phase B's squad/
+  player pages must independently check for `team_id` and for `fpl_id`/
+  `fd_id` presence rather than assume every Premier League player has both a
+  club and full FPL statistics, and must not assume a name search returns
+  exactly one row.

@@ -82,20 +82,22 @@ export function classify(title: string): string[] {
 }
 
 // A feed can carry a pubDate/isoDate that `new Date()` parses into an Invalid Date
-// (e.g. a malformed or non-standard string). Calling `.toISOString()` on an Invalid
-// Date throws RangeError — uncaught, that would previously blow up this item's whole
-// feed (and, via Promise.all in fetchAll, the other healthy feeds too). We choose to
-// fall back to "now" rather than skip the item, matching the existing intent of the
-// `published ? ... : new Date().toISOString()` fallback already used when no date is
-// present at all: a wrong-but-recent timestamp is more useful downstream than losing
-// the story entirely, and "now" is a safe, honest default for "we don't know when
-// this was published."
-function safePublishedAt(published: string | undefined): string {
+// (e.g. a malformed or non-standard string), or no date at all. Calling
+// `.toISOString()` on an Invalid Date throws RangeError, so this must never do that
+// -- but the old fix for that RangeError went too far the other way: it fell back to
+// `new Date().toISOString()`, i.e. *now*, and stored that guess as the article's
+// actual publication date. That's a fabrication, not a safe default: `published_at`
+// is the single column `news_items` is sorted by (`news_published_idx ... published_at
+// desc`), so a story of genuinely unknown date would pin itself to the very top of
+// the feed, ahead of stories that really are new. The honest value for "we don't know
+// when this was published" is `null`, not a confident-looking timestamp equal to the
+// moment the ingestion job happened to run.
+function safePublishedAt(published: string | undefined): string | null {
   if (published) {
     const d = new Date(published);
     if (!Number.isNaN(d.getTime())) return d.toISOString();
   }
-  return new Date().toISOString();
+  return null;
 }
 
 export function contentHash(title: string): string {
@@ -108,7 +110,11 @@ export interface NewsItem {
   summary: string | null;
   url: string;
   imageUrl: string | null;
-  publishedAt: string;
+  // null means the feed's date was absent or unparseable -- never guessed at.
+  // See safePublishedAt above and lib/db/repositories/news.ts for how the
+  // write path tolerates this both before and after migration 0004 makes
+  // the `news_items.published_at` column nullable.
+  publishedAt: string | null;
   categories: string[];
   contentHash: string;
 }

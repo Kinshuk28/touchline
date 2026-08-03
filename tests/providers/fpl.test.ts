@@ -87,4 +87,70 @@ describe('FplClient.getPlayers', () => {
     expect(raya.expectedGoals).toBe(0);
     expect(raya.expectedGoals).not.toBeNull();
   });
+
+  it('returns null rather than 0 when minutes/goals/assists are absent from the payload', async () => {
+    // Mirrors the expected_goals regression test above: `?? 0` on these three
+    // fields would turn "the provider didn't send this field" into an
+    // authoritative "this player has 0 minutes / goals / assists" — exactly
+    // the fabrication the product must never commit.
+    const players = await clientFor({
+      elements: [
+        { id: 901, first_name: 'No', second_name: 'Stats', web_name: 'NoStats', team: 1, element_type: 2 },
+      ],
+      teams: [], events: [],
+    }).getPlayers();
+    const p = players.find((pl) => pl.fplId === 901)!;
+    expect(p).toBeDefined();
+    expect(p.minutes).toBeNull();
+    expect(p.goals).toBeNull();
+    expect(p.assists).toBeNull();
+  });
+
+  it('returns a real 0 (not null) when minutes/goals/assists are present and zero', async () => {
+    // The other half of the same regression: a real, reported zero must
+    // survive as 0, not be swallowed into null by an overly broad fix.
+    const players = await clientFor({
+      elements: [
+        {
+          id: 902, first_name: 'Zero', second_name: 'Stats', web_name: 'ZeroStats',
+          team: 1, element_type: 2, minutes: 0, goals_scored: 0, assists: 0,
+        },
+      ],
+      teams: [], events: [],
+    }).getPlayers();
+    const p = players.find((pl) => pl.fplId === 902)!;
+    expect(p).toBeDefined();
+    expect(p.minutes).toBe(0);
+    expect(p.goals).toBe(0);
+    expect(p.assists).toBe(0);
+  });
+
+  it('skips elements whose element_type is not a known playing position (e.g. a manager, element_type 5) instead of storing them with a guessed position', async () => {
+    // FPL's bootstrap-static adds element_type 5 for fantasy managers in
+    // seasons where manager scoring exists. Storing that row as a player
+    // with position 'Unknown' would fabricate data; the correct behaviour
+    // is to not create a player row for it at all.
+    const players = await clientFor({
+      elements: [
+        { id: 903, first_name: 'Real', second_name: 'Player', web_name: 'RP', team: 1, element_type: 3 },
+        { id: 904, first_name: 'Some', second_name: 'Manager', web_name: 'SM', team: 1, element_type: 5 },
+      ],
+      teams: [], events: [],
+    }).getPlayers();
+    expect(players.some((p) => p.fplId === 903)).toBe(true);
+    expect(players.some((p) => p.fplId === 904)).toBe(false);
+    expect(players).toHaveLength(1);
+  });
+});
+
+describe('FplClient.getBootstrap', () => {
+  it('returns the 20 Premier League clubs alongside the players, from a single fetch', async () => {
+    const { players, teams } = await clientFor(bootstrap).getBootstrap();
+    expect(teams).toHaveLength(20);
+    const arsenal = teams.find((t) => t.name === 'Arsenal')!;
+    expect(arsenal).toBeDefined();
+    expect(arsenal.fplId).toBe(1);
+    expect(arsenal.shortName).toBe('ARS');
+    expect(players.length).toBeGreaterThan(400);
+  });
 });

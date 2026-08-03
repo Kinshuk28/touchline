@@ -147,6 +147,47 @@ d('repositories against a real Supabase project', () => {
     expect(errorAfter).toBeNull();
     expect(countAfter).toBe(0);
   });
+
+  // `published_at` is `not null` until supabase/migrations/0004_nullable_news_
+  // published_at.sql is applied by hand (see that file). This test doesn't
+  // assume which state the live database is in -- it asserts the one thing
+  // that must be true either way: upsertNewsItems must never throw for a null
+  // published_at, and every *other* item in the same batch must still land.
+  // What happens to the null-dated item itself is allowed to differ by state
+  // (stored as null once the migration is applied; skipped with a logged
+  // warning until then) -- both are checked for and both are correct.
+  it('tolerates a null published_at across both migration states, and never drops the rest of the batch', async () => {
+    const db = serviceClient();
+    const undatedHash = 'zz-test-null-date';
+    const datedHash = 'zz-test-null-date-sibling';
+
+    const batch = [
+      {
+        source: 'test-rss', title: 'Undated story', summary: null,
+        url: 'https://example.com/undated', imageUrl: null,
+        publishedAt: null, categories: [], contentHash: undatedHash,
+      },
+      {
+        source: 'test-rss', title: 'Dated sibling in the same batch', summary: null,
+        url: 'https://example.com/dated-sibling', imageUrl: null,
+        publishedAt: new Date().toISOString(), categories: [], contentHash: datedHash,
+      },
+    ];
+
+    await expect(upsertNewsItems(batch)).resolves.not.toThrow();
+
+    // The dated item must survive regardless of migration state -- this is
+    // the "don't crash the whole batch" guarantee, the actual point of the test.
+    const { data: dated } = await db.from('news_items').select('published_at').eq('content_hash', datedHash);
+    expect(dated).toHaveLength(1);
+
+    const { data: undated } = await db.from('news_items').select('published_at').eq('content_hash', undatedHash);
+    if (undated && undated.length > 0) {
+      expect(undated[0]!.published_at).toBeNull(); // migration applied: null stored honestly
+    } // else: migration not applied yet -- the undated item was skipped, not crashed on
+
+    await db.from('news_items').delete().in('content_hash', [undatedHash, datedHash]);
+  });
 });
 
 // PostgREST caps a plain `select` at 1,000 rows by default. `getPlayerIdByFdId`

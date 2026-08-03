@@ -36,3 +36,29 @@ export async function getTeamIdMap(): Promise<Map<number, number>> {
   );
   return new Map(rows.map((r) => [r.fd_id, r.id]));
 }
+
+export interface ClubIdentityRow {
+  id: number;
+  name: string;
+  short_name: string | null;
+  tla: string | null;
+}
+
+/**
+ * Every club currently in a given league, with the identity fields
+ * (`name`, `short_name`, `tla`) `matchFplTeamsToClubs`
+ * (`lib/ingest/playerIdentity.ts`) needs to resolve an FPL team id onto our
+ * internal `teams.id` — see that module for why all three fields matter.
+ */
+export async function getTeamsByLeagueId(leagueId: number): Promise<ClubIdentityRow[]> {
+  return fetchAllRows<ClubIdentityRow>(
+    'getTeamsByLeagueId',
+    (from, to) =>
+      serviceClient()
+        .from('teams')
+        .select('id, name, short_name, tla')
+        .eq('league_id', leagueId)
+        .order('id', { ascending: true })
+        .range(from, to),
+  );
+}
