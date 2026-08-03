@@ -1467,18 +1467,27 @@ Expected: a count above 20.
 
 - [ ] **Step 2: Write the failing test**
 
-Create `tests/providers/rss.test.ts`:
+Create `tests/providers/rss.test.ts`. (Below is the test file as it stands after the
+"fault isolation and classifier precision round 2" fix — see
+`.superpowers/sdd/task-6-report.md` for the history of what changed and why: the
+`RssClient.fetchAll` describe block now drives the real `fetchAll()` — including a
+dedupe-collision-winner test and a one-feed-fails-doesn't-sink-the-others test — instead
+of re-implementing its merge loop inline, and `classify` gained coverage for the
+`'knock'`/`'strain'`/`'contract'` false positives and past-tense transfer verbs.)
 
 ```ts
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { RssClient, classify, contentHash } from '@/lib/providers/rss';
+import { RssClient, classify, contentHash, FEEDS } from '@/lib/providers/rss';
 
 const xml = readFileSync('tests/fixtures/rss-bbc.xml', 'utf8');
 
+function fetchImplFor(body: string): typeof fetch {
+  return (async () => new Response(body, { status: 200 })) as unknown as typeof fetch;
+}
+
 function clientFor(body: string) {
-  const fetchImpl = (async () => new Response(body, { status: 200 })) as unknown as typeof fetch;
-  return new RssClient({ fetchImpl });
+  return new RssClient({ fetchImpl: fetchImplFor(body) });
 }
 
 describe('classify', () => {
@@ -1516,6 +1525,39 @@ describe('classify', () => {
   it('does not let the short "acl" token match as a substring of unrelated words', () => {
     expect(classify('A spectacle at the Bernabeu')).toEqual([]);
     expect(classify('Miracle comeback stuns the champions')).toEqual([]);
+  });
+  it('does not tag the cup idiom "knock ... out of" as an injury (bare "knock" dropped)', () => {
+    // "X knock Y out of the cup" is extremely common match-report language for
+    // eliminating an opponent — nothing to do with an injury. Bare "knock" used to
+    // match here even after the word-boundary fix, because the fix only ever
+    // defended against the compound "knockout", not this separated form. The bare
+    // token is gone; "picked up a knock" (a genuine injury phrase) remains.
+    expect(classify('Arsenal knock Chelsea out of FA Cup')).toEqual([]);
+    expect(classify('Manchester City knock Newcastle out of Carabao Cup')).toEqual([]);
+  });
+  it('does not tag managerial "under strain" as an injury (bare "strain" dropped)', () => {
+    // "Klopp under strain after a run of poor results" is about job pressure, not a
+    // muscle injury. Bare "strain" is gone; "muscle strain" / "hamstring strain"
+    // remain as unambiguous injury phrases.
+    expect(classify('Klopp under strain after run of poor results')).toEqual([]);
+  });
+  it('does not tag commercial/sponsorship contract stories as a transfer (bare "contract" dropped)', () => {
+    // "Contract" is everywhere in football business writing that isn't a player
+    // transfer — sponsorship, broadcast rights, image rights. Bare "contract" is
+    // gone; "new contract" / "contract extension" / "signs contract" /
+    // "contract talks" remain as unambiguous transfer-context phrases.
+    expect(classify('Sponsor contract dispute overshadows kit launch')).toEqual([]);
+  });
+  it('tags past-tense transfer verbs ("signed for", "loaned to")', () => {
+    // Past tense is at least as common as present tense in transfer headlines.
+    // Bare "signed"/"joined" are deliberately not added (see the comment above
+    // INJURY_WORDS in rss.ts) because they collide with non-transfer prose
+    // ("legend's signed shirt", "players joined in celebration").
+    expect(classify('Rice signed for Arsenal in club-record deal')).toContain('transfer');
+    expect(classify('Striker loaned to Championship side')).toContain('transfer');
+  });
+  it('tags "signs new contract" via the specific contract phrase', () => {
+    expect(classify('Haaland signs new contract at City')).toContain('transfer');
   });
   it('tags realistic transfer headlines', () => {
     expect(classify('Arsenal complete signing of midfielder')).toContain('transfer');
@@ -1572,7 +1614,165 @@ describe('RssClient.fetchFeed', () => {
     const items = await new RssClient({ fetchImpl }).fetchFeed('X', 'https://example.test/rss');
     expect(items).toEqual([]);
   });
+
+  it('returns an empty array instead of throwing on unparseable XML', async () => {
+    const fetchImpl = (async () => new Response('not xml at all', { status: 200 })) as unknown as typeof fetch;
+    const items = await new RssClient({ fetchImpl }).fetchFeed('X', 'https://example.test/rss');
+    expect(items).toEqual([]);
+  });
+
+  it('returns an empty array instead of throwing when fetchImpl itself rejects (network/DNS failure)', async () => {
+    // The third failure mode alongside non-2xx and unparseable XML: the fetch call
+    // never even completes.
+    const fetchImpl = (async () => {
+      throw new Error('simulated DNS failure');
+    }) as unknown as typeof fetch;
+    const items = await new RssClient({ fetchImpl }).fetchFeed('X', 'https://example.test/rss');
+    expect(items).toEqual([]);
+  });
+
+  it('does not swap title and summary: title matches the <title>, summary matches the description text', async () => {
+    const items = await clientFor(xml).fetchFeed('BBC Sport', 'https://example.test/rss');
+    const i = items[0]!;
+    expect(i.title).toBe('FA set to withdraw support for Fifa president Infantino');
+    expect(i.summary).toContain('Football Association');
+    expect(i.title).not.toBe(i.summary);
+  });
+
+  it('resolves imageUrl to the media:thumbnail CDN url for a real fixture item', async () => {
+    const items = await clientFor(xml).fetchFeed('BBC Sport', 'https://example.test/rss');
+    // Pinned against the known first item in tests/fixtures/rss-bbc.xml — all 70
+    // items in that fixture carry a media:thumbnail, and this was previously
+    // completely uncovered.
+    expect(items[0]!.imageUrl).toBe(
+      'https://ichef.bbci.co.uk/ace/standard/240/cpsprodpb/d0fe/live/77f3d980-8d91-11f1-800e-433295bded5e.jpg',
+    );
+  });
+
+  it('yields a null imageUrl when an item has neither media:thumbnail nor enclosure', async () => {
+    const body = feedXml([{ title: 'No image here', link: 'https://x.test/1' }]);
+    const items = await new RssClient({ fetchImpl: fetchImplFor(body) }).fetchFeed('X', 'https://example.test/rss');
+    expect(items).toHaveLength(1);
+    expect(items[0]!.imageUrl).toBeNull();
+  });
+
+  it('does not throw when an item carries an unparseable pubDate, and falls back to a valid timestamp', async () => {
+    // Proves finding 1's per-item fix: a malformed date must not kill its own
+    // feed's other items. Before the fix, `new Date('garbage-date').toISOString()`
+    // threw an uncaught RangeError here, and fetchFeed's promise rejected instead
+    // of resolving to [] or to the parsed items.
+    const body = feedXml([
+      { title: 'Healthy item before the bad one', link: 'https://x.test/1' },
+      { title: 'Item with an unparseable pubDate', link: 'https://x.test/2', pubDate: 'garbage-date' },
+      { title: 'Healthy item after the bad one', link: 'https://x.test/3' },
+    ]);
+    const items = await new RssClient({ fetchImpl: fetchImplFor(body) }).fetchFeed('X', 'https://example.test/rss');
+    expect(items).toHaveLength(3);
+    const titles = items.map((i) => i.title);
+    expect(titles).toContain('Healthy item before the bad one');
+    expect(titles).toContain('Item with an unparseable pubDate');
+    expect(titles).toContain('Healthy item after the bad one');
+    const bad = items.find((i) => i.title === 'Item with an unparseable pubDate')!;
+    expect(bad.publishedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+  });
 });
+
+// Branches a fetchImpl over the three real FEEDS URLs so RssClient.fetchAll() itself
+// (not a hand-rolled re-implementation of its dedupe loop) is what's under test.
+function fetchImplForFeeds(bodies: { bbc?: string; guardian?: string; sky?: string }): typeof fetch {
+  return (async (url: string | URL | Request) => {
+    const u = String(url instanceof Request ? url.url : url);
+    if (u === FEEDS[0]!.url) {
+      if (bodies.bbc === undefined) throw new Error('simulated failure for BBC Sport');
+      return new Response(bodies.bbc, { status: 200 });
+    }
+    if (u === FEEDS[1]!.url) {
+      if (bodies.guardian === undefined) throw new Error('simulated failure for The Guardian');
+      return new Response(bodies.guardian, { status: 200 });
+    }
+    if (u === FEEDS[2]!.url) {
+      if (bodies.sky === undefined) throw new Error('simulated failure for Sky Sports');
+      return new Response(bodies.sky, { status: 200 });
+    }
+    throw new Error(`unexpected feed url in test: ${u}`);
+  }) as unknown as typeof fetch;
+}
+
+describe('RssClient.fetchAll', () => {
+  it('collapses the same story syndicated across two of the three real feeds into a single item, keeping the first-listed feed\'s copy', async () => {
+    const shared = 'Same Headline Across Feeds';
+    const bbcBody = feedXml([{ title: shared, link: 'https://bbc.test/story' }]);
+    const guardianBody = feedXml([{ title: 'Guardian-only headline', link: 'https://guardian.test/only' }]);
+    // Sky Sports carries the same story as BBC Sport, syndicated with different
+    // casing and a different URL — the real-world shape of a wire-copy duplicate.
+    const skyBody = feedXml([{ title: shared.toUpperCase(), link: 'https://sky.test/story' }]);
+
+    const client = new RssClient({
+      fetchImpl: fetchImplForFeeds({ bbc: bbcBody, guardian: guardianBody, sky: skyBody }),
+    });
+    const items = await client.fetchAll();
+
+    const matches = items.filter((i) => i.contentHash === contentHash(shared));
+    expect(matches).toHaveLength(1); // collapsed, not duplicated
+    // Pin which copy won the collision: FEEDS[0] is BBC Sport, and batches.flat()
+    // preserves FEEDS order, so the first-seen (BBC Sport's) copy is kept.
+    expect(matches[0]!.source).toBe('BBC Sport');
+    expect(matches[0]!.url).toBe('https://bbc.test/story');
+    // The non-duplicate story from the other feed still comes through untouched.
+    expect(items.some((i) => i.title === 'Guardian-only headline')).toBe(true);
+    expect(items).toHaveLength(2);
+  });
+
+  it('still returns the other two feeds\' items when one feed has an item with an unparseable pubDate', async () => {
+    // Proves finding 1's fetchAll-level fix: before the fix, an uncaught RangeError
+    // thrown while formatting one item's date propagated out of fetchFeed(), and
+    // Promise.all rejected the whole fetchAll() call — discarding the two healthy
+    // feeds along with it. See the "old behaviour" note in the task report for
+    // confirmation this reproduces against the pre-fix code.
+    const bbcBody = feedXml([{ title: 'Healthy BBC story', link: 'https://bbc.test/1' }]);
+    const guardianBody = feedXml([{ title: 'Healthy Guardian story', link: 'https://guardian.test/1' }]);
+    const skyBody = feedXml([
+      { title: 'Sky story with a bad date', link: 'https://sky.test/1', pubDate: 'garbage-date' },
+    ]);
+
+    const client = new RssClient({
+      fetchImpl: fetchImplForFeeds({ bbc: bbcBody, guardian: guardianBody, sky: skyBody }),
+    });
+    const items = await client.fetchAll();
+
+    const titles = items.map((i) => i.title);
+    expect(titles).toContain('Healthy BBC story');
+    expect(titles).toContain('Healthy Guardian story');
+    // The malformed-date item isn't dropped either — it's kept with a fallback
+    // timestamp instead of taking its feed (or the whole call) down.
+    expect(titles).toContain('Sky story with a bad date');
+    expect(items).toHaveLength(3);
+  });
+
+  it('still returns the other two feeds\' items when one feed rejects outright (network/DNS failure)', async () => {
+    const bbcBody = feedXml([{ title: 'Healthy BBC story', link: 'https://bbc.test/1' }]);
+    const skyBody = feedXml([{ title: 'Healthy Sky story', link: 'https://sky.test/1' }]);
+
+    // bodies.guardian left undefined -> fetchImplForFeeds throws for that URL.
+    const client = new RssClient({ fetchImpl: fetchImplForFeeds({ bbc: bbcBody, sky: skyBody }) });
+    const items = await client.fetchAll();
+
+    const titles = items.map((i) => i.title);
+    expect(titles).toContain('Healthy BBC story');
+    expect(titles).toContain('Healthy Sky story');
+    expect(items).toHaveLength(2);
+  });
+});
+
+function feedXml(items: Array<{ title: string; link: string; pubDate?: string }>): string {
+  const itemsXml = items
+    .map(
+      (it) =>
+        `<item><title><![CDATA[${it.title}]]></title><link>${it.link}</link><description><![CDATA[summary]]></description><pubDate>${it.pubDate ?? 'Mon, 03 Aug 2026 07:49:33 GMT'}</pubDate></item>`,
+    )
+    .join('');
+  return `<?xml version="1.0" encoding="UTF-8"?><rss version="2.0"><channel><title>Test Feed</title>${itemsXml}</channel></rss>`;
+}
 ```
 
 - [ ] **Step 3: Run it and confirm it fails**
@@ -1581,6 +1781,18 @@ Run: `npm test -- tests/providers/rss.test.ts`
 Expected: FAIL — `Cannot find module '@/lib/providers/rss'`
 
 - [ ] **Step 4: Implement `lib/providers/rss.ts`**
+
+(Below is the implementation as it stands after the "fault isolation and classifier
+precision round 2" fix. Two changes from the first-draft version matter most: (1)
+`fetchAll` uses `Promise.allSettled`, not `Promise.all`, and each item is built inside
+its own `try/catch` with a `safePublishedAt()` helper that can never throw — together
+these guarantee a feed being unreachable, or carrying one malformed date, never takes
+down a run that's also reading two healthy feeds; (2) `TRANSFER_WORDS`/`INJURY_WORDS`
+dropped the bare tokens `'contract'`, `'knock'`, and `'strain'` in favour of specific
+phrases, and gained past-tense transfer phrases `'signed for'` / `'loaned to'`, because
+each bare token had a common non-football-transfer/non-injury sense that was firing as
+a false positive. See `.superpowers/sdd/task-6-report.md` for the full before/after and
+the false-positive headlines that drove each change.)
 
 ```ts
 import Parser from 'rss-parser';
@@ -1606,33 +1818,81 @@ export const FEEDS: Array<{ source: string; url: string }> = [
 // "injuries" no longer matches through its singular root ("transfer"/"injury") — in
 // practice those headlines still carry other signal (another keyword, or the word
 // elsewhere in the title), so the small recall loss is worth the precision gained.
+//
+// Beyond that word-boundary trap, some tokens are ambiguous even as *whole words* —
+// they have a common non-football-news sense as well as the football sense:
+//   - bare "knock" is also standard match-report idiom for eliminating an opponent
+//     ("Arsenal knock Chelsea out of the FA Cup"), nothing to do with an injury.
+//   - bare "strain" is also standard for managerial/off-pitch pressure ("Klopp under
+//     strain after a run of poor results"), nothing to do with a muscle injury.
+//   - bare "contract" is everywhere in football *business* writing that isn't a player
+//     transfer at all — sponsorship deals, broadcast-rights deals, image-rights deals
+//     ("Sponsor contract dispute overshadows kit launch").
+// Word boundaries can't fix these, because the word itself is the false positive, not
+// just a substring of it. So these three are dropped as bare tokens entirely and only
+// kept as specific multi-word phrases that disambiguate the real signal.
 const TRANSFER_WORDS = [
-  'transfer', 'signing', 'signs for', 'signs with', 'set to join', 'joins',
-  'move to', 'move for', 'deal for', 'bid for', 'agree deal', 'agrees deal',
-  'agreed deal', 'medical', 'loan', 'release clause', 'transfer fee',
-  'record fee', 'swap deal', 'contract', 'complete signing', 'complete move',
+  'transfer', 'signing', 'signs for', 'signs with', 'signed for', 'set to join',
+  'joins', 'loaned to', 'move to', 'move for', 'deal for', 'bid for',
+  'agree deal', 'agrees deal', 'agreed deal', 'medical', 'loan',
+  'release clause', 'transfer fee', 'record fee', 'swap deal',
+  'complete signing', 'complete move', 'new contract', 'contract extension',
+  'signs contract', 'contract talks',
 ];
 const INJURY_WORDS = [
   'injury', 'injured', 'ruled out', 'sidelined', 'hamstring', 'acl',
-  'cruciate', 'surgery', 'operation', 'strain', 'knock', 'out until',
-  'doubtful', 'fitness doubt',
+  'cruciate', 'surgery', 'operation', 'out until', 'doubtful',
+  'fitness doubt', 'muscle strain', 'hamstring strain', 'picked up a knock',
 ];
+// Bare "signed" and bare "joined" were deliberately left out even though they're
+// common past-tense transfer verbs: "signed" collides with memorabilia/autograph
+// stories ("legend's signed shirt auctioned for charity") and "joined" collides with
+// ordinary match-report prose ("players joined in celebration", "joined by his
+// teammates"). "signed for" and "loaned to" above capture the same real signal
+// (see the required-regression headlines) without those collisions.
 
 function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-function matchesKeyword(t: string, term: string): boolean {
-  if (term.includes(' ')) return t.includes(term);
-  return new RegExp(`\\b${escapeRegExp(term)}\\b`).test(t);
+// Precompiled once at module load rather than per matchesKeyword() call: single-word
+// terms need a `\bword\b` RegExp, multi-word phrases are checked as plain substrings
+// and need no RegExp at all. Building `new RegExp` inside classify()'s hot path (once
+// per keyword, per call) was wasted work since the word lists never change at runtime.
+function compileMatchers(words: readonly string[]): Array<(t: string) => boolean> {
+  return words.map((term) => {
+    if (term.includes(' ')) return (t: string) => t.includes(term);
+    const re = new RegExp(`\\b${escapeRegExp(term)}\\b`);
+    return (t: string) => re.test(t);
+  });
 }
+
+const TRANSFER_MATCHERS = compileMatchers(TRANSFER_WORDS);
+const INJURY_MATCHERS = compileMatchers(INJURY_WORDS);
 
 export function classify(title: string): string[] {
   const t = title.toLowerCase();
   const out: string[] = [];
-  if (TRANSFER_WORDS.some((w) => matchesKeyword(t, w))) out.push('transfer');
-  if (INJURY_WORDS.some((w) => matchesKeyword(t, w))) out.push('injury');
+  if (TRANSFER_MATCHERS.some((m) => m(t))) out.push('transfer');
+  if (INJURY_MATCHERS.some((m) => m(t))) out.push('injury');
   return out;
+}
+
+// A feed can carry a pubDate/isoDate that `new Date()` parses into an Invalid Date
+// (e.g. a malformed or non-standard string). Calling `.toISOString()` on an Invalid
+// Date throws RangeError — uncaught, that would previously blow up this item's whole
+// feed (and, via Promise.all in fetchAll, the other healthy feeds too). We choose to
+// fall back to "now" rather than skip the item, matching the existing intent of the
+// `published ? ... : new Date().toISOString()` fallback already used when no date is
+// present at all: a wrong-but-recent timestamp is more useful downstream than losing
+// the story entirely, and "now" is a safe, honest default for "we don't know when
+// this was published."
+function safePublishedAt(published: string | undefined): string {
+  if (published) {
+    const d = new Date(published);
+    if (!Number.isNaN(d.getTime())) return d.toISOString();
+  }
+  return new Date().toISOString();
 }
 
 export function contentHash(title: string): string {
@@ -1679,26 +1939,42 @@ export class RssClient {
 
     const items: NewsItem[] = [];
     for (const item of feed.items ?? []) {
-      const title = item.title?.trim();
-      const link = item.link?.trim();
-      if (!title || !link) continue;
-      const published = item.isoDate ?? item.pubDate;
-      items.push({
-        source,
-        title,
-        summary: item.contentSnippet?.trim() ?? null,
-        url: link,
-        imageUrl: extractImage(item),
-        publishedAt: published ? new Date(published).toISOString() : new Date().toISOString(),
-        categories: classify(title),
-        contentHash: contentHash(title),
-      });
+      // Defense in depth: a malformed item (bad date, unexpected field shape, or
+      // anything else unanticipated) must not take down the rest of this feed's
+      // items. Skip just this one and keep going. safePublishedAt() below already
+      // guarantees the date itself can't throw, but this guard covers whatever we
+      // haven't thought of too.
+      try {
+        const title = item.title?.trim();
+        const link = item.link?.trim();
+        if (!title || !link) continue;
+        const published = item.isoDate ?? item.pubDate;
+        items.push({
+          source,
+          title,
+          summary: item.contentSnippet?.trim() ?? null,
+          url: link,
+          imageUrl: extractImage(item),
+          publishedAt: safePublishedAt(published),
+          categories: classify(title),
+          contentHash: contentHash(title),
+        });
+      } catch {
+        continue;
+      }
     }
     return items;
   }
 
   async fetchAll(): Promise<NewsItem[]> {
-    const batches = await Promise.all(FEEDS.map((f) => this.fetchFeed(f.source, f.url)));
+    // Promise.allSettled, not Promise.all: a feed being unreachable (or any other
+    // per-feed failure) must never throw, and one dead feed must not take down a run
+    // that is also reading two healthy ones. fetchFeed() already catches its own
+    // fetch/parse/item errors and resolves to [], so this is defense in depth — but it
+    // is the line that actually enforces "never let one feed's rejection sink the
+    // whole call" against future bugs in fetchFeed.
+    const results = await Promise.allSettled(FEEDS.map((f) => this.fetchFeed(f.source, f.url)));
+    const batches = results.map((r) => (r.status === 'fulfilled' ? r.value : []));
     const seen = new Set<string>();
     const merged: NewsItem[] = [];
     for (const item of batches.flat()) {
@@ -1721,7 +1997,7 @@ function extractImage(item: Record<string, unknown>): string | null {
 - [ ] **Step 5: Run the tests**
 
 Run: `npm test -- tests/providers/rss.test.ts`
-Expected: PASS, 18 tests
+Expected: PASS, 29 tests
 
 - [ ] **Step 6: Commit**
 

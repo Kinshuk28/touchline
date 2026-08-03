@@ -21,33 +21,81 @@ export const FEEDS: Array<{ source: string; url: string }> = [
 // "injuries" no longer matches through its singular root ("transfer"/"injury") — in
 // practice those headlines still carry other signal (another keyword, or the word
 // elsewhere in the title), so the small recall loss is worth the precision gained.
+//
+// Beyond that word-boundary trap, some tokens are ambiguous even as *whole words* —
+// they have a common non-football-news sense as well as the football sense:
+//   - bare "knock" is also standard match-report idiom for eliminating an opponent
+//     ("Arsenal knock Chelsea out of the FA Cup"), nothing to do with an injury.
+//   - bare "strain" is also standard for managerial/off-pitch pressure ("Klopp under
+//     strain after a run of poor results"), nothing to do with a muscle injury.
+//   - bare "contract" is everywhere in football *business* writing that isn't a player
+//     transfer at all — sponsorship deals, broadcast-rights deals, image-rights deals
+//     ("Sponsor contract dispute overshadows kit launch").
+// Word boundaries can't fix these, because the word itself is the false positive, not
+// just a substring of it. So these three are dropped as bare tokens entirely and only
+// kept as specific multi-word phrases that disambiguate the real signal.
 const TRANSFER_WORDS = [
-  'transfer', 'signing', 'signs for', 'signs with', 'set to join', 'joins',
-  'move to', 'move for', 'deal for', 'bid for', 'agree deal', 'agrees deal',
-  'agreed deal', 'medical', 'loan', 'release clause', 'transfer fee',
-  'record fee', 'swap deal', 'contract', 'complete signing', 'complete move',
+  'transfer', 'signing', 'signs for', 'signs with', 'signed for', 'set to join',
+  'joins', 'loaned to', 'move to', 'move for', 'deal for', 'bid for',
+  'agree deal', 'agrees deal', 'agreed deal', 'medical', 'loan',
+  'release clause', 'transfer fee', 'record fee', 'swap deal',
+  'complete signing', 'complete move', 'new contract', 'contract extension',
+  'signs contract', 'contract talks',
 ];
 const INJURY_WORDS = [
   'injury', 'injured', 'ruled out', 'sidelined', 'hamstring', 'acl',
-  'cruciate', 'surgery', 'operation', 'strain', 'knock', 'out until',
-  'doubtful', 'fitness doubt',
+  'cruciate', 'surgery', 'operation', 'out until', 'doubtful',
+  'fitness doubt', 'muscle strain', 'hamstring strain', 'picked up a knock',
 ];
+// Bare "signed" and bare "joined" were deliberately left out even though they're
+// common past-tense transfer verbs: "signed" collides with memorabilia/autograph
+// stories ("legend's signed shirt auctioned for charity") and "joined" collides with
+// ordinary match-report prose ("players joined in celebration", "joined by his
+// teammates"). "signed for" and "loaned to" above capture the same real signal
+// (see the required-regression headlines) without those collisions.
 
 function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-function matchesKeyword(t: string, term: string): boolean {
-  if (term.includes(' ')) return t.includes(term);
-  return new RegExp(`\\b${escapeRegExp(term)}\\b`).test(t);
+// Precompiled once at module load rather than per matchesKeyword() call: single-word
+// terms need a `\bword\b` RegExp, multi-word phrases are checked as plain substrings
+// and need no RegExp at all. Building `new RegExp` inside classify()'s hot path (once
+// per keyword, per call) was wasted work since the word lists never change at runtime.
+function compileMatchers(words: readonly string[]): Array<(t: string) => boolean> {
+  return words.map((term) => {
+    if (term.includes(' ')) return (t: string) => t.includes(term);
+    const re = new RegExp(`\\b${escapeRegExp(term)}\\b`);
+    return (t: string) => re.test(t);
+  });
 }
+
+const TRANSFER_MATCHERS = compileMatchers(TRANSFER_WORDS);
+const INJURY_MATCHERS = compileMatchers(INJURY_WORDS);
 
 export function classify(title: string): string[] {
   const t = title.toLowerCase();
   const out: string[] = [];
-  if (TRANSFER_WORDS.some((w) => matchesKeyword(t, w))) out.push('transfer');
-  if (INJURY_WORDS.some((w) => matchesKeyword(t, w))) out.push('injury');
+  if (TRANSFER_MATCHERS.some((m) => m(t))) out.push('transfer');
+  if (INJURY_MATCHERS.some((m) => m(t))) out.push('injury');
   return out;
+}
+
+// A feed can carry a pubDate/isoDate that `new Date()` parses into an Invalid Date
+// (e.g. a malformed or non-standard string). Calling `.toISOString()` on an Invalid
+// Date throws RangeError — uncaught, that would previously blow up this item's whole
+// feed (and, via Promise.all in fetchAll, the other healthy feeds too). We choose to
+// fall back to "now" rather than skip the item, matching the existing intent of the
+// `published ? ... : new Date().toISOString()` fallback already used when no date is
+// present at all: a wrong-but-recent timestamp is more useful downstream than losing
+// the story entirely, and "now" is a safe, honest default for "we don't know when
+// this was published."
+function safePublishedAt(published: string | undefined): string {
+  if (published) {
+    const d = new Date(published);
+    if (!Number.isNaN(d.getTime())) return d.toISOString();
+  }
+  return new Date().toISOString();
 }
 
 export function contentHash(title: string): string {
@@ -94,26 +142,42 @@ export class RssClient {
 
     const items: NewsItem[] = [];
     for (const item of feed.items ?? []) {
-      const title = item.title?.trim();
-      const link = item.link?.trim();
-      if (!title || !link) continue;
-      const published = item.isoDate ?? item.pubDate;
-      items.push({
-        source,
-        title,
-        summary: item.contentSnippet?.trim() ?? null,
-        url: link,
-        imageUrl: extractImage(item),
-        publishedAt: published ? new Date(published).toISOString() : new Date().toISOString(),
-        categories: classify(title),
-        contentHash: contentHash(title),
-      });
+      // Defense in depth: a malformed item (bad date, unexpected field shape, or
+      // anything else unanticipated) must not take down the rest of this feed's
+      // items. Skip just this one and keep going. safePublishedAt() below already
+      // guarantees the date itself can't throw, but this guard covers whatever we
+      // haven't thought of too.
+      try {
+        const title = item.title?.trim();
+        const link = item.link?.trim();
+        if (!title || !link) continue;
+        const published = item.isoDate ?? item.pubDate;
+        items.push({
+          source,
+          title,
+          summary: item.contentSnippet?.trim() ?? null,
+          url: link,
+          imageUrl: extractImage(item),
+          publishedAt: safePublishedAt(published),
+          categories: classify(title),
+          contentHash: contentHash(title),
+        });
+      } catch {
+        continue;
+      }
     }
     return items;
   }
 
   async fetchAll(): Promise<NewsItem[]> {
-    const batches = await Promise.all(FEEDS.map((f) => this.fetchFeed(f.source, f.url)));
+    // Promise.allSettled, not Promise.all: a feed being unreachable (or any other
+    // per-feed failure) must never throw, and one dead feed must not take down a run
+    // that is also reading two healthy ones. fetchFeed() already catches its own
+    // fetch/parse/item errors and resolves to [], so this is defense in depth — but it
+    // is the line that actually enforces "never let one feed's rejection sink the
+    // whole call" against future bugs in fetchFeed.
+    const results = await Promise.allSettled(FEEDS.map((f) => this.fetchFeed(f.source, f.url)));
+    const batches = results.map((r) => (r.status === 'fulfilled' ? r.value : []));
     const seen = new Set<string>();
     const merged: NewsItem[] = [];
     for (const item of batches.flat()) {
