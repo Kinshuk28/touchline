@@ -3,53 +3,88 @@
 **Date:** 2026-08-03
 **Scope:** Phase A (data spine) and Phase B (public site)
 **Out of scope:** Phase C (accounts, comments), Phase D (fantasy game)
+**Status:** all data sources empirically verified against live endpoints on 2026-08-03
 
 ---
 
 ## 1. Purpose
 
-A single place to follow the top five European leagues — Premier League, La Liga, Serie A, Bundesliga, Ligue 1 — covering live scores, fixtures, league tables, squads, player statistics, injuries, transfers, aggregated news, and a fixture calendar.
+A single place to follow the top five European leagues — Premier League, La Liga, Serie A, Bundesliga, Ligue 1 — covering scores, fixtures, league tables, squads, player statistics, aggregated news, transfers, injuries, and a fixture calendar.
 
-The product is judged on two things: whether the data is current, and whether pages appear instantly. Every decision below serves one of those.
+The product is judged on two things: whether the data is current, and whether pages appear instantly.
 
 ### Phase decomposition
 
-The original brief spans four independent subsystems. They ship in order, each with its own spec:
-
 | Phase | Contents | Status |
 |---|---|---|
-| **A** | Ingestion pipeline, budget control, canonical store | This spec |
+| **A** | Ingestion pipeline, rate limiting, canonical store | This spec |
 | **B** | Public site: landing, scores, calendar, leagues, teams, players, news, transfers, search | This spec |
 | **C** | Accounts, comments, reactions, followed teams | Later spec |
 | **D** | Fantasy game | Later spec |
 
-A + B together are a complete, shippable product. C and D depend on both.
+**Hard project constraint: no paid services, ever.** Every component sits inside a permanent free tier. Where a limit binds, the product accepts the limit rather than the invoice.
 
 ---
 
-## 2. Constraints that shape the design
+## 2. Data sources — verified, not assumed
 
-These are facts established during design, not preferences. They are the reason the architecture looks the way it does.
+Every claim below was tested against the live API on 2026-08-03. This section supersedes all vendor marketing and pricing-page claims, several of which proved wrong.
 
-**football-data.org free tier** provides fixtures, schedules and league tables only, all delayed. It does **not** include live scores, lineups, goal scorers, or squad data — those are paid (€12–29/mo).
+### 2.1 What was rejected, and why
 
-**API-Football free tier** provides everything (live scores, injuries, transfers, player statistics, images) but is capped at **100 requests per day, total**.
+**API-Football (api-sports.io) — rejected as a live source.** The free plan is documented as 100 requests/day, which we budgeted for in detail. The real blocker is different and fatal: the free plan **only serves seasons 2022–2024**. A request for the 2026 season returns:
 
-**Consequence:** the site cannot call a provider in response to a user action. At any real traffic level the daily cap would be exhausted in seconds. All provider traffic must be scheduled, server-side, and budget-controlled; users read only from our own database.
+> `"Free plans do not have access to this season, try from 2022 to 2024."`
 
-**Netlify's free tier is credit-based:** 300 credits/month, with production deploys at 15 credits each (~20 deploys/month) and a 10-second function timeout. Ingestion therefore does **not** run on Netlify Functions — the timeout is too tight for batch jobs and deploys are the scarce resource. Netlify hosts and serves only.
+It therefore cannot supply current-season live scores, injuries, transfers, or player statistics. The adapter is still written and tested (against recorded 2023 responses) so that a future paid key activates it by configuration alone — but nothing in phases A or B depends on it.
 
-**Ingestion runs on GitHub Actions:** unlimited minutes on public repositories, no execution timeout, cron intervals down to 5 minutes. Workflows write directly to Supabase and consume no Netlify credits.
+**TheSportsDB free key — rejected as a primary source.** The keyless tier is throttled to a degree that makes it unusable: a Premier League table request returned **5 rows instead of 20**, and upcoming fixtures returned **1 event**. Retained only as an optional source of event thumbnail imagery.
 
-**Hard project constraint: no paid services, ever.** Every component must sit inside a permanent free tier. Where a limit binds, the product accepts the limit rather than the invoice.
+**ESPN RSS — rejected.** Its football feed returned **1 item**. Not a usable news source.
 
-**Decision:** build entirely on free tiers, with the ingestion layer written as swappable provider adapters and all poll cadences in configuration. Upgrading to a paid key later is an environment variable plus a number — not a rewrite. On the free tier, live scores update every ~10 minutes; on a paid key the same code polls every 15–30 seconds.
+### 2.2 What was accepted
 
-**News is aggregated, not republished.** RSS sources give headline, snippet, image and link. We store and display headline + 1–2 sentence snippet + source attribution + timestamp, linking out to the publisher. We do not reproduce full article text — it is third-party copyright.
+**football-data.org (free tier) — the backbone.** Far more capable than its own pricing page advertises. Verified working on the free key:
+
+| Capability | Verified result |
+|---|---|
+| Fixtures, all 5 leagues | ✓ 380 PL matches for 2026-27, full season |
+| Results with scores | ✓ 2025-26 returned 380 matches, 380 played, with full-time scores |
+| League tables | ✓ full 20-row standings |
+| **Squads with player bio** | ✓ Arsenal returned 29 players with name, position, date of birth, nationality |
+| **Club crests** | ✓ `crests.football-data.org` |
+| Historical seasons | ✓ 2025-26 complete |
+| Top scorers | ✓ endpoint healthy (returns 0 while the season is unplayed) |
+
+Its pricing page claims squads and scorers are paid-only. **They are not.** This was tested directly.
+
+Rate limit confirmed from live response headers: `x-requests-available-minute: 9`, `X-RequestCounter-Reset: 60` — **10 requests/minute, ≈14,400/day.**
+
+**Fantasy Premier League API (`fantasy.premierleague.com/api/`) — keyless, no auth, no documented limit.** Verified: 20 teams, **564 players**, 38 gameweeks, with per-player `minutes`, `goals_scored`, `assists`, `expected_goals`, `form`, and `photo`. Premier League only. This is the richest free player-statistics source available and it also becomes the natural data source for the phase D fantasy game.
+
+**RSS — news, transfers, injuries.** Verified item counts: BBC Sport **71**, Guardian Football **61**, Sky Sports **20**.
+
+### 2.3 Resulting source map
+
+| Need | Source | Coverage |
+|---|---|---|
+| Fixtures, results, tables, squads, crests | football-data.org | All 5 leagues |
+| Historical (2025-26) | football-data.org | All 5 leagues |
+| Top scorers / assisters | football-data.org | All 5 leagues |
+| Deep per-player statistics + photos | FPL API | **Premier League only** |
+| News, transfers, injuries (as stories) | RSS (BBC, Guardian, Sky) | Global |
+
+### 2.4 Two acknowledged gaps
+
+**In-play live scores.** No free source provides true minute-by-minute in-play data. football-data.org serves scores on a delay of unknown length — unmeasurable today because no league in the free set had a match in progress. Mitigation: poll `/v4/matches` every 60 seconds (1,440 requests/day against a 14,400 ceiling — comfortably affordable) and display whatever freshness the source provides, with a visible "updated N seconds ago" stamp so latency is honest rather than hidden. **Actual latency is to be measured on 2026-08-16, the first matchday, and this section updated with the observed figure.**
+
+**Per-player statistics outside the Premier League.** La Liga, Serie A, Bundesliga and Ligue 1 players get: full bio (name, position, date of birth, nationality), club, and — where they appear in the league's top scorers — goals and assists. They do not get minutes, xG, or shot data, because no free source provides it. Premier League players get the complete set from the FPL API.
+
+This asymmetry is displayed honestly: non-PL player pages show the statistics that exist and state plainly which are unavailable, rather than rendering empty charts or fabricated values. **No statistic is ever estimated, interpolated, or invented.**
 
 ---
 
-## 2a. Season timing and preseason mode
+## 3. Season timing and preseason mode
 
 Verified against football-data.org on 2026-08-03:
 
@@ -61,29 +96,27 @@ Verified against football-data.org on 2026-08-03:
 | Serie A | 2026-08-23 | 2027-05-30 |
 | Bundesliga | 2026-08-28 | 2027-05-22 |
 
-The build begins 13–25 days before kickoff. Every league is at matchday 1 with no results, no table, and no 2026-27 player statistics. The site must therefore be correct and populated **before** any match is played, not merely correct once the season is underway.
-
-**Budget consequence (favourable):** with no matches in progress, the match-window guard suppresses all live polling, freeing the entire 100 requests/day for the player crawl. A full pass (~150 requests) completes in under two days. The crawl is therefore front-loaded during preseason so player data is complete at kickoff.
+The build begins 13–25 days before kickoff. Every league sits at matchday 1 with no results and no table. The site must be correct and populated **before** any match is played.
 
 **Preseason behaviour by surface:**
 
-- **Player pages** — query 2026-27 stats; when a player has no meaningful minutes in the current season, fall back to 2025-26 and label the block explicitly with the season it describes. A player page must never render empty. This fallback is permanent behaviour, not a temporary hack: it also covers new signings and January arrivals mid-season.
-- **League tables** — no 2026-27 table exists until matchday 1 concludes. Show the final 2025-26 table, clearly labelled as last season, alongside a countdown to the league's first fixture.
-- **Landing page** — the live-score strip has a preseason variant: a countdown to the next league to kick off, with the transfer feed promoted into the primary slot. August is the peak transfer window, so this is the richest content available at launch rather than a consolation.
-- **Historical backfill** — 2025-26 final standings, results and player statistics are ingested during preseason. This gives the site real content on day one and gives development real data to build against.
+- **Player pages** — query 2026-27 stats; when a player has no minutes in the current season, fall back to 2025-26 and label the block with the season it describes. A player page must never render empty. This is permanent behaviour, not a temporary hack — it also covers new signings and January arrivals.
+- **League tables** — no 2026-27 table exists until matchday 1 concludes. Show the final 2025-26 table, clearly labelled as last season, alongside a countdown to that league's first fixture.
+- **Landing page** — the live-score strip has a preseason variant: a countdown to the next league to kick off, with the transfer and news feed promoted into the primary slot. August is the peak transfer window, so this is the richest content available at launch rather than a consolation.
+- **Historical backfill** — 2025-26 final standings, all 380 results per league, and top scorers are ingested during preseason. This gives the site real content on day one and gives development real data to build against.
 
-**Testing consequence:** live-score ingestion cannot be validated against real in-play matches before 2026-08-16. Recorded response snapshots are therefore mandatory for the live path, and the match-window guard must be unit-tested against synthetic fixture states covering pre-match, in-play, half-time, finished and postponed.
+**Testing consequence:** the live path cannot be validated against real in-play matches before 2026-08-16. Recorded response snapshots are mandatory for it, and the match-window guard must be unit-tested against synthetic fixture states covering scheduled, in-play, paused, finished and postponed.
 
 ---
 
-## 3. Architecture
+## 4. Architecture
 
 ```
-API-Football · football-data.org · TheSportsDB · RSS feeds
+football-data.org · FPL API · RSS feeds
         │
-        │  Netlify Scheduled Functions (cron)
+        │  GitHub Actions (cron)
         ▼
-   Ingestion workers  ←──►  budget ledger
+   Ingestion workers  ←──►  rate limiter
         │
         ▼
    Supabase Postgres  ── the only source pages read from
@@ -92,166 +125,146 @@ API-Football · football-data.org · TheSportsDB · RSS feeds
    Next.js App Router (server components) ──► Netlify CDN
 ```
 
-**Invariant:** no third-party API call ever occurs on the request path of a page view. This is what makes pages fast and what makes the free tier survive traffic.
+**Invariant:** no third-party API call ever occurs on the request path of a page view. Users read Postgres, always. This is what makes pages fast and what keeps provider load flat regardless of traffic.
 
 ### Stack
 
 - Next.js 15, App Router, TypeScript
 - Tailwind CSS
-- Supabase Postgres (also provides Auth and relational tables that phases C and D require)
+- Supabase Postgres (also provides Auth and relational tables for phases C and D)
 - Netlify — hosting and CDN only
 - GitHub Actions — all scheduled ingestion
 - Vitest (unit/integration), Playwright (E2E)
 
-**Netlify credit discipline:** at 15 credits per production deploy against 300/month, deploys are a scarce resource. Work is verified locally and in CI; production deploys are batched, not made per-commit. Deploy previews are disabled for routine branches.
+**Why ingestion is not on Netlify:** Netlify's free tier is credit-based — 300 credits/month, 15 credits per production deploy (≈20 deploys/month), and a 10-second function timeout. Batch ingestion does not fit that, and deploys are the scarce resource. GitHub Actions gives unlimited minutes on public repositories with no execution timeout.
 
-Supabase's free tier pauses after 7 days idle; our hourly cron keeps it active, so this never triggers.
+**Netlify credit discipline:** work is verified locally and in CI; production deploys are batched, not made per-commit. Deploy previews are disabled for routine branches.
+
+Supabase's free tier pauses after 7 days idle; the hourly cron keeps it active, so this never triggers.
 
 ---
 
-## 4. Ingestion layer (Phase A)
+## 5. Ingestion layer (Phase A)
 
-Four components, each independently testable.
+### 5.1 Provider adapters — `lib/providers/`
 
-### 4.1 Provider adapters — `lib/providers/`
-
-One module per source, each exposing a narrow typed interface and owning its own auth, pagination, and response mapping. Nothing outside this directory knows a provider's response shape.
+One module per source, each behind a narrow typed interface, owning its own auth, pagination and response mapping. Nothing outside this directory sees a provider's raw response shape. Adapters return domain types (`Fixture`, `Standing`, `SquadMember`, …), never provider JSON.
 
 | Module | Source | Provides |
 |---|---|---|
-| `apiFootball.ts` | api-sports.io | live scores, injuries, transfers, player stats, lineups, images |
-| `footballData.ts` | football-data.org | fixtures, schedules, league tables |
-| `theSportsDb.ts` | TheSportsDB | crests, team and player imagery |
-| `rss.ts` | BBC, Sky, Guardian, ESPN, league feeds | news headlines |
+| `footballData.ts` | football-data.org | fixtures, results, standings, squads, crests, scorers |
+| `fpl.ts` | fantasy.premierleague.com | Premier League per-player statistics and photos |
+| `rss.ts` | BBC, Guardian, Sky | news headlines |
+| `apiFootball.ts` | api-sports.io | **dormant** — written and tested against recorded 2023 responses, activated only by a future paid key |
 
-Adapters return domain types (`Fixture`, `PlayerStats`, …), never raw provider JSON.
+### 5.2 Rate limiter — `lib/ingest/rateLimiter.ts`
 
-### 4.2 Budget ledger — `lib/ingest/budget.ts`
+football-data.org permits 10 requests/minute. Every outbound call passes through a token-bucket limiter that reads the live `x-requests-available-minute` response header and self-corrects, rather than relying on a fixed local count that can drift out of sync after retries.
 
-A Postgres table counting requests per provider per UTC day against a configured limit. **Every outbound provider call is routed through it.** It refuses calls that would exceed the cap and records consumption atomically.
+This replaces the daily-quota budget ledger from the earlier draft: with ~14,400 requests/day available against a workload of roughly 1,600, the daily budget is no longer the binding constraint. **Requests-per-minute is.**
 
-This is the single component that turns a 100-request cap from a daily outage into a manageable resource.
+`ingest_budget` is retained purely as an observability record — requests consumed per provider per day, surfaced on `/status`.
 
-Allocation for API-Football (100/day):
+### 5.3 Job scheduling — `lib/ingest/jobs.ts`
 
-| Priority | Job | Cap |
+Jobs are **staleness-driven, not clock-driven**: each asks "what in the database is older than its freshness target?" and works that set. This is what makes them safe under GitHub Actions' best-effort cron, which can fire late or skip.
+
+| Job | Freshness target | Cost |
 |---|---|---|
-| P0 | Live scores | 60 |
-| P1 | Standings, fixtures, injuries | 20 |
-| P2 | Transfers | 5 |
-| P3 | Player crawl | whatever remains |
+| Live/recent matches | 60s during match windows | 1 req |
+| Fixtures & results | 6h | 5 req |
+| Standings | 1h | 5 req |
+| Squads | 7d | 98 req (one per club) |
+| Top scorers | 6h | 5 req |
+| FPL player stats | 6h | 1 req (single bulk endpoint) |
+| News (RSS) | 15min | 3 fetches, unmetered |
 
-football-data.org (10 req/min) and RSS (unlimited) are tracked but effectively unconstrained.
+Total steady-state load is well under 2,000 requests/day against a 14,400 ceiling.
 
-### 4.3 Priority job queue — `lib/ingest/jobs.ts`
+### 5.4 Match-window guard
 
-Each scheduled invocation drains jobs highest-priority-first until the budget is exhausted or the queue empties. Lower-priority work is naturally deferred on busy matchdays and catches up on quiet days.
+The live job first queries the **database** (free) to determine whether any tracked fixture is currently in progress. If none is, it returns immediately without spending a request. Without this, 60-second polling costs 1,440 requests/day year-round; with it, that cost is only incurred while matches are actually being played — which during preseason is never.
 
-The player crawl (P3) is **cursor-based**: it records its position in `ingest_cursor` and resumes there on the next run, so a full pass over ~2,500 players across five leagues (~150 requests) completes over roughly 7–10 days without ever competing with live scores.
+### 5.5 Scheduled workers — `.github/workflows/`
 
-### 4.4 Match-window guard
-
-The live-score cron first queries the **database** (free) to determine whether any tracked fixture is currently in progress. If none is, it returns immediately without spending a request.
-
-Without this guard, polling every 10 minutes costs 144 requests/day — over budget before any other job runs. With it, live polling costs zero on non-matchdays and the full allocation only when matches are actually being played.
-
-### 4.5 Scheduled workers — `.github/workflows/`
-
-Ingestion runs as GitHub Actions cron workflows, not Netlify Functions. Each invokes a Node entrypoint under `scripts/ingest/` that connects to Supabase with the service role key.
+Each workflow invokes a Node entrypoint under `scripts/ingest/` that connects to Supabase with the service role key.
 
 | Workflow | Schedule | Work |
 |---|---|---|
-| `ingest-live.yml` | `*/10 * * * *` | Match-window guard, then `fixtures?live=all` (one request covers every in-play match) |
-| `ingest-core.yml` | `0 * * * *` | Standings, upcoming fixtures, injuries |
-| `ingest-news.yml` | `*/15 * * * *` | RSS ingest, dedupe, classify by league/team |
-| `ingest-transfers.yml` | `0 6 * * *` | Daily transfer sweep |
-| `ingest-players.yml` | `30 */6 * * *` | Player statistics crawl, leftover budget only |
+| `ingest-live.yml` | `*/5 * * * *` | Match-window guard, then in-play match refresh |
+| `ingest-core.yml` | `0 * * * *` | Standings, fixtures, results, top scorers |
+| `ingest-news.yml` | `*/15 * * * *` | RSS ingest, dedupe by content hash, classify by league/team |
+| `ingest-players.yml` | `30 */6 * * *` | FPL player statistics; squad refresh when stale |
+| `keepalive.yml` | `0 3 1 * *` | Monthly commit — prevents Actions disabling schedules after 60 days of repository inactivity |
 
-Each workflow also declares `workflow_dispatch` so any job can be run manually from the Actions tab — the primary debugging affordance for the pipeline.
+Every workflow declares `workflow_dispatch` so any job can be run manually from the Actions tab. That is the primary debugging affordance for the pipeline.
 
-**Two GitHub Actions caveats the design must absorb:**
-- Scheduled workflows are **disabled after 60 days without a repository commit**. A `keepalive.yml` workflow commits a timestamp file monthly to prevent this.
-- Cron triggers are best-effort and may be **delayed under GitHub load**, occasionally by 10+ minutes. Jobs must therefore be idempotent and driven by "what is stale in the database", never by "it is now exactly 15:00".
-
-### 4.6 Player statistics strategy
-
-A rolling crawl covers every player in all five leagues, so every player has a real page. Top scorers and assisters sit in a priority tier refreshed every 2 days. If a visitor opens a player whose record is stale and budget remains, that player is refreshed on the spot.
-
-Crawl duration depends on live-score contention:
-
-| Period | Live polling cost | Budget for crawl | Full pass |
-|---|---|---|---|
-| Preseason (now → 16 Aug) | 0 | ~80/day | **< 2 days** |
-| In-season matchday | 60 | ~15/day | ~10 days |
-| In-season non-matchday | 0 | ~80/day | ~2 days |
-
-The initial full crawl runs during preseason, so player coverage is complete before the first match. In-season, the crawl only maintains freshness rather than building coverage from nothing.
+**GitHub Actions caveats absorbed by design:** scheduled workflows are disabled after 60 days without a repository commit (hence `keepalive.yml`), and cron firing is best-effort and may be delayed (hence staleness-driven jobs). Five-minute cron is the platform minimum, which is why `ingest-live` runs at 5-minute granularity even though the rate limit would permit 60-second polling; the job itself re-polls in a short loop within a single invocation to achieve finer resolution during match windows.
 
 ---
 
-## 5. Data model (Supabase Postgres)
+## 6. Data model (Supabase Postgres)
 
 ```
-leagues              id, api_football_id, football_data_id, slug, name, country,
-                     logo_url, current_season
+leagues              id, fd_code, fd_id, slug, name, country, emblem_url,
+                     current_season, season_start, season_end
 
-teams                id, api_football_id, league_id→leagues, slug, name, short_name,
-                     crest_url, primary_color, venue, founded
+teams                id, fd_id, league_id→leagues, slug, name, short_name, tla,
+                     crest_url, venue, founded, club_colors
 
-players              id, api_football_id, team_id→teams, slug, name, position,
-                     nationality, birth_date, height, photo_url
+players              id, fd_id, fpl_id, team_id→teams, slug, name, position,
+                     nationality, date_of_birth, photo_url
 
-fixtures             id, api_football_id, league_id, home_team_id, away_team_id,
-                     kickoff_utc, status, minute, home_goals, away_goals,
-                     round, venue, updated_at
+fixtures             id, fd_id, league_id, home_team_id, away_team_id,
+                     kickoff_utc, status, matchday, home_goals, away_goals,
+                     half_time_home, half_time_away, last_updated, updated_at
 
-standings            league_id, team_id, rank, played, won, drawn, lost,
-                     goals_for, goals_against, goal_diff, points, form, updated_at
+standings            league_id, team_id, season, position, played, won, drawn,
+                     lost, goals_for, goals_against, goal_difference, points,
+                     form, updated_at
 
-player_season_stats  player_id, league_id, season, appearances, minutes, goals,
-                     assists, yellow_cards, red_cards, rating, shots, passes,
+player_season_stats  player_id, league_id, season, source, appearances, minutes,
+                     goals, assists, expected_goals, yellow_cards, red_cards,
                      updated_at
-
-injuries             id, player_id, team_id, type, reason, fixture_id, updated_at
-
-transfers            id, player_id, from_team_id, to_team_id, transfer_date,
-                     type, fee_text, updated_at
 
 news_items           id, source, title, summary, url, image_url, published_at,
                      league_id, team_ids[], content_hash
 
-ingest_budget        provider, day_utc, requests_used, requests_limit
-ingest_cursor        job, cursor, updated_at
-ingest_log           id, job, status, message, requests_used, started_at, finished_at
+ingest_run           id, job, status, message, requests_used, started_at,
+                     finished_at
+ingest_budget        provider, day_utc, requests_used     -- observability only
 ```
 
-Every user-facing table carries `updated_at` so pages can display data age. `news_items.content_hash` deduplicates the same story arriving from multiple feeds.
+`player_season_stats.source` records which provider supplied a row (`fpl` or `football-data`), so the UI can state exactly which statistics are available and which are not. Every user-facing table carries `updated_at` so pages can display data age. `news_items.content_hash` deduplicates the same story arriving from multiple feeds.
 
-Indexes: `fixtures(kickoff_utc)`, `fixtures(status)` for the match-window guard, `standings(league_id, rank)`, `news_items(published_at DESC)`, and pg_trgm indexes on `teams.name` and `players.name` for search.
+Indexes: `fixtures(kickoff_utc)`, `fixtures(status)` for the match-window guard, `standings(league_id, season, position)`, `news_items(published_at DESC)`, and pg_trgm indexes on `teams.name` and `players.name` for search.
+
+Transfers and injuries have **no structured free source**. They are surfaced as classified news items from RSS (filtered on transfer and injury keywords, tagged to clubs and players by name match) rather than as structured records. The `/transfers` route is therefore a filtered news view, not a table of confirmed fees. It is labelled accordingly — reported, not confirmed.
 
 ---
 
-## 6. Site (Phase B)
+## 7. Site (Phase B)
 
-### 6.1 Routes
+### 7.1 Routes
 
 | Route | Contents |
 |---|---|
-| `/` | Trending news, live-score strip, next fixtures, fantasy slot |
-| `/scores` | Live and today's results across all five leagues |
+| `/` | Trending news, score strip (preseason: countdown), next fixtures, fantasy slot |
+| `/scores` | Live and recent results across all five leagues |
 | `/calendar` | Month and week fixture views, league/club filters, `.ics` export |
 | `/league/[slug]` | Table, fixtures, top scorers |
-| `/team/[slug]` | Squad, form, fixtures, injuries, related news |
-| `/player/[slug]` | Season statistics, splits, photo, club context |
+| `/team/[slug]` | Squad, form, fixtures, related news |
+| `/player/[slug]` | Statistics (full for PL, bio + available figures elsewhere), photo, club |
 | `/news` | Aggregated feed with league/club filters |
-| `/transfers` | Transfer feed |
+| `/transfers` | Transfer-classified news feed, labelled as reported |
 | `/search` | Instant search across teams and players |
+| `/status` | Pipeline health: last run per job, requests used, recent errors |
 
-**Landing-page fantasy slot in phases A + B:** the layout reserves the slot, and it renders a real "Fantasy — coming soon" panel with a short description of the game. It is not hidden and not a dead placeholder; phase D replaces its contents without touching the landing-page layout.
+**Landing-page fantasy slot in phases A + B:** the layout reserves the slot and renders a real "Fantasy — coming soon" panel describing the game. Phase D replaces its contents without touching the landing layout.
 
-**Search implementation:** a server route handler queries the pg_trgm indexes on `teams.name` and `players.name` and returns ranked JSON. The client input is debounced at 150ms. Results are prefetched on hover so opening one is instant. No search index is held client-side.
+**Search implementation:** a server route handler queries the pg_trgm indexes on `teams.name` and `players.name` and returns ranked JSON. Client input is debounced at 150ms. Results are prefetched on hover. No search index is held client-side.
 
-### 6.2 Refresh behaviour
+### 7.2 Refresh behaviour
 
 A hard requirement: refreshing a page must refresh *that page's* data, like a normal website — never reset to an app shell or lose the user's place.
 
@@ -260,9 +273,9 @@ A hard requirement: refreshing a page must refresh *that page's* data, like a no
 - Live views additionally poll a lightweight JSON route handler and **patch only the changed values in place**. Scroll position, active filters and expanded panels survive.
 - Because rendering reads Postgres and never a provider, a hard refresh is fast regardless of provider state.
 
-### 6.3 Visual direction — "Broadcast"
+### 7.3 Visual direction — "Broadcast"
 
-Dark-first, high contrast, matchday register. A properly built light theme ships as secondary — a careful translation, not a co-equal design.
+Dark-first, high contrast, matchday register. A light theme ships as a considered secondary.
 
 | Token | Value |
 |---|---|
@@ -276,65 +289,64 @@ Dark-first, high contrast, matchday register. A properly built light theme ships
 
 Typography: Inter variable, tight tracking on headlines, **tabular numerals on all scores and statistics** so digits don't jitter as values update.
 
-Accessibility: all text pairs meet WCAG AA against their background; live state is never signalled by colour alone (dot + minute label accompany it); every interactive element is keyboard reachable with a visible focus ring.
+Accessibility: all text meets WCAG AA against its background; live state is never signalled by colour alone (dot plus minute label); every interactive element is keyboard reachable with a visible focus ring.
 
-### 6.4 Imagery
+### 7.4 Imagery
 
-Real club crests and player photography from provider CDNs. URLs stored in the database, served via `next/image` with remote patterns whitelisted and cached at the CDN edge. Every image has a coloured-monogram fallback so a missing asset never renders as a broken icon. No generated imagery anywhere in the product.
+Real club crests from `crests.football-data.org` and real player photos from the FPL asset CDN, URLs stored in the database and served via `next/image` with those hosts whitelisted. Every image has a club-coloured monogram fallback so a missing asset never renders as a broken icon. **No generated imagery anywhere in the product.**
 
-### 6.5 Performance
-
-- All page reads hit indexed Postgres queries; no provider call on the request path, ever.
-- Search uses pg_trgm indexes, with results prefetched on hover.
-- Route segments are statically rendered where data allows, revalidated on the cadences above.
+Player photography exists for Premier League players only. Elsewhere the monogram fallback is the normal state, designed to look deliberate rather than broken.
 
 ---
 
-## 7. Failure handling
+## 8. Failure handling
 
 Ingestion failure must never break a page.
 
 - Pages render last-known-good data from Postgres with a visible "updated N minutes ago" stamp — staleness is shown, not hidden.
-- Provider errors are written to `ingest_log` with job, message and requests consumed.
-- A `429` marks that provider exhausted for the remainder of the UTC day in the budget ledger; retries use exponential backoff.
-- A `/status` page reports budget consumed, last successful run per job, and recent errors. A scheduled pipeline that cannot be observed cannot be operated.
+- Provider errors are written to `ingest_run` with job, message and requests consumed.
+- A `429` or an `x-requests-available-minute` of 0 triggers exponential backoff; the limiter self-corrects from the response header.
+- `/status` reports last successful run per job, requests consumed, and recent errors. A scheduled pipeline that cannot be observed cannot be operated.
 
 ---
 
-## 8. Testing
+## 9. Testing
 
 | Level | Tool | Covers |
 |---|---|---|
-| Unit | Vitest | Provider adapters against recorded JSON snapshots; budget ledger arithmetic and refusal behaviour; job prioritisation; match-window guard |
+| Unit | Vitest | Adapters against recorded JSON snapshots; rate limiter including header self-correction; staleness selection; match-window guard across all fixture states |
 | Integration | Vitest + local Supabase | Ingestion → database writes, upserts, dedupe |
-| E2E | Playwright | Landing renders with data; hard refresh preserves page and filters; live patch updates a score without navigation |
+| E2E | Playwright | Landing renders with data; hard refresh preserves page and filters; live patch updates a score without navigation; player page never renders empty |
 
-**No live provider calls in CI** — they would consume the production daily budget. All adapter tests run against committed response snapshots.
-
----
-
-## 9. External accounts required
-
-To be created by the project owner; none require a payment card:
-
-- **GitHub** — account and a **public** repository (public is what makes Actions minutes unlimited)
-- **api-sports.io** — API-Football free key
-- **football-data.org** — free key
-- **Supabase** — project (URL, anon key, service role key)
-- **Netlify** — site, connected to the GitHub repository
-
-TheSportsDB and RSS feeds require no key.
-
-Secrets live in three places: `.env.local` for local development (gitignored), **GitHub repository secrets** for the ingestion workflows, and **Netlify environment variables** for page rendering. The service role key goes only in GitHub secrets and Netlify — never in client-side code, never committed.
+**No live provider calls in CI.** All adapter tests run against committed response snapshots captured from the real endpoints.
 
 ---
 
-## 10. Definition of done for A + B
+## 10. External accounts
 
-- All five leagues ingesting fixtures, tables, injuries, transfers and news on schedule.
-- Player crawl completing a full cycle within 10 days without ever starving live scores.
-- Daily API-Football consumption stays at or under 100 requests, verified on `/status` across a full matchday.
-- All nine routes rendering real data with real crests and photography.
+All created and verified on 2026-08-03:
+
+- **GitHub** — public repository (public is what makes Actions minutes unlimited)
+- **football-data.org** — free key ✓ verified
+- **Supabase** — project ✓ verified (service_role 200, anon JWT valid to 2036)
+- **Netlify** — site, connected to the repository (deferred until there is something to deploy)
+- **api-sports.io** — key held but dormant; unusable for current seasons on the free plan
+
+FPL, RSS and crest CDNs require no key.
+
+Secrets live in three places: `.env.local` for local development (gitignored), **GitHub repository secrets** for ingestion workflows, and **Netlify environment variables** for page rendering. The service role key goes only in GitHub secrets and Netlify — never in client code, never committed.
+
+---
+
+## 11. Definition of done for A + B
+
+- All five leagues ingesting fixtures, results, tables, squads and news on schedule.
+- 2025-26 historical season backfilled so no page is empty before kickoff.
+- FPL player statistics ingesting for all 564 Premier League players.
+- Sustained request rate staying under 10/minute, verified on `/status`.
+- All ten routes rendering real data with real crests.
+- Player pages never empty — current-season stats where they exist, labelled prior-season fallback where they don't, and an explicit statement of which statistics are unavailable for non-PL players.
 - Hard refresh on any route re-renders that route with fresh data and preserves filters.
 - Light and dark themes both meeting WCAG AA.
 - Unit, integration and E2E suites passing with no live provider calls.
+- Live-score latency measured on 2026-08-16 and §2.4 updated with the observed figure.
