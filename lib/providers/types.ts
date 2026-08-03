@@ -38,6 +38,17 @@ export interface RawFixture {
 
 export interface RawStanding {
   teamFdId: number;
+  /**
+   * Club identity fields embedded directly in the standings row's `team`
+   * object. Present for every row, including clubs relegated out of every
+   * competition the free tier covers (which would otherwise 403 on
+   * `/teams/{id}`) — this is the zero-extra-request source of their
+   * identity for the historical clubs table.
+   */
+  teamName: string;
+  teamShortName: string | null;
+  teamTla: string | null;
+  teamCrestUrl: string | null;
   position: number;
   played: number;
   won: number;

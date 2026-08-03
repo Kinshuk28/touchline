@@ -1,6 +1,7 @@
 import { serviceClient } from '@/lib/db/client';
 import type { WindowFixture } from '@/lib/ingest/matchWindow';
 import type { FixtureStatus } from '@/lib/providers/types';
+import { dedupeByKey } from '@/lib/db/dedupe';
 
 export interface FixtureRow {
   fd_id: number;
@@ -19,11 +20,19 @@ export interface FixtureRow {
   updated_at: string;
 }
 
+/**
+ * Deduped on `fd_id` (its conflict target) across the whole input before
+ * chunking into batches — see `lib/db/dedupe.ts`. Deduping must happen
+ * before the chunk loop, not per-chunk, or a duplicate pair that straddles
+ * a chunk boundary would still make Postgres reject that chunk with
+ * "ON CONFLICT DO UPDATE command cannot affect row a second time".
+ */
 export async function upsertFixtures(rows: FixtureRow[]): Promise<void> {
   if (rows.length === 0) return;
+  const deduped = dedupeByKey(rows, (r) => r.fd_id);
   const db = serviceClient();
-  for (let i = 0; i < rows.length; i += 500) {
-    const { error } = await db.from('fixtures').upsert(rows.slice(i, i + 500), { onConflict: 'fd_id' });
+  for (let i = 0; i < deduped.length; i += 500) {
+    const { error } = await db.from('fixtures').upsert(deduped.slice(i, i + 500), { onConflict: 'fd_id' });
     if (error) throw new Error(`upsertFixtures: ${error.message}`);
   }
 }

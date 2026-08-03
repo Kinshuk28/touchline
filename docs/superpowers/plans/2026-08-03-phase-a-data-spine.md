@@ -737,13 +737,35 @@ git commit -m "feat: token-bucket rate limiter with header self-correction"
 - Create: `lib/providers/types.ts`, `lib/providers/footballData.ts`
 - Create: `tests/fixtures/fd-matches-pl.json`, `tests/fixtures/fd-standings-pl.json`, `tests/fixtures/fd-team-57.json`
 - Create: `tests/fixtures/fd-matches-pl-2025.json`, `tests/fixtures/fd-scorers-pl-2025.json`
+- Create: `tests/fixtures/fd-competition-teams-pd.json`
 - Test: `tests/providers/footballData.test.ts`
 
 **Interfaces:**
 - Consumes: `RateLimiter` (Task 3).
 - Produces:
   - Types: `LeagueCode`, `FixtureStatus`, `RawFixture`, `RawStanding`, `RawSquadMember`, `RawScorer`
-  - `class FootballDataClient { constructor(opts: { apiKey: string; limiter: RateLimiter; fetchImpl?: typeof fetch }); getMatches(code: LeagueCode, season: number): Promise<RawFixture[]>; getStandings(code: LeagueCode, season: number): Promise<RawStanding[]>; getSquad(teamFdId: number): Promise<{ team: RawTeam; squad: RawSquadMember[] }>; getScorers(code: LeagueCode, season: number): Promise<RawScorer[]> }`
+  - `class FootballDataClient { constructor(opts: { apiKey: string; limiter: RateLimiter; fetchImpl?: typeof fetch }); getMatches(code: LeagueCode, season: number): Promise<RawFixture[]>; getStandings(code: LeagueCode, season: number): Promise<RawStanding[]>; getCompetitionTeams(code: LeagueCode): Promise<RawTeam[]>; getSquad(teamFdId: number): Promise<{ team: RawTeam; squad: RawSquadMember[] }>; getScorers(code: LeagueCode, season: number): Promise<RawScorer[]> }`
+
+**Why `getCompetitionTeams` exists (added during backfill rework, 2026-08-03):**
+The original backfill discovered every club by walking last season's
+standings and calling `getSquad` (→ `/teams/{id}`) for each row. That 403s
+for any club that was relegated (or otherwise dropped) out of every
+competition the free tier covers — confirmed live: RCD Mallorca (id 89)
+403s on `/teams/89`, Real Madrid (id 86) does not, and Mallorca is absent
+from the current `/competitions/PD/teams` listing. St. Pauli and Pisa hit
+the identical failure in Bundesliga/Serie A. This is **not** a blanket
+free-tier restriction on `/teams/{id}` — it is specifically clubs no longer
+in a covered competition.
+
+`GET /competitions/{code}/teams` works on the free tier and returns the
+current season's ~20 clubs with full metadata (id, name, shortName, tla,
+crest, venue, founded, clubColors) — but never a relegated club, and its
+`squad` array is always empty. `getStandings`'s `team` object, by contrast,
+already carries `{id, name, shortName, tla, crest}` for every row, including
+relegated clubs — verified present for Mallorca — so a relegated club's
+identity can be written with zero extra requests, straight from a call the
+backfill already makes. Do not "simplify" this back to walking standings +
+`getSquad` for club discovery — that is the exact bug this rework fixed.
 
 - [ ] **Step 1: Capture real response snapshots**
 
@@ -769,13 +791,24 @@ sleep 7
 curl -s -H "X-Auth-Token: $FOOTBALL_DATA_KEY" \
   "https://api.football-data.org/v4/competitions/PL/scorers?season=2025&limit=50" \
   -o tests/fixtures/fd-scorers-pl-2025.json
+sleep 7
+curl -s -H "X-Auth-Token: $FOOTBALL_DATA_KEY" \
+  "https://api.football-data.org/v4/competitions/PD/teams" \
+  -o tests/fixtures/fd-competition-teams-pd.json
 ```
 
 Verify each file is real JSON, not an error body:
 
 ```bash
-node -e "for (const f of ['fd-matches-pl','fd-standings-pl','fd-team-57','fd-matches-pl-2025','fd-scorers-pl-2025']) { const j = require('./tests/fixtures/'+f+'.json'); console.log(f, Object.keys(j).slice(0,4).join(',')); }"
+node -e "for (const f of ['fd-matches-pl','fd-standings-pl','fd-team-57','fd-matches-pl-2025','fd-scorers-pl-2025','fd-competition-teams-pd']) { const j = require('./tests/fixtures/'+f+'.json'); console.log(f, Object.keys(j).slice(0,4).join(',')); }"
 ```
+
+`fd-competition-teams-pd.json` was captured 2026-08-03 (added during the
+backfill rework): 20 current La Liga clubs, full metadata, `squad: []` on
+every entry. Confirmed empirically: RCD Mallorca does not appear in this
+list (it was relegated at the end of 2025-26) — that absence is exactly
+what phase 3 of the backfill relies on to know a club needs the
+standings-embedded fallback instead of `/teams/{id}`.
 
 Expected: keys including `matches`, `standings`, `squad`, `matches`, `scorers` respectively.
 
@@ -824,6 +857,17 @@ export interface RawFixture {
 
 export interface RawStanding {
   teamFdId: number;
+  /**
+   * Club identity fields embedded directly in the standings row's `team`
+   * object. Present for every row, including clubs relegated out of every
+   * competition the free tier covers (which would otherwise 403 on
+   * `/teams/{id}`) — this is the zero-extra-request source of their
+   * identity for the historical clubs table.
+   */
+  teamName: string;
+  teamShortName: string | null;
+  teamTla: string | null;
+  teamCrestUrl: string | null;
   position: number;
   played: number;
   won: number;
@@ -1062,6 +1106,82 @@ describe('FootballDataClient.getStandings', () => {
     expect(rows[0]!.points).toBe(totalGroup!.table[0]!.points);
     expect(rows[0]!.teamFdId).toBe(totalGroup!.table[0]!.team.id);
   });
+
+  it('embeds the club identity fields from the row\'s team object — the zero-request source of a relegated club\'s metadata', async () => {
+    // The backfill's historical-clubs phase relies on getStandings alone to
+    // create a team row for a relegated club, with no follow-up request to
+    // /teams/{id} (which 403s for clubs no longer in a covered competition).
+    // That only works if name/shortName/tla/crest survive the mapping.
+    const raw = snap('fd-standings-pl') as {
+      standings: Array<{
+        type: string;
+        table: Array<{ team: { id: number; name: string; shortName: string; tla: string; crest: string } }>;
+      }>;
+    };
+    const totalGroup = raw.standings.find((g) => g.type === 'TOTAL')!;
+    const rawTeam = totalGroup.table[0]!.team;
+
+    const { client } = clientFor(raw);
+    const rows = await client.getStandings('PL', 2025);
+    const row = rows[0]!;
+    expect(row.teamName).toBe(rawTeam.name);
+    expect(row.teamShortName).toBe(rawTeam.shortName);
+    expect(row.teamTla).toBe(rawTeam.tla);
+    expect(row.teamCrestUrl).toBe(rawTeam.crest);
+  });
+});
+
+describe('FootballDataClient.getCompetitionTeams', () => {
+  it('maps every current club with full metadata, straight from the competition teams endpoint', async () => {
+    const raw = snap('fd-competition-teams-pd') as {
+      teams: Array<{
+        id: number; name: string; shortName: string; tla: string; crest: string;
+        venue: string; founded: number; clubColors: string;
+      }>;
+    };
+    expect(raw.teams.length).toBe(20);
+    const rawFirst = raw.teams[0]!;
+
+    const { client } = clientFor(raw);
+    const out = await client.getCompetitionTeams('PD');
+    expect(out).toHaveLength(20);
+    const first = out[0]!;
+
+    // Exact-value assertions against the real captured fixture (Athletic
+    // Club), not guessed placeholders — catches a field mix-up that a bare
+    // typeof check would miss.
+    expect(first.fdId).toBe(rawFirst.id);
+    expect(first.name).toBe(rawFirst.name);
+    expect(first.crestUrl).toBe(rawFirst.crest);
+    expect(first.venue).toBe(rawFirst.venue);
+    expect(first.founded).toBe(rawFirst.founded);
+    expect(first.name).toBe('Athletic Club');
+    expect(first.crestUrl).toBe('https://crests.football-data.org/77.png');
+    expect(first.venue).toBe('San Mamés');
+    expect(first.founded).toBe(1898);
+  });
+
+  it('confirms RCD Mallorca — the club that 403s on /teams/{id} after relegation — is absent from the current teams listing', async () => {
+    // This is the empirical basis for the historical-clubs phase: a
+    // relegated club genuinely does not appear here, so its identity must
+    // come from getStandings instead.
+    const raw = snap('fd-competition-teams-pd') as { teams: Array<{ name: string }> };
+    expect(raw.teams.some((t) => /mallorca/i.test(t.name))).toBe(false);
+  });
+
+  it('sends the auth header and hits the competition teams endpoint (no season param)', async () => {
+    const { client, calls } = clientFor(snap('fd-competition-teams-pd'));
+    await client.getCompetitionTeams('PD');
+    expect(calls[0]).toContain('/competitions/PD/teams');
+  });
+
+  it('feeds the rate-limit header back into the limiter', async () => {
+    const { client, limiter } = clientFor(snap('fd-competition-teams-pd'), {
+      'x-requests-available-minute': '6',
+    });
+    await client.getCompetitionTeams('PD');
+    expect(limiter.available).toBe(6);
+  });
 });
 
 describe('FootballDataClient.getSquad', () => {
@@ -1146,6 +1266,10 @@ export class FootballDataClient {
     const total = (data.standings ?? []).find((g) => g.type === 'TOTAL') ?? data.standings?.[0];
     return (total?.table ?? []).map((r) => ({
       teamFdId: r.team.id,
+      teamName: r.team.name,
+      teamShortName: r.team.shortName ?? null,
+      teamTla: r.team.tla ?? null,
+      teamCrestUrl: r.team.crest ?? null,
       position: r.position,
       played: r.playedGames,
       won: r.won,
@@ -1156,6 +1280,29 @@ export class FootballDataClient {
       goalDifference: r.goalDifference,
       points: r.points,
       form: r.form ?? null,
+    }));
+  }
+
+  /**
+   * The full current roster of clubs in a competition — the free tier's
+   * only reliable per-club metadata source. Unlike `/teams/{id}`, this
+   * endpoint does not 403 for clubs still in the competition, but it also
+   * never lists a club that has dropped out of every competition the free
+   * tier covers (e.g. relegated at the end of last season) — those must be
+   * sourced from `getStandings` instead. The `squad` array on each entry is
+   * always empty here; this call is metadata-only.
+   */
+  async getCompetitionTeams(code: LeagueCode): Promise<RawTeam[]> {
+    const data = await this.get<{ teams?: FdTeam[] }>(`/competitions/${code}/teams`);
+    return (data.teams ?? []).map((t) => ({
+      fdId: t.id,
+      name: t.name,
+      shortName: t.shortName ?? null,
+      tla: t.tla ?? null,
+      crestUrl: t.crest ?? null,
+      venue: t.venue ?? null,
+      founded: t.founded ?? null,
+      clubColors: t.clubColors ?? null,
     }));
   }
 
@@ -1225,7 +1372,9 @@ interface FdMatch {
 interface FdStandingGroup {
   type: string;
   table: Array<{
-    position: number; team: { id: number }; playedGames: number; won: number;
+    position: number;
+    team: { id: number; name: string; shortName?: string; tla?: string; crest?: string };
+    playedGames: number; won: number;
     draw: number; lost: number; goalsFor: number; goalsAgainst: number;
     goalDifference: number; points: number; form?: string | null;
   }>;
@@ -1245,6 +1394,12 @@ interface FdScorer {
 
 Run: `npm test -- tests/providers/footballData.test.ts`
 Expected: PASS, 15 tests (7 original + 4 covering the played-match mapping path against the fully-played 2025-26 season, including the discriminating genuine-0-0 case, + 4 covering `getScorers`)
+
+**Added during the backfill rework (2026-08-03):** one more assertion on
+the existing `getStandings` test (the embedded team-identity fields) plus a
+new `getCompetitionTeams` describe block (4 tests: metadata mapping against
+the real fixture, Mallorca's confirmed absence, the request URL, and the
+rate-limit header sync) — 20 tests total.
 
 - [ ] **Step 7: Commit**
 
@@ -2227,25 +2382,58 @@ first page. `leagues` (5 rows) and `teams` (~98 rows) are under the cap today,
 but they share the identical pattern and must use the same paginated helper —
 a future competition addition must not reintroduce the unpaginated version.
 
+**Reworked 2026-08-03 after the live backfill died in phase 5 (squads).**
+Postgres refuses an entire `INSERT ... ON CONFLICT DO UPDATE` statement — not
+just the offending row — if that statement contains two rows that resolve to
+the same conflict key: `ON CONFLICT DO UPDATE command cannot affect row a
+second time`. The backfill hit this for real: a player who appeared in two
+different clubs' squads (moved mid-window, or a provider data quirk) put the
+same `fd_id` twice into one `upsertPlayersByFdId` call, and Postgres rejected
+the whole ~2,500-row batch — zero players written, despite 110 teams having
+just been seeded correctly. This is a hazard for *every* bulk upsert in this
+file, not just the players one, because every one of them keys its `onConflict`
+on a natural id that could in principle repeat within a single caller's batch.
+**Do not remove `dedupeByKey` calls from these upserts as redundant** — without
+it, any input containing so much as one repeated conflict key silently takes
+down the entire batch, and that repeat can come from provider data, not just a
+caller bug.
+
+The fix is `lib/db/dedupe.ts`'s `dedupeByKey<T>(rows, keyOf)`: it collapses
+rows sharing a key, last occurrence wins (later data is treated as fresher).
+Every bulk upsert below calls it internally, keyed on its own `onConflict`
+target, so callers never need to know this constraint exists:
+`upsertPlayersByFdId`/`upsertPlayersByFplId` (`fd_id`/`fpl_id`),
+`upsertTeams` (`fd_id`), `upsertFixtures` (`fd_id`), `upsertLeagues`
+(`fd_code`), `upsertStandings` (`league_id,season,team_id`),
+`upsertPlayerSeasonStats` (`player_id,season,source`), `upsertNewsItems`
+(`content_hash`). For the two upserts that chunk their input into batches of
+500 (`upsertFixtures`, `upsertPlayerSeasonStats`, and now also
+`upsertPlayersByFdId`/`upsertPlayersByFplId`), the dedupe runs once across the
+*whole* input before chunking — deduping per-chunk would still leave a
+duplicate pair that straddles a chunk boundary intact, reproducing the exact
+bug this fixes.
+
 **Files:**
 - Create: `lib/db/repositories/leagues.ts`, `teams.ts`, `players.ts`, `fixtures.ts`, `standings.ts`, `playerStats.ts`, `news.ts`, `runs.ts`
 - Create: `lib/db/slug.ts`
 - Create: `lib/db/paginate.ts` — shared `fetchAllRows()` helper that pages a select with `.range()` until a page returns fewer rows than the page size (1,000), so no id-map helper can silently truncate past PostgREST's default row cap
-- Test: `tests/db/slug.test.ts`, `tests/db/repositories.integration.test.ts`
+- Create: `lib/db/dedupe.ts` — shared `dedupeByKey<T>(rows: readonly T[], keyOf: (row: T) => string | number): T[]` helper, last-occurrence-wins, used inside every bulk upsert above to prevent a repeated conflict key from making Postgres reject an entire `ON CONFLICT DO UPDATE` batch
+- Test: `tests/db/slug.test.ts`, `tests/db/dedupe.test.ts`, `tests/db/repositories.integration.test.ts`
 
 **Interfaces:**
 - Consumes: `serviceClient()` (Task 2), domain types (Task 4), `NewsItem` (Task 6).
 - Produces:
   - `slugify(name: string): string`
   - `fetchAllRows<T>(context: string, fetchPage: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>, pageSize?: number): Promise<T[]>` — pages through `.range(from, to)` until a page comes back shorter than `pageSize`; guards against a non-terminating loop if a page unexpectedly returns more rows than requested
-  - `upsertLeagues(rows: LeagueRow[]): Promise<void>`
-  - `upsertTeams(rows: TeamRow[]): Promise<void>`
-  - `upsertPlayersByFdId(rows: PlayerRow[]): Promise<void>` — squad members from football-data
-  - `upsertPlayersByFplId(rows: PlayerRow[]): Promise<void>` — Premier League players from FPL
-  - `upsertFixtures(rows: FixtureRow[]): Promise<void>`
-  - `upsertStandings(rows: StandingRow[]): Promise<void>`
-  - `upsertPlayerSeasonStats(rows: PlayerStatsRow[]): Promise<void>`
-  - `upsertNewsItems(items: NewsItem[]): Promise<number>` — returns count newly inserted
+  - `dedupeByKey<T>(rows: readonly T[], keyOf: (row: T) => string | number): T[]` — collapses rows sharing a key, last occurrence wins; called inside every upsert below, keyed on that upsert's own `onConflict` target, so a repeated conflict key in a caller's batch never reaches Postgres as a rejected `ON CONFLICT DO UPDATE`
+  - `upsertLeagues(rows: LeagueRow[]): Promise<void>` — deduped on `fd_code`
+  - `upsertTeams(rows: TeamRow[]): Promise<void>` — deduped on `fd_id`
+  - `upsertPlayersByFdId(rows: PlayerRow[]): Promise<void>` — squad members from football-data; deduped on `fd_id` across the whole input, then chunked in batches of 500
+  - `upsertPlayersByFplId(rows: PlayerRow[]): Promise<void>` — Premier League players from FPL; deduped on `fpl_id` across the whole input, then chunked in batches of 500
+  - `upsertFixtures(rows: FixtureRow[]): Promise<void>` — deduped on `fd_id` across the whole input, then chunked in batches of 500
+  - `upsertStandings(rows: StandingRow[]): Promise<void>` — deduped on composite key `league_id,season,team_id`
+  - `upsertPlayerSeasonStats(rows: PlayerStatsRow[]): Promise<void>` — deduped on composite key `player_id,season,source` across the whole input, then chunked in batches of 500
+  - `upsertNewsItems(items: NewsItem[]): Promise<number>` — returns count newly inserted; deduped on `content_hash`
   - `getTeamIdMap(): Promise<Map<number, number>>` — football-data id → internal id; paginated via `fetchAllRows`, safe past 1,000 teams
   - `getLeagueIdMap(): Promise<Map<string, number>>` — league code → internal id; paginated via `fetchAllRows`, safe past 1,000 leagues
   - `getPlayerIdByFdId(): Promise<Map<number, number>>` — football-data id → internal id; paginated via `fetchAllRows`, safe past 1,000 players
@@ -2845,6 +3033,62 @@ git commit -m "feat: repository layer with idempotent upserts"
 
 This is the one-time run that makes every later job cheap: it seeds the five leagues, every club, every squad, and the complete 2025-26 season so no page is empty before kickoff.
 
+**Reworked 2026-08-03 after the live run 403'd.** The original version
+below (club discovery by walking last season's standings and calling
+`getSquad` — i.e. `/teams/{id}` — for every row) fails partway through: any
+club relegated at the end of 2025-26 is no longer in any competition the
+free tier covers, and `/teams/{id}` 403s for it. Confirmed live: RCD
+Mallorca (id 89) 403s, Real Madrid (id 86) does not; St. Pauli and Pisa hit
+the identical failure in Bundesliga and Serie A. **This is not a blanket
+free-tier restriction on `/teams/{id}`** — it is specifically clubs that
+dropped out of every covered competition — so retrying or backing off does
+not help; the discovery strategy itself has to change.
+
+The fix restructures club discovery into two sources instead of one:
+`getCompetitionTeams` (Task 4) for the ~98 current clubs (full metadata,
+zero 403 risk), and the standings response's embedded `team` object for any
+club in last season's table that isn't in the current listing (relegated
+clubs — identity only, since `venue`/`founded`/`clubColors` are genuinely
+absent from that payload). See Task 4 for the full API-level reasoning.
+**Do not simplify this back to single-source discovery via `getSquad`** —
+that reintroduces the exact bug this rework fixed.
+
+**Reworked again 2026-08-03 after the live run died in phase 5 (squads).**
+With the 403 fix above in place, the run got past clubs cleanly (5 leagues,
+96 current + 14 historical-only clubs = 110 teams written) and then failed
+on the very next step: `upsertPlayersByFdId: ON CONFLICT DO UPDATE command
+cannot affect row a second time`. Postgres rejects an entire upsert
+statement — not just the offending row — if it contains two rows resolving
+to the same conflict key. The backfill collects every current club's squad
+and upserts all of them in one call keyed on `fd_id`; a player who appears in
+two clubs' squads (moved mid-window, or a provider data quirk) puts that
+`fd_id` in the batch twice, and the whole ~2,500-row call was rejected —
+zero players written despite the 110 teams above landing correctly.
+
+This is a general hazard of every bulk upsert in the repository layer, not
+specific to squads, so the fix lives in the repository layer (Task 8) rather
+than here: every `upsert*` function in `lib/db/repositories/` now dedupes its
+input on its own conflict key via `lib/db/dedupe.ts`'s `dedupeByKey`
+(last-occurrence-wins) before it ever reaches Postgres, and
+`upsertPlayersByFdId`/`upsertPlayersByFplId` now chunk in batches of 500 like
+`upsertFixtures` and `upsertPlayerSeasonStats` already did. **This script does
+not need to dedupe squads itself** — that would just be reimplementing what
+the repository layer already guarantees for every caller. **Do not add
+per-call-site dedupe here as a "belt and suspenders" measure** — it duplicates
+logic that is already centralized and tested (`tests/db/dedupe.test.ts`,
+`tests/db/repositories.integration.test.ts`).
+
+One trade-off is worth recording rather than silently resolving: a player who
+legitimately appears in two clubs' squads has an ambiguous `team_id` at
+backfill time, and last-wins picks whichever club's squad the collection loop
+happened to process last — arbitrary, not authoritative. For this dataset
+(free-tier football-data.org squads across five leagues, one season boundary)
+that is judged an acceptable trade-off: the count of affected players is
+small, the ambiguity resolves itself at the next scheduled ingestion job once
+the player's move is reflected in their new club's squad listing, and building
+real reconciliation (e.g. "most recent squad listing wins" cross-referenced
+against transfer data) is complexity this one-time backfill does not need.
+
 - [ ] **Step 1: Write `lib/ingest/leagueSeed.ts`**
 
 ```ts
@@ -2873,6 +3117,12 @@ export const PREVIOUS_SEASON = 2025;
 
 - [ ] **Step 2: Write `scripts/backfill.ts`**
 
+Seven phases, in order — current clubs and historical clubs are
+deliberately split into two sources (see the rework note above), team ids
+are resolved exactly once after *both* club-writing phases have run, and a
+403 on an individual club's squad fetch is caught, logged and counted
+rather than aborting the whole run:
+
 ```ts
 import 'dotenv/config';
 import { loadEnv } from '@/lib/config/env';
@@ -2886,7 +3136,7 @@ import { upsertPlayersByFdId } from '@/lib/db/repositories/players';
 import { upsertFixtures } from '@/lib/db/repositories/fixtures';
 import { upsertStandings } from '@/lib/db/repositories/standings';
 import { startRun, finishRun } from '@/lib/db/repositories/runs';
-import type { RawSquadMember } from '@/lib/providers/types';
+import type { RawStanding } from '@/lib/providers/types';
 
 const env = loadEnv();
 const limiter = new RateLimiter({ capacity: 10, windowMs: 60_000 });
@@ -2895,9 +3145,11 @@ const now = () => new Date().toISOString();
 
 const runId = await startRun('backfill');
 let requests = 0;
+const squadSkips: string[] = [];
 
 try {
-  console.log('1/4  seeding leagues');
+  // Phase 1: leagues.
+  console.log('1/7  seeding leagues');
   await upsertLeagues(LEAGUE_SEEDS.map((s) => ({
     fd_code: s.code, fd_id: s.fdId, slug: s.slug, name: s.name, country: s.country,
     emblem_url: `https://crests.football-data.org/${s.code}.png`,
@@ -2905,31 +3157,83 @@ try {
   })));
   const leagueIds = await getLeagueIdMap();
 
-  // Phase 1: discover every club and its squad. Last season's table is the
-  // cheapest complete roster of clubs in a league (the current table may be
-  // empty before matchday 1).
-  console.log('2/4  clubs and squads');
-  const collectedTeams: TeamRow[] = [];
-  const collectedSquads: Array<{ teamFdId: number; squad: RawSquadMember[] }> = [];
-
+  // Phase 2: current clubs, straight from each competition's teams
+  // endpoint — full metadata, never 403s for a club still in the
+  // competition. See the rework note above for why this replaced
+  // getSquad-per-club discovery.
+  console.log('2/7  current clubs');
+  const currentTeams: TeamRow[] = [];
+  const seenFdIds = new Set<number>();
   for (const s of LEAGUE_SEEDS) {
-    const table = await fd.getStandings(s.code, PREVIOUS_SEASON); requests++;
+    const teams = await fd.getCompetitionTeams(s.code); requests++;
     const leagueId = leagueIds.get(s.code)!;
-    for (const row of table) {
-      const { team, squad } = await fd.getSquad(row.teamFdId); requests++;
-      collectedTeams.push({
+    for (const team of teams) {
+      currentTeams.push({
         fd_id: team.fdId, league_id: leagueId, slug: slugify(team.name), name: team.name,
         short_name: team.shortName, tla: team.tla, crest_url: team.crestUrl,
         venue: team.venue, founded: team.founded, club_colors: team.clubColors,
       });
-      collectedSquads.push({ teamFdId: team.fdId, squad });
+      seenFdIds.add(team.fdId);
     }
-    console.log(`     ${s.code}: ${table.length} clubs`);
+    console.log(`     ${s.code}: ${teams.length} current clubs`);
   }
+  await upsertTeams(currentTeams);
 
-  // Phase 2: write clubs, then resolve ids ONCE, then write players.
-  await upsertTeams(collectedTeams);
+  // Phase 3: historical clubs, from last season's standings. Any club here
+  // not already seen in phase 2 was relegated (or otherwise dropped) out of
+  // every competition the free tier covers, so it can never be looked up by
+  // id. Its identity comes from the standings row's embedded `team` object
+  // — zero extra requests, no /teams/{id} call ever happens for it.
+  // venue/founded/clubColors genuinely are not in that payload, so they
+  // stay null rather than being invented.
+  console.log('3/7  historical clubs (last season standings)');
+  const historicalTeams: TeamRow[] = [];
+  const standingsByLeague = new Map<string, RawStanding[]>();
+  for (const s of LEAGUE_SEEDS) {
+    const table = await fd.getStandings(s.code, PREVIOUS_SEASON); requests++;
+    standingsByLeague.set(s.code, table);
+    const leagueId = leagueIds.get(s.code)!;
+    for (const row of table) {
+      if (seenFdIds.has(row.teamFdId)) continue;
+      historicalTeams.push({
+        fd_id: row.teamFdId, league_id: leagueId, slug: slugify(row.teamName), name: row.teamName,
+        short_name: row.teamShortName, tla: row.teamTla, crest_url: row.teamCrestUrl,
+        venue: null, founded: null, club_colors: null,
+      });
+      seenFdIds.add(row.teamFdId);
+    }
+    console.log(`     ${s.code}: ${table.length} clubs in last season's table`);
+  }
+  await upsertTeams(historicalTeams);
+  console.log(`     ${currentTeams.length} current + ${historicalTeams.length} historical-only clubs`);
+
+  // Phase 4: resolve every club's database id ONCE, now that both current
+  // and historical clubs have been written. Never inside a loop.
+  console.log('4/7  resolving team ids');
   const teamIds = await getTeamIdMap();
+
+  // Phase 5: squads for the current clubs only. A relegated club gets no
+  // squad — correct, its identity alone is enough for the historical
+  // standings table. A 403 on any individual club must not abort the run:
+  // catch it, log which club was skipped, count it, and continue. Anything
+  // that isn't a 403 (429, 500, ...) is a real failure and must still fail
+  // loudly.
+  console.log('5/7  squads (current clubs)');
+  const collectedSquads: Array<{ teamFdId: number; squad: Awaited<ReturnType<typeof fd.getSquad>>['squad'] }> = [];
+  for (const team of currentTeams) {
+    try {
+      const { squad } = await fd.getSquad(team.fd_id); requests++;
+      collectedSquads.push({ teamFdId: team.fd_id, squad });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (/football-data\.org 403 /.test(message)) {
+        squadSkips.push(`${team.name} (fd_id ${team.fd_id})`);
+        console.warn(`     skipped (403): ${team.name} (fd_id ${team.fd_id})`);
+        continue;
+      }
+      throw err;
+    }
+  }
 
   await upsertPlayersByFdId(collectedSquads.flatMap(({ teamFdId, squad }) =>
     squad.map((p) => ({
@@ -2937,10 +3241,10 @@ try {
       slug: `${slugify(p.name)}-${p.fdId}`, name: p.name, position: p.position,
       nationality: p.nationality, date_of_birth: p.dateOfBirth, photo_url: null,
     }))));
-  console.log(`     ${collectedTeams.length} clubs, ${collectedSquads.reduce((n, c) => n + c.squad.length, 0)} players`);
+  console.log(`     ${collectedSquads.length}/${currentTeams.length} squads fetched, ${collectedSquads.reduce((n, c) => n + c.squad.length, 0)} players, ${squadSkips.length} skipped (403)`);
 
-  // Phase 3: fixtures for both seasons. Fetched once each, not twice.
-  console.log('3/4  fixtures');
+  // Phase 6: fixtures for both seasons, both leagues. Fetched once each, not twice.
+  console.log('6/7  fixtures');
   for (const s of LEAGUE_SEEDS) {
     for (const season of [PREVIOUS_SEASON, CURRENT_SEASON]) {
       const matches = await fd.getMatches(s.code, season); requests++;
@@ -2957,19 +3261,38 @@ try {
     }
   }
 
-  console.log('4/4  last season final tables');
+  // Phase 7: last season's final tables, using the standings rows already
+  // fetched in phase 3 — no re-fetch. With phase 3 in place every club here
+  // now has a database row, so a lookup miss is a real bug, not an expected
+  // gap: log it loudly by name rather than silently dropping the table row
+  // (the original bug this replaced — `.filter((r) => r.team_id !==
+  // undefined)` against `teamIds.get(...)!` — dropped rows for exactly the
+  // relegated clubs that now resolve correctly, with no warning that a
+  // league table had come up short).
+  console.log('7/7  last season final tables');
   for (const s of LEAGUE_SEEDS) {
-    const rows = await fd.getStandings(s.code, PREVIOUS_SEASON); requests++;
-    await upsertStandings(rows.map((r) => ({
-      league_id: leagueIds.get(s.code)!, team_id: teamIds.get(r.teamFdId)!,
-      season: PREVIOUS_SEASON, position: r.position, played: r.played, won: r.won,
-      drawn: r.drawn, lost: r.lost, goals_for: r.goalsFor, goals_against: r.goalsAgainst,
-      goal_difference: r.goalDifference, points: r.points, form: r.form, updated_at: now(),
-    })).filter((r) => r.team_id !== undefined));
+    const table = standingsByLeague.get(s.code)!;
+    const leagueId = leagueIds.get(s.code)!;
+    const rows = [];
+    for (const r of table) {
+      const teamId = teamIds.get(r.teamFdId);
+      if (teamId === undefined) {
+        console.warn(`     WARNING: unresolved club "${r.teamName}" (fd_id ${r.teamFdId}) in ${s.code} standings — row dropped`);
+        continue;
+      }
+      rows.push({
+        league_id: leagueId, team_id: teamId,
+        season: PREVIOUS_SEASON, position: r.position, played: r.played, won: r.won,
+        drawn: r.drawn, lost: r.lost, goals_for: r.goalsFor, goals_against: r.goalsAgainst,
+        goal_difference: r.goalDifference, points: r.points, form: r.form, updated_at: now(),
+      });
+    }
+    await upsertStandings(rows);
+    console.log(`     ${s.code}: ${rows.length}/${table.length} standings rows written`);
   }
 
   await finishRun(runId, 'ok', null, requests);
-  console.log(`\nBackfill complete. ${requests} requests used.`);
+  console.log(`\nBackfill complete. ${requests} requests used. ${squadSkips.length} squads skipped (403): ${squadSkips.join(', ') || 'none'}`);
 } catch (err) {
   const message = err instanceof Error ? err.message : String(err);
   await finishRun(runId, 'error', message, requests);
@@ -2984,7 +3307,10 @@ try {
 npx tsx --env-file=.env.local scripts/backfill.ts
 ```
 
-Expected: roughly 110–120 requests, taking about 12 minutes because the limiter paces to 10/min. Final line reports the request count.
+Expected: roughly 113 requests (5 current-clubs + 5 historical-standings +
+~98 squads + 10 fixtures, standings reuse phase 3's data with no extra
+requests), taking about 12 minutes because the limiter paces to 10/min.
+Final line reports the request count and the 403-skip count/list.
 
 - [ ] **Step 4: Verify the data landed**
 
@@ -2998,7 +3324,12 @@ union all select 'fixtures', count(*) from fixtures
 union all select 'standings', count(*) from standings;
 ```
 
-Expected roughly: leagues 5, teams ~98, players ~2500, fixtures ~3600, standings ~98.
+Expected roughly: leagues 5, teams 105–120 (~98 current + relegated
+clubs), players ~2000–2600, fixtures ~3600, standings ~98 (20 per league —
+fewer means a historical club got dropped in phase 7, which now warns by
+name instead of failing silently). Also check: zero fixtures with a null
+`home_team_id`/`away_team_id`, zero teams with a null `crest_url`, and both
+seasons (2025, 2026) present per league.
 
 - [ ] **Step 5: Commit**
 

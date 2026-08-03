@@ -50,6 +50,10 @@ export class FootballDataClient {
     const total = (data.standings ?? []).find((g) => g.type === 'TOTAL') ?? data.standings?.[0];
     return (total?.table ?? []).map((r) => ({
       teamFdId: r.team.id,
+      teamName: r.team.name,
+      teamShortName: r.team.shortName ?? null,
+      teamTla: r.team.tla ?? null,
+      teamCrestUrl: r.team.crest ?? null,
       position: r.position,
       played: r.playedGames,
       won: r.won,
@@ -60,6 +64,29 @@ export class FootballDataClient {
       goalDifference: r.goalDifference,
       points: r.points,
       form: r.form ?? null,
+    }));
+  }
+
+  /**
+   * The full current roster of clubs in a competition — the free tier's
+   * only reliable per-club metadata source. Unlike `/teams/{id}`, this
+   * endpoint does not 403 for clubs still in the competition, but it also
+   * never lists a club that has dropped out of every competition the free
+   * tier covers (e.g. relegated at the end of last season) — those must be
+   * sourced from `getStandings` instead. The `squad` array on each entry is
+   * always empty here; this call is metadata-only.
+   */
+  async getCompetitionTeams(code: LeagueCode): Promise<RawTeam[]> {
+    const data = await this.get<{ teams?: FdTeam[] }>(`/competitions/${code}/teams`);
+    return (data.teams ?? []).map((t) => ({
+      fdId: t.id,
+      name: t.name,
+      shortName: t.shortName ?? null,
+      tla: t.tla ?? null,
+      crestUrl: t.crest ?? null,
+      venue: t.venue ?? null,
+      founded: t.founded ?? null,
+      clubColors: t.clubColors ?? null,
     }));
   }
 
@@ -129,7 +156,9 @@ interface FdMatch {
 interface FdStandingGroup {
   type: string;
   table: Array<{
-    position: number; team: { id: number }; playedGames: number; won: number;
+    position: number;
+    team: { id: number; name: string; shortName?: string; tla?: string; crest?: string };
+    playedGames: number; won: number;
     draw: number; lost: number; goalsFor: number; goalsAgainst: number;
     goalDifference: number; points: number; form?: string | null;
   }>;

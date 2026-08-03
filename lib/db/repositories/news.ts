@@ -1,5 +1,6 @@
 import { serviceClient } from '@/lib/db/client';
 import type { NewsItem } from '@/lib/providers/rss';
+import { dedupeByKey } from '@/lib/db/dedupe';
 
 /**
  * Inserts or updates news items by content_hash, returning the count of newly
@@ -14,9 +15,18 @@ import type { NewsItem } from '@/lib/providers/rss';
  * sub-batches (e.g. 500 items per batch, like `upsertFixtures` and
  * `upsertPlayerSeasonStats`), then sum the returned counts.
  */
+/**
+ * Deduped on `content_hash` (its conflict target) before the upsert — see
+ * `lib/db/dedupe.ts`. `ignoreDuplicates: true` (DO NOTHING) doesn't trigger
+ * Postgres's "cannot affect row a second time" error the way the other
+ * repositories' DO UPDATE upserts do, but a repeated `content_hash` within
+ * one batch would still make the returned insert count unreliable, so the
+ * same dedupe is applied here for consistency with every other bulk upsert.
+ */
 export async function upsertNewsItems(items: NewsItem[]): Promise<number> {
   if (items.length === 0) return 0;
-  const rows = items.map((i) => ({
+  const deduped = dedupeByKey(items, (i) => i.contentHash);
+  const rows = deduped.map((i) => ({
     source: i.source,
     title: i.title,
     summary: i.summary,

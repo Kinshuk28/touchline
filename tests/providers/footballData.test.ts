@@ -201,6 +201,82 @@ describe('FootballDataClient.getStandings', () => {
     expect(rows[0]!.points).toBe(totalGroup!.table[0]!.points);
     expect(rows[0]!.teamFdId).toBe(totalGroup!.table[0]!.team.id);
   });
+
+  it('embeds the club identity fields from the row\'s team object — the zero-request source of a relegated club\'s metadata', async () => {
+    // The backfill's historical-clubs phase relies on getStandings alone to
+    // create a team row for a relegated club, with no follow-up request to
+    // /teams/{id} (which 403s for clubs no longer in a covered competition).
+    // That only works if name/shortName/tla/crest survive the mapping.
+    const raw = snap('fd-standings-pl') as {
+      standings: Array<{
+        type: string;
+        table: Array<{ team: { id: number; name: string; shortName: string; tla: string; crest: string } }>;
+      }>;
+    };
+    const totalGroup = raw.standings.find((g) => g.type === 'TOTAL')!;
+    const rawTeam = totalGroup.table[0]!.team;
+
+    const { client } = clientFor(raw);
+    const rows = await client.getStandings('PL', 2025);
+    const row = rows[0]!;
+    expect(row.teamName).toBe(rawTeam.name);
+    expect(row.teamShortName).toBe(rawTeam.shortName);
+    expect(row.teamTla).toBe(rawTeam.tla);
+    expect(row.teamCrestUrl).toBe(rawTeam.crest);
+  });
+});
+
+describe('FootballDataClient.getCompetitionTeams', () => {
+  it('maps every current club with full metadata, straight from the competition teams endpoint', async () => {
+    const raw = snap('fd-competition-teams-pd') as {
+      teams: Array<{
+        id: number; name: string; shortName: string; tla: string; crest: string;
+        venue: string; founded: number; clubColors: string;
+      }>;
+    };
+    expect(raw.teams.length).toBe(20);
+    const rawFirst = raw.teams[0]!;
+
+    const { client } = clientFor(raw);
+    const out = await client.getCompetitionTeams('PD');
+    expect(out).toHaveLength(20);
+    const first = out[0]!;
+
+    // Exact-value assertions against the real captured fixture (Athletic
+    // Club), not guessed placeholders — catches a field mix-up that a bare
+    // typeof check would miss.
+    expect(first.fdId).toBe(rawFirst.id);
+    expect(first.name).toBe(rawFirst.name);
+    expect(first.crestUrl).toBe(rawFirst.crest);
+    expect(first.venue).toBe(rawFirst.venue);
+    expect(first.founded).toBe(rawFirst.founded);
+    expect(first.name).toBe('Athletic Club');
+    expect(first.crestUrl).toBe('https://crests.football-data.org/77.png');
+    expect(first.venue).toBe('San Mamés');
+    expect(first.founded).toBe(1898);
+  });
+
+  it('confirms RCD Mallorca — the club that 403s on /teams/{id} after relegation — is absent from the current teams listing', async () => {
+    // This is the empirical basis for the historical-clubs phase: a
+    // relegated club genuinely does not appear here, so its identity must
+    // come from getStandings instead.
+    const raw = snap('fd-competition-teams-pd') as { teams: Array<{ name: string }> };
+    expect(raw.teams.some((t) => /mallorca/i.test(t.name))).toBe(false);
+  });
+
+  it('sends the auth header and hits the competition teams endpoint (no season param)', async () => {
+    const { client, calls } = clientFor(snap('fd-competition-teams-pd'));
+    await client.getCompetitionTeams('PD');
+    expect(calls[0]).toContain('/competitions/PD/teams');
+  });
+
+  it('feeds the rate-limit header back into the limiter', async () => {
+    const { client, limiter } = clientFor(snap('fd-competition-teams-pd'), {
+      'x-requests-available-minute': '6',
+    });
+    await client.getCompetitionTeams('PD');
+    expect(limiter.available).toBe(6);
+  });
 });
 
 describe('FootballDataClient.getSquad', () => {

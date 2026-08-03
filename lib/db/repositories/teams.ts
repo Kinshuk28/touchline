@@ -1,5 +1,6 @@
 import { serviceClient } from '@/lib/db/client';
 import { fetchAllRows } from '@/lib/db/paginate';
+import { dedupeByKey } from '@/lib/db/dedupe';
 
 export interface TeamRow {
   fd_id: number;
@@ -14,9 +15,16 @@ export interface TeamRow {
   club_colors: string | null;
 }
 
+/**
+ * Deduped on `fd_id` (its conflict target) before the upsert — see
+ * `lib/db/dedupe.ts`. A repeated `fd_id` in one call would otherwise make
+ * Postgres reject the whole batch with "ON CONFLICT DO UPDATE command
+ * cannot affect row a second time".
+ */
 export async function upsertTeams(rows: TeamRow[]): Promise<void> {
   if (rows.length === 0) return;
-  const { error } = await serviceClient().from('teams').upsert(rows, { onConflict: 'fd_id' });
+  const deduped = dedupeByKey(rows, (r) => r.fd_id);
+  const { error } = await serviceClient().from('teams').upsert(deduped, { onConflict: 'fd_id' });
   if (error) throw new Error(`upsertTeams: ${error.message}`);
 }
 

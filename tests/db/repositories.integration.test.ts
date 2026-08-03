@@ -201,3 +201,42 @@ d('getPlayerIdByFdId beyond the 1,000-row PostgREST cap', () => {
     expect(map.get(BASE_FD_ID + 1049)).toBeDefined();
   });
 });
+
+// Reproduces the live backfill failure (Task 9, 2026-08-03): a squad batch
+// containing the same fd_id twice (a player who moved clubs mid-window, or a
+// provider data quirk) made Postgres reject the *entire* upsert with
+// "ON CONFLICT DO UPDATE command cannot affect row a second time" — zero
+// players written. Before the fix in lib/db/dedupe.ts this test fails with
+// exactly that Postgres error; the fix must not just "not throw" but must
+// also prove last-wins by asserting the surviving row's name is the second
+// one, not the first.
+d('upsertPlayersByFdId with a duplicate conflict key in one batch', () => {
+  const DUP_FD_ID = 999_996;
+
+  afterAll(async () => {
+    await serviceClient().from('players').delete().eq('fd_id', DUP_FD_ID);
+  });
+
+  it('does not throw, writes exactly one row, and keeps the last name (last-wins)', async () => {
+    const rows: PlayerRow[] = [
+      {
+        fd_id: DUP_FD_ID, fpl_id: null, team_id: null, slug: `dup-test-player-first-${DUP_FD_ID}`,
+        name: 'First Name', position: 'Midfielder', nationality: 'Testland',
+        date_of_birth: '2000-01-01', photo_url: null,
+      },
+      {
+        fd_id: DUP_FD_ID, fpl_id: null, team_id: null, slug: `dup-test-player-second-${DUP_FD_ID}`,
+        name: 'Second Name', position: 'Forward', nationality: 'Testland',
+        date_of_birth: '2000-01-01', photo_url: null,
+      },
+    ];
+
+    await expect(upsertPlayersByFdId(rows)).resolves.not.toThrow();
+
+    const { data, error } = await serviceClient()
+      .from('players').select('fd_id, name').eq('fd_id', DUP_FD_ID);
+    expect(error).toBeNull();
+    expect(data).toHaveLength(1);
+    expect(data![0]!.name).toBe('Second Name'); // last-wins, not the first row
+  });
+});

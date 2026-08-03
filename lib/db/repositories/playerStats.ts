@@ -1,4 +1,5 @@
 import { serviceClient } from '@/lib/db/client';
+import { dedupeByKey } from '@/lib/db/dedupe';
 
 export interface PlayerStatsRow {
   player_id: number;
@@ -15,13 +16,22 @@ export interface PlayerStatsRow {
   updated_at: string;
 }
 
+/**
+ * Deduped on the composite conflict target `player_id,season,source` across
+ * the whole input before chunking into batches — see `lib/db/dedupe.ts`.
+ * Deduping must happen before the chunk loop, not per-chunk, or a duplicate
+ * pair that straddles a chunk boundary would still make Postgres reject
+ * that chunk with "ON CONFLICT DO UPDATE command cannot affect row a
+ * second time".
+ */
 export async function upsertPlayerSeasonStats(rows: PlayerStatsRow[]): Promise<void> {
   if (rows.length === 0) return;
+  const deduped = dedupeByKey(rows, (r) => `${r.player_id}|${r.season}|${r.source}`);
   const db = serviceClient();
-  for (let i = 0; i < rows.length; i += 500) {
+  for (let i = 0; i < deduped.length; i += 500) {
     const { error } = await db
       .from('player_season_stats')
-      .upsert(rows.slice(i, i + 500), { onConflict: 'player_id,season,source' });
+      .upsert(deduped.slice(i, i + 500), { onConflict: 'player_id,season,source' });
     if (error) throw new Error(`upsertPlayerSeasonStats: ${error.message}`);
   }
 }
