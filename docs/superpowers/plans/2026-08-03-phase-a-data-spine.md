@@ -221,6 +221,7 @@ git commit -m "feat: project scaffold and validated environment config"
 
 **Files:**
 - Create: `supabase/migrations/0001_init.sql`
+- Create: `supabase/migrations/0002_grants_and_rls.sql`
 - Create: `lib/db/client.ts`
 - Create: `scripts/verify-schema.ts`
 
@@ -376,7 +377,42 @@ create index players_name_trgm       on players using gin (name gin_trgm_ops);
 Open the Supabase dashboard → **SQL Editor** → **New query** → paste the entire contents of `supabase/migrations/0001_init.sql` → **Run**.
 Expected: `Success. No rows returned`.
 
-- [ ] **Step 3: Implement `lib/db/client.ts`**
+- [ ] **Step 3: Write and apply `supabase/migrations/0002_grants_and_rls.sql`**
+
+Creating tables via the SQL Editor does **not** grant the PostgREST roles
+(`anon`, `authenticated`, `service_role`) any privileges on them — Postgres
+privileges are always explicit, and the SQL Editor's own session role owns
+the new tables but nobody else does. Left unaddressed, every PostgREST
+request against every table fails with `permission denied for table <name>`,
+for every role, including `service_role` — confirmed empirically after
+applying 0001.
+
+Write `supabase/migrations/0002_grants_and_rls.sql` to:
+- grant `service_role` full read/write on all nine tables (and their
+  sequences), since ingestion jobs authenticate with it and it must be able
+  to write;
+- grant `anon` and `authenticated` **`select` only** — never insert/update/
+  delete. This is deliberate, not an oversight: Phase B ships the `anon` key
+  to the browser, so any write privilege granted to `anon` would let every
+  site visitor mutate the database (fabricate fixtures, delete standings);
+- enable Row Level Security on all nine tables with a read-only policy for
+  `anon`/`authenticated`, as defence in depth so a future accidental grant
+  still can't produce a write from the public key;
+- set default privileges for the `public` schema so tables added by later
+  migrations automatically inherit this same posture (full for
+  `service_role`, select-only for `anon`/`authenticated`) without another
+  manual grants migration.
+
+Make every statement idempotent (safe to run twice) — `drop policy if
+exists` before each `create policy`, and rely on `grant`/`alter default
+privileges`/`enable row level security` being naturally idempotent in
+Postgres.
+
+Open the Supabase dashboard → **SQL Editor** → **New query** → paste the
+entire contents of `supabase/migrations/0002_grants_and_rls.sql` → **Run**.
+Expected: `Success. No rows returned`.
+
+- [ ] **Step 4: Implement `lib/db/client.ts`**
 
 ```ts
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
@@ -394,7 +430,7 @@ export function serviceClient(): SupabaseClient {
 }
 ```
 
-- [ ] **Step 4: Implement `scripts/verify-schema.ts`**
+- [ ] **Step 5: Implement `scripts/verify-schema.ts`**
 
 ```ts
 import 'dotenv/config';
@@ -425,18 +461,20 @@ if (failed) {
 console.log('\nAll tables present.');
 ```
 
-- [ ] **Step 5: Run it**
+- [ ] **Step 6: Run it**
 
 ```bash
 npx tsx --env-file=.env.local scripts/verify-schema.ts
 ```
 
-Expected: nine `ok` lines, then `All tables present.`
+Expected: nine `ok` lines, then `All tables present.` (Requires Step 3's
+grants to already be applied — without them `service_role` itself gets
+`permission denied` on every table.)
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
-git add supabase/migrations/0001_init.sql lib/db/client.ts scripts/verify-schema.ts
+git add supabase/migrations/0001_init.sql supabase/migrations/0002_grants_and_rls.sql lib/db/client.ts scripts/verify-schema.ts
 git commit -m "feat: database schema, service client and schema verification"
 ```
 
