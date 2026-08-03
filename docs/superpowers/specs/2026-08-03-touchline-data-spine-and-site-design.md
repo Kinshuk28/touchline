@@ -155,7 +155,8 @@ One module per source, each behind a narrow typed interface, owning its own auth
 | `footballData.ts` | football-data.org | fixtures, results, standings, squads, crests, scorers |
 | `fpl.ts` | fantasy.premierleague.com | Premier League per-player statistics and photos |
 | `rss.ts` | BBC, Guardian, Sky | news headlines |
-| `apiFootball.ts` | api-sports.io | **dormant** — written and tested against recorded 2023 responses, activated only by a future paid key |
+
+No API-Football adapter is written. Its free plan cannot serve current seasons, so the code would be dead on arrival; the adapter interface exists so one can be added later if a paid key is ever acceptable, but building it now would be unused code.
 
 ### 5.2 Rate limiter — `lib/ingest/rateLimiter.ts`
 
@@ -174,8 +175,8 @@ Jobs are **staleness-driven, not clock-driven**: each asks "what in the database
 | Live/recent matches | 60s during match windows | 1 req |
 | Fixtures & results | 6h | 5 req |
 | Standings | 1h | 5 req |
-| Squads | 7d | 98 req (one per club) |
-| Top scorers | 6h | 5 req |
+| Squads | 7d, weekly job | 98 req (one per club) |
+| Top scorers | 1h, with core | 5 req |
 | FPL player stats | 6h | 1 req (single bulk endpoint) |
 | News (RSS) | 15min | 3 fetches, unmetered |
 
