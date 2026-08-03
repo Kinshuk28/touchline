@@ -37,6 +37,12 @@ These are facts established during design, not preferences. They are the reason 
 
 **Consequence:** the site cannot call a provider in response to a user action. At any real traffic level the daily cap would be exhausted in seconds. All provider traffic must be scheduled, server-side, and budget-controlled; users read only from our own database.
 
+**Netlify's free tier is credit-based:** 300 credits/month, with production deploys at 15 credits each (~20 deploys/month) and a 10-second function timeout. Ingestion therefore does **not** run on Netlify Functions — the timeout is too tight for batch jobs and deploys are the scarce resource. Netlify hosts and serves only.
+
+**Ingestion runs on GitHub Actions:** unlimited minutes on public repositories, no execution timeout, cron intervals down to 5 minutes. Workflows write directly to Supabase and consume no Netlify credits.
+
+**Hard project constraint: no paid services, ever.** Every component must sit inside a permanent free tier. Where a limit binds, the product accepts the limit rather than the invoice.
+
 **Decision:** build entirely on free tiers, with the ingestion layer written as swappable provider adapters and all poll cadences in configuration. Upgrading to a paid key later is an environment variable plus a number — not a rewrite. On the free tier, live scores update every ~10 minutes; on a paid key the same code polls every 15–30 seconds.
 
 **News is aggregated, not republished.** RSS sources give headline, snippet, image and link. We store and display headline + 1–2 sentence snippet + source attribution + timestamp, linking out to the publisher. We do not reproduce full article text — it is third-party copyright.
@@ -66,8 +72,11 @@ API-Football · football-data.org · TheSportsDB · RSS feeds
 - Next.js 15, App Router, TypeScript
 - Tailwind CSS
 - Supabase Postgres (also provides Auth and relational tables that phases C and D require)
-- Netlify hosting + Netlify Scheduled Functions
+- Netlify — hosting and CDN only
+- GitHub Actions — all scheduled ingestion
 - Vitest (unit/integration), Playwright (E2E)
+
+**Netlify credit discipline:** at 15 credits per production deploy against 300/month, deploys are a scarce resource. Work is verified locally and in CI; production deploys are batched, not made per-commit. Deploy previews are disabled for routine branches.
 
 Supabase's free tier pauses after 7 days idle; our hourly cron keeps it active, so this never triggers.
 
@@ -119,15 +128,23 @@ The live-score cron first queries the **database** (free) to determine whether a
 
 Without this guard, polling every 10 minutes costs 144 requests/day — over budget before any other job runs. With it, live polling costs zero on non-matchdays and the full allocation only when matches are actually being played.
 
-### 4.5 Scheduled functions — `netlify/functions/`
+### 4.5 Scheduled workers — `.github/workflows/`
 
-| Function | Schedule | Work |
+Ingestion runs as GitHub Actions cron workflows, not Netlify Functions. Each invokes a Node entrypoint under `scripts/ingest/` that connects to Supabase with the service role key.
+
+| Workflow | Schedule | Work |
 |---|---|---|
-| `cron-live` | `*/10 * * * *` | Match-window guard, then `fixtures?live=all` (one request covers every in-play match) |
-| `cron-hourly` | `0 * * * *` | Standings, upcoming fixtures, injuries |
-| `cron-news` | `*/15 * * * *` | RSS ingest, dedupe, classify by league/team |
-| `cron-transfers` | `0 6 * * *` | Daily transfer sweep |
-| `cron-crawl` | `30 */6 * * *` | Player statistics crawl, leftover budget only |
+| `ingest-live.yml` | `*/10 * * * *` | Match-window guard, then `fixtures?live=all` (one request covers every in-play match) |
+| `ingest-core.yml` | `0 * * * *` | Standings, upcoming fixtures, injuries |
+| `ingest-news.yml` | `*/15 * * * *` | RSS ingest, dedupe, classify by league/team |
+| `ingest-transfers.yml` | `0 6 * * *` | Daily transfer sweep |
+| `ingest-players.yml` | `30 */6 * * *` | Player statistics crawl, leftover budget only |
+
+Each workflow also declares `workflow_dispatch` so any job can be run manually from the Actions tab — the primary debugging affordance for the pipeline.
+
+**Two GitHub Actions caveats the design must absorb:**
+- Scheduled workflows are **disabled after 60 days without a repository commit**. A `keepalive.yml` workflow commits a timestamp file monthly to prevent this.
+- Cron triggers are best-effort and may be **delayed under GitHub load**, occasionally by 10+ minutes. Jobs must therefore be idempotent and driven by "what is stale in the database", never by "it is now exactly 15:00".
 
 ### 4.6 Player statistics strategy
 
@@ -263,12 +280,15 @@ Ingestion failure must never break a page.
 
 To be created by the project owner; none require a payment card:
 
+- **GitHub** — account and a **public** repository (public is what makes Actions minutes unlimited)
 - **api-sports.io** — API-Football free key
 - **football-data.org** — free key
 - **Supabase** — project (URL, anon key, service role key)
-- **Netlify** — site
+- **Netlify** — site, connected to the GitHub repository
 
 TheSportsDB and RSS feeds require no key.
+
+Secrets live in three places: `.env.local` for local development (gitignored), **GitHub repository secrets** for the ingestion workflows, and **Netlify environment variables** for page rendering. The service role key goes only in GitHub secrets and Netlify — never in client-side code, never committed.
 
 ---
 
