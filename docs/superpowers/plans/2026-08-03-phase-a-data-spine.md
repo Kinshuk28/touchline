@@ -512,6 +512,84 @@ describe('RateLimiter', () => {
     limiter.syncFromHeaders(new Headers({ 'x-requests-available-minute': 'nonsense' }));
     expect(limiter.available).toBe(9);
   });
+
+  it('a sleep that under-advances the clock does not over-grant', async () => {
+    // sleep only advances the injected clock by a fraction of the requested
+    // duration, simulating a non-monotonic Date.now() that jumps backwards
+    // between the pre-sleep and post-sleep reads.
+    let clock = 0;
+    const waits: number[] = [];
+    const availableSamples: number[] = [];
+    const capacity = 10;
+    const limiter = new RateLimiter({
+      capacity,
+      windowMs: 60_000,
+      now: () => clock,
+      sleep: async (ms: number) => {
+        waits.push(ms);
+        clock += ms / 10; // under-advance: only 10% of the requested wait
+      },
+    });
+
+    for (let i = 0; i < capacity; i++) {
+      await limiter.acquire();
+      availableSamples.push(limiter.available);
+    }
+
+    await limiter.acquire();
+    availableSamples.push(limiter.available);
+
+    expect(waits.length).toBeGreaterThan(1);
+    for (const sample of availableSamples) {
+      expect(sample).toBeLessThanOrEqual(capacity);
+    }
+  });
+
+  it('a backwards clock jump grants no free tokens', async () => {
+    // The first sleep simulates an NTP correction: wall-clock time genuinely
+    // passes, but the injected clock jumps backwards instead of forward, so
+    // the post-sleep read is earlier than the pre-sleep read. A correct
+    // limiter must not mistake that for an elapsed window; it must keep
+    // waiting (a second, real sleep) rather than force-granting a token.
+    const capacity = 10;
+    let clock = 0;
+    let sleepCalls = 0;
+    const limiter = new RateLimiter({
+      capacity,
+      windowMs: 60_000,
+      now: () => clock,
+      sleep: async (ms: number) => {
+        sleepCalls += 1;
+        if (sleepCalls === 1) {
+          clock -= 30_000; // backwards jump — no real elapsed time recorded
+        } else {
+          clock += ms; // subsequent sleeps behave normally
+        }
+      },
+    });
+
+    for (let i = 0; i < capacity; i++) await limiter.acquire();
+    expect(limiter.available).toBe(0);
+
+    await limiter.acquire();
+
+    // A single backwards-jumping sleep must not have been enough to unlock
+    // the 11th request — the limiter had to sleep again for real.
+    expect(sleepCalls).toBeGreaterThan(1);
+    // And the token it eventually granted came from a genuine refill, not a
+    // free capacity-reset: available should now reflect one token consumed
+    // out of a legitimately refilled bucket, never more than capacity.
+    expect(limiter.available).toBeLessThanOrEqual(capacity - 1);
+  });
+
+  it('refills exactly once to capacity after a genuine full window', async () => {
+    const { limiter, advance } = harness();
+    for (let i = 0; i < 10; i++) await limiter.acquire();
+    advance(60_000);
+    expect(limiter.available).toBe(10);
+    advance(1_000);
+    expect(limiter.available).toBe(10);
+  });
 });
 ```
 
@@ -551,6 +629,14 @@ export class RateLimiter {
 
   private refillIfWindowElapsed(): void {
     const elapsed = this.now() - this.windowStart;
+    if (elapsed < 0) {
+      // Non-monotonic clock (e.g. an NTP correction) moved `now()` backwards.
+      // Re-anchor the window to the current time so future waits are
+      // computed correctly, but never treat this as capacity earned —
+      // tokens are left untouched.
+      this.windowStart = this.now();
+      return;
+    }
     if (elapsed >= this.windowMs) {
       this.tokens = this.capacity;
       this.windowStart = this.now();
@@ -564,14 +650,16 @@ export class RateLimiter {
 
   async acquire(): Promise<void> {
     this.refillIfWindowElapsed();
-    if (this.tokens <= 0) {
+    // Loop rather than sleep-once-and-fall-back: `now()` is `Date.now()` by
+    // default, which is NOT monotonic. A clock correction between the
+    // pre-sleep and post-sleep reads can make `elapsed` small or negative
+    // even though real time genuinely passed during the sleep. If we still
+    // haven't seen a full window elapse, the only correct move is to wait
+    // again — never to force-grant a token that wasn't actually earned.
+    while (this.tokens <= 0) {
       const waitMs = this.windowMs - (this.now() - this.windowStart) + 250;
       await this.sleep(Math.max(waitMs, 0));
       this.refillIfWindowElapsed();
-      if (this.tokens <= 0) {
-        this.tokens = this.capacity;
-        this.windowStart = this.now();
-      }
     }
     this.tokens -= 1;
   }
@@ -594,7 +682,7 @@ export class RateLimiter {
 - [ ] **Step 4: Run the tests**
 
 Run: `npm test -- tests/ingest/rateLimiter.test.ts`
-Expected: PASS, 5 tests
+Expected: PASS, 8 tests
 
 - [ ] **Step 5: Commit**
 
