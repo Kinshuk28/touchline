@@ -49,6 +49,33 @@ These are facts established during design, not preferences. They are the reason 
 
 ---
 
+## 2a. Season timing and preseason mode
+
+Verified against football-data.org on 2026-08-03:
+
+| League | 2026-27 starts | Ends |
+|---|---|---|
+| La Liga | 2026-08-16 | 2027-05-30 |
+| Premier League | 2026-08-21 | 2027-05-30 |
+| Ligue 1 | 2026-08-22 | 2027-05-29 |
+| Serie A | 2026-08-23 | 2027-05-30 |
+| Bundesliga | 2026-08-28 | 2027-05-22 |
+
+The build begins 13–25 days before kickoff. Every league is at matchday 1 with no results, no table, and no 2026-27 player statistics. The site must therefore be correct and populated **before** any match is played, not merely correct once the season is underway.
+
+**Budget consequence (favourable):** with no matches in progress, the match-window guard suppresses all live polling, freeing the entire 100 requests/day for the player crawl. A full pass (~150 requests) completes in under two days. The crawl is therefore front-loaded during preseason so player data is complete at kickoff.
+
+**Preseason behaviour by surface:**
+
+- **Player pages** — query 2026-27 stats; when a player has no meaningful minutes in the current season, fall back to 2025-26 and label the block explicitly with the season it describes. A player page must never render empty. This fallback is permanent behaviour, not a temporary hack: it also covers new signings and January arrivals mid-season.
+- **League tables** — no 2026-27 table exists until matchday 1 concludes. Show the final 2025-26 table, clearly labelled as last season, alongside a countdown to the league's first fixture.
+- **Landing page** — the live-score strip has a preseason variant: a countdown to the next league to kick off, with the transfer feed promoted into the primary slot. August is the peak transfer window, so this is the richest content available at launch rather than a consolation.
+- **Historical backfill** — 2025-26 final standings, results and player statistics are ingested during preseason. This gives the site real content on day one and gives development real data to build against.
+
+**Testing consequence:** live-score ingestion cannot be validated against real in-play matches before 2026-08-16. Recorded response snapshots are therefore mandatory for the live path, and the match-window guard must be unit-tested against synthetic fixture states covering pre-match, in-play, half-time, finished and postponed.
+
+---
+
 ## 3. Architecture
 
 ```
@@ -148,7 +175,17 @@ Each workflow also declares `workflow_dispatch` so any job can be run manually f
 
 ### 4.6 Player statistics strategy
 
-A rolling crawl covers every player in all five leagues on a ~7–10 day cycle using leftover budget, so every player has a real page. Top scorers and assisters sit in a priority tier refreshed every 2 days. If a visitor opens a player whose record is stale and budget remains, that player is refreshed on the spot.
+A rolling crawl covers every player in all five leagues, so every player has a real page. Top scorers and assisters sit in a priority tier refreshed every 2 days. If a visitor opens a player whose record is stale and budget remains, that player is refreshed on the spot.
+
+Crawl duration depends on live-score contention:
+
+| Period | Live polling cost | Budget for crawl | Full pass |
+|---|---|---|---|
+| Preseason (now → 16 Aug) | 0 | ~80/day | **< 2 days** |
+| In-season matchday | 60 | ~15/day | ~10 days |
+| In-season non-matchday | 0 | ~80/day | ~2 days |
+
+The initial full crawl runs during preseason, so player coverage is complete before the first match. In-season, the crawl only maintains freshness rather than building coverage from nothing.
 
 ---
 
