@@ -1,4 +1,5 @@
 import { serviceClient } from '@/lib/db/client';
+import { fetchAllRows } from '@/lib/db/paginate';
 
 export interface PlayerRow {
   fd_id: number | null;
@@ -25,15 +26,29 @@ export async function upsertPlayersByFplId(rows: PlayerRow[]): Promise<void> {
 }
 
 export async function getPlayerIdByFplId(): Promise<Map<number, number>> {
-  const { data, error } = await serviceClient()
-    .from('players').select('id, fpl_id').not('fpl_id', 'is', null);
-  if (error) throw new Error(`getPlayerIdByFplId: ${error.message}`);
-  return new Map((data ?? []).map((r) => [r.fpl_id as number, r.id as number]));
+  const rows = await fetchAllRows<{ id: number; fpl_id: number }>(
+    'getPlayerIdByFplId',
+    (from, to) =>
+      serviceClient()
+        .from('players')
+        .select('id, fpl_id')
+        .not('fpl_id', 'is', null)
+        .order('id', { ascending: true })
+        .range(from, to),
+  );
+  return new Map(rows.map((r) => [r.fpl_id, r.id]));
 }
 
 export async function getPlayerIdByFdId(): Promise<Map<number, number>> {
-  const { data, error } = await serviceClient()
-    .from('players').select('id, fd_id').not('fd_id', 'is', null);
-  if (error) throw new Error(`getPlayerIdByFdId: ${error.message}`);
-  return new Map((data ?? []).map((r) => [r.fd_id as number, r.id as number]));
+  const rows = await fetchAllRows<{ id: number; fd_id: number }>(
+    'getPlayerIdByFdId',
+    (from, to) =>
+      serviceClient()
+        .from('players')
+        .select('id, fd_id')
+        .not('fd_id', 'is', null)
+        .order('id', { ascending: true })
+        .range(from, to),
+  );
+  return new Map(rows.map((r) => [r.fd_id, r.id]));
 }

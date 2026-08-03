@@ -28,7 +28,16 @@ export async function upsertFixtures(rows: FixtureRow[]): Promise<void> {
   }
 }
 
-/** Fixtures near enough to now that the guard needs to consider them. */
+/**
+ * Fixtures near enough to now that the guard needs to consider them.
+ *
+ * Deliberately left unpaginated: this queries an 8-hour kickoff window
+ * (±4 hours) across the ~5 leagues this app tracks. Even a fixture-congested
+ * day with every tracked league kicking off simultaneously is on the order of
+ * tens of matches, nowhere near PostgREST's 1,000-row default select cap
+ * (see `lib/db/paginate.ts`). Pagination here would be complexity with no
+ * corresponding risk.
+ */
 export async function getWindowFixtures(now = new Date()): Promise<WindowFixture[]> {
   const from = new Date(now.getTime() - 4 * 60 * 60 * 1000).toISOString();
   const to = new Date(now.getTime() + 4 * 60 * 60 * 1000).toISOString();

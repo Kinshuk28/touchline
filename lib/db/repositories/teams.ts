@@ -1,4 +1,5 @@
 import { serviceClient } from '@/lib/db/client';
+import { fetchAllRows } from '@/lib/db/paginate';
 
 export interface TeamRow {
   fd_id: number;
@@ -20,7 +21,10 @@ export async function upsertTeams(rows: TeamRow[]): Promise<void> {
 }
 
 export async function getTeamIdMap(): Promise<Map<number, number>> {
-  const { data, error } = await serviceClient().from('teams').select('id, fd_id');
-  if (error) throw new Error(`getTeamIdMap: ${error.message}`);
-  return new Map((data ?? []).map((r) => [r.fd_id as number, r.id as number]));
+  const rows = await fetchAllRows<{ id: number; fd_id: number }>(
+    'getTeamIdMap',
+    (from, to) =>
+      serviceClient().from('teams').select('id, fd_id').order('id', { ascending: true }).range(from, to),
+  );
+  return new Map(rows.map((r) => [r.fd_id, r.id]));
 }

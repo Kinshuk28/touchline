@@ -2215,15 +2215,29 @@ git commit -m "feat: match-window guard so live polling costs nothing off-matchd
 
 ### Task 8: Repository layer
 
+**PostgREST caps a plain `select` at 1,000 rows by default.** Any id-map helper
+that reads a whole table (`getLeagueIdMap`, `getTeamIdMap`, `getPlayerIdByFdId`,
+`getPlayerIdByFplId`) must page through results with `.range()` instead of doing
+one unpaginated select — otherwise, once the table crosses 1,000 rows, the
+helper silently returns a truncated `Map` with no error. This bit exactly this
+project: with 2,600 rows seeded into `players`, `getPlayerIdByFdId()` returned
+a map of only 1,000 entries, which downstream would mean fixtures written with
+null team ids and player stats silently dropped for every player past the
+first page. `leagues` (5 rows) and `teams` (~98 rows) are under the cap today,
+but they share the identical pattern and must use the same paginated helper —
+a future competition addition must not reintroduce the unpaginated version.
+
 **Files:**
 - Create: `lib/db/repositories/leagues.ts`, `teams.ts`, `players.ts`, `fixtures.ts`, `standings.ts`, `playerStats.ts`, `news.ts`, `runs.ts`
 - Create: `lib/db/slug.ts`
+- Create: `lib/db/paginate.ts` — shared `fetchAllRows()` helper that pages a select with `.range()` until a page returns fewer rows than the page size (1,000), so no id-map helper can silently truncate past PostgREST's default row cap
 - Test: `tests/db/slug.test.ts`, `tests/db/repositories.integration.test.ts`
 
 **Interfaces:**
 - Consumes: `serviceClient()` (Task 2), domain types (Task 4), `NewsItem` (Task 6).
 - Produces:
   - `slugify(name: string): string`
+  - `fetchAllRows<T>(context: string, fetchPage: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>, pageSize?: number): Promise<T[]>` — pages through `.range(from, to)` until a page comes back shorter than `pageSize`; guards against a non-terminating loop if a page unexpectedly returns more rows than requested
   - `upsertLeagues(rows: LeagueRow[]): Promise<void>`
   - `upsertTeams(rows: TeamRow[]): Promise<void>`
   - `upsertPlayersByFdId(rows: PlayerRow[]): Promise<void>` — squad members from football-data
@@ -2232,11 +2246,11 @@ git commit -m "feat: match-window guard so live polling costs nothing off-matchd
   - `upsertStandings(rows: StandingRow[]): Promise<void>`
   - `upsertPlayerSeasonStats(rows: PlayerStatsRow[]): Promise<void>`
   - `upsertNewsItems(items: NewsItem[]): Promise<number>` — returns count newly inserted
-  - `getTeamIdMap(): Promise<Map<number, number>>` — football-data id → internal id
-  - `getLeagueIdMap(): Promise<Map<string, number>>` — league code → internal id
-  - `getPlayerIdByFdId(): Promise<Map<number, number>>` — football-data id → internal id
-  - `getPlayerIdByFplId(): Promise<Map<number, number>>` — FPL id → internal id
-  - `getWindowFixtures(now?: Date): Promise<WindowFixture[]>`
+  - `getTeamIdMap(): Promise<Map<number, number>>` — football-data id → internal id; paginated via `fetchAllRows`, safe past 1,000 teams
+  - `getLeagueIdMap(): Promise<Map<string, number>>` — league code → internal id; paginated via `fetchAllRows`, safe past 1,000 leagues
+  - `getPlayerIdByFdId(): Promise<Map<number, number>>` — football-data id → internal id; paginated via `fetchAllRows`, safe past 1,000 players
+  - `getPlayerIdByFplId(): Promise<Map<number, number>>` — FPL id → internal id; paginated via `fetchAllRows`, safe past 1,000 players
+  - `getWindowFixtures(now?: Date): Promise<WindowFixture[]>` — deliberately left unpaginated: an 8-hour kickoff window across ~5 tracked leagues realistically returns tens of rows, nowhere near the 1,000-row cap
   - `startRun(job: string): Promise<number>`, `finishRun(id: number, status: 'ok'|'error', message: string|null, requestsUsed: number): Promise<void>`
 
 - [ ] **Step 1: Write the slug test**
@@ -2289,10 +2303,67 @@ Expected: PASS, 4 tests
 
 - [ ] **Step 5: Implement the repositories**
 
+Create `lib/db/paginate.ts` first — the shared helper every id-map getter below
+uses to stay correct once its table crosses PostgREST's 1,000-row default cap:
+
+```ts
+const PAGE_SIZE = 1000;
+
+interface PageResult<T> {
+  data: T[] | null;
+  error: { message: string } | null;
+}
+
+/**
+ * PostgREST caps a plain `select` at 1,000 rows by default. A single
+ * unpaginated select against a table past that cap does not error — it just
+ * silently returns a truncated result set. `fetchAllRows` pages through
+ * `fetchPage` with `.range(from, to)` until a page comes back shorter than
+ * `pageSize`. Callers must apply a stable `.order(...)` on their query so row
+ * order — and therefore which rows land on which page — stays consistent
+ * across the separate requests that make up one pagination run.
+ */
+export async function fetchAllRows<T>(
+  context: string,
+  fetchPage: (from: number, to: number) => PromiseLike<PageResult<T>>,
+  pageSize = PAGE_SIZE,
+): Promise<T[]> {
+  const rows: T[] = [];
+  let from = 0;
+
+  // Sanity cap so a misbehaving page (e.g. a server that ignores `range` and
+  // always returns a full page) can't spin forever.
+  const MAX_PAGES = 100_000;
+  let pagesFetched = 0;
+
+  for (;;) {
+    if (pagesFetched >= MAX_PAGES) {
+      throw new Error(`${context}: exceeded ${MAX_PAGES} pages while paginating — aborting to avoid a non-terminating loop`);
+    }
+    pagesFetched++;
+
+    const to = from + pageSize - 1;
+    const { data, error } = await fetchPage(from, to);
+    if (error) throw new Error(`${context}: ${error.message}`);
+
+    const page = data ?? [];
+    rows.push(...page);
+
+    if (page.length < pageSize) break;
+    // Advance by rows actually received, not the assumed page size, so a
+    // page that returns more than requested still makes forward progress.
+    from += page.length;
+  }
+
+  return rows;
+}
+```
+
 Create `lib/db/repositories/leagues.ts`:
 
 ```ts
 import { serviceClient } from '@/lib/db/client';
+import { fetchAllRows } from '@/lib/db/paginate';
 
 export interface LeagueRow {
   fd_code: string;
@@ -2315,9 +2386,12 @@ export async function upsertLeagues(rows: LeagueRow[]): Promise<void> {
 }
 
 export async function getLeagueIdMap(): Promise<Map<string, number>> {
-  const { data, error } = await serviceClient().from('leagues').select('id, fd_code');
-  if (error) throw new Error(`getLeagueIdMap: ${error.message}`);
-  return new Map((data ?? []).map((r) => [r.fd_code as string, r.id as number]));
+  const rows = await fetchAllRows<{ id: number; fd_code: string }>(
+    'getLeagueIdMap',
+    (from, to) =>
+      serviceClient().from('leagues').select('id, fd_code').order('id', { ascending: true }).range(from, to),
+  );
+  return new Map(rows.map((r) => [r.fd_code, r.id]));
 }
 ```
 
@@ -2325,6 +2399,7 @@ Create `lib/db/repositories/teams.ts`:
 
 ```ts
 import { serviceClient } from '@/lib/db/client';
+import { fetchAllRows } from '@/lib/db/paginate';
 
 export interface TeamRow {
   fd_id: number;
@@ -2346,9 +2421,12 @@ export async function upsertTeams(rows: TeamRow[]): Promise<void> {
 }
 
 export async function getTeamIdMap(): Promise<Map<number, number>> {
-  const { data, error } = await serviceClient().from('teams').select('id, fd_id');
-  if (error) throw new Error(`getTeamIdMap: ${error.message}`);
-  return new Map((data ?? []).map((r) => [r.fd_id as number, r.id as number]));
+  const rows = await fetchAllRows<{ id: number; fd_id: number }>(
+    'getTeamIdMap',
+    (from, to) =>
+      serviceClient().from('teams').select('id, fd_id').order('id', { ascending: true }).range(from, to),
+  );
+  return new Map(rows.map((r) => [r.fd_id, r.id]));
 }
 ```
 
@@ -2385,7 +2463,16 @@ export async function upsertFixtures(rows: FixtureRow[]): Promise<void> {
   }
 }
 
-/** Fixtures near enough to now that the guard needs to consider them. */
+/**
+ * Fixtures near enough to now that the guard needs to consider them.
+ *
+ * Deliberately left unpaginated: this queries an 8-hour kickoff window
+ * (±4 hours) across the ~5 leagues this app tracks. Even a fixture-congested
+ * day with every tracked league kicking off simultaneously is on the order of
+ * tens of matches, nowhere near PostgREST's 1,000-row default select cap
+ * (see `lib/db/paginate.ts`). Pagination here would be complexity with no
+ * corresponding risk.
+ */
 export async function getWindowFixtures(now = new Date()): Promise<WindowFixture[]> {
   const from = new Date(now.getTime() - 4 * 60 * 60 * 1000).toISOString();
   const to = new Date(now.getTime() + 4 * 60 * 60 * 1000).toISOString();
@@ -2437,6 +2524,7 @@ Create `lib/db/repositories/players.ts`:
 
 ```ts
 import { serviceClient } from '@/lib/db/client';
+import { fetchAllRows } from '@/lib/db/paginate';
 
 export interface PlayerRow {
   fd_id: number | null;
@@ -2463,19 +2551,39 @@ export async function upsertPlayersByFplId(rows: PlayerRow[]): Promise<void> {
 }
 
 export async function getPlayerIdByFplId(): Promise<Map<number, number>> {
-  const { data, error } = await serviceClient()
-    .from('players').select('id, fpl_id').not('fpl_id', 'is', null);
-  if (error) throw new Error(`getPlayerIdByFplId: ${error.message}`);
-  return new Map((data ?? []).map((r) => [r.fpl_id as number, r.id as number]));
+  const rows = await fetchAllRows<{ id: number; fpl_id: number }>(
+    'getPlayerIdByFplId',
+    (from, to) =>
+      serviceClient()
+        .from('players')
+        .select('id, fpl_id')
+        .not('fpl_id', 'is', null)
+        .order('id', { ascending: true })
+        .range(from, to),
+  );
+  return new Map(rows.map((r) => [r.fpl_id, r.id]));
 }
 
 export async function getPlayerIdByFdId(): Promise<Map<number, number>> {
-  const { data, error } = await serviceClient()
-    .from('players').select('id, fd_id').not('fd_id', 'is', null);
-  if (error) throw new Error(`getPlayerIdByFdId: ${error.message}`);
-  return new Map((data ?? []).map((r) => [r.fd_id as number, r.id as number]));
+  const rows = await fetchAllRows<{ id: number; fd_id: number }>(
+    'getPlayerIdByFdId',
+    (from, to) =>
+      serviceClient()
+        .from('players')
+        .select('id, fd_id')
+        .not('fd_id', 'is', null)
+        .order('id', { ascending: true })
+        .range(from, to),
+  );
+  return new Map(rows.map((r) => [r.fd_id, r.id]));
 }
 ```
+
+**Why this matters:** with 2,600 rows seeded into `players`, the old unpaginated
+`getPlayerIdByFdId()` returned a map of only 1,000 entries — no error, just a
+silent partial result. Task 9's backfill and Task 10's ingestion jobs resolve
+foreign keys through these maps, so a truncated map means fixtures written with
+null team ids and player stats dropped for every player past the first 1,000.
 
 Create `lib/db/repositories/playerStats.ts`:
 
@@ -2570,12 +2678,13 @@ export async function finishRun(
 Create `tests/db/repositories.integration.test.ts`:
 
 ```ts
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { serviceClient } from '@/lib/db/client';
 import { upsertLeagues, getLeagueIdMap } from '@/lib/db/repositories/leagues';
 import { upsertTeams, getTeamIdMap } from '@/lib/db/repositories/teams';
 import { upsertFixtures } from '@/lib/db/repositories/fixtures';
 import { startRun, finishRun } from '@/lib/db/repositories/runs';
+import { upsertPlayersByFdId, getPlayerIdByFdId, type PlayerRow } from '@/lib/db/repositories/players';
 
 const live = process.env.RUN_DB_TESTS === '1';
 const d = live ? describe : describe.skip;
@@ -2587,6 +2696,17 @@ d('repositories against a real Supabase project', () => {
       country: 'Testland', emblem_url: null, current_season: 2026,
       season_start: '2026-08-01', season_end: '2027-05-01',
     }]);
+  });
+
+  // Delete the synthetic rows created by this test file so they never leak into
+  // the real backfill (Task 9). Order matters: fixtures/teams reference leagues,
+  // so children are removed before the parent.
+  afterAll(async () => {
+    const db = serviceClient();
+    await db.from('fixtures').delete().eq('fd_id', 999997);
+    await db.from('teams').delete().eq('fd_id', 999998);
+    await db.from('leagues').delete().eq('fd_code', 'TEST');
+    await db.from('ingest_run').delete().eq('job', 'test-job');
   });
 
   it('upserts a league idempotently', async () => {
@@ -2636,28 +2756,74 @@ d('repositories against a real Supabase project', () => {
     expect(id).toBeGreaterThan(0);
   });
 });
+
+// PostgREST caps a plain `select` at 1,000 rows by default. `getPlayerIdByFdId`
+// (like the other id-map helpers) used to do a single unpaginated select, so on
+// a table with more than 1,000 rows it silently returned a partial map — no
+// error, just missing entries. This seeds past that boundary to prove pages
+// beyond the first are actually fetched, not just that a count matches.
+d('getPlayerIdByFdId beyond the 1,000-row PostgREST cap', () => {
+  const BASE_FD_ID = 90_000_000; // far outside any real football-data.org id range
+  const SEED_COUNT = 1100;
+  const BATCH_SIZE = 500;
+
+  beforeAll(async () => {
+    const rows: PlayerRow[] = Array.from({ length: SEED_COUNT }, (_, i) => ({
+      fd_id: BASE_FD_ID + i,
+      fpl_id: null,
+      team_id: null,
+      slug: `pg-cap-test-player-${i}`,
+      name: `Pagination Cap Test Player ${i}`,
+      position: null,
+      nationality: null,
+      date_of_birth: null,
+      photo_url: null,
+    }));
+    for (let i = 0; i < rows.length; i += BATCH_SIZE) {
+      await upsertPlayersByFdId(rows.slice(i, i + BATCH_SIZE));
+    }
+  });
+
+  afterAll(async () => {
+    const db = serviceClient();
+    await db.from('players').delete().gte('fd_id', BASE_FD_ID).lt('fd_id', BASE_FD_ID + SEED_COUNT);
+
+    const { count, error } = await db
+      .from('players')
+      .select('*', { count: 'exact', head: true })
+      .gte('fd_id', BASE_FD_ID)
+      .lt('fd_id', BASE_FD_ID + SEED_COUNT);
+    expect(error).toBeNull();
+    expect(count).toBe(0);
+  });
+
+  it('returns all 1,100 seeded rows, including one from beyond the first page', async () => {
+    const map = await getPlayerIdByFdId();
+    const seededIds = [...map.keys()].filter((k) => k >= BASE_FD_ID && k < BASE_FD_ID + SEED_COUNT);
+
+    expect(map.size).toBe(SEED_COUNT);
+    expect(seededIds).toHaveLength(SEED_COUNT);
+
+    // The 1,050th seeded player (index 1049) is past the first 1,000-row page.
+    // A truncated, unpaginated select would never see it.
+    expect(map.get(BASE_FD_ID + 1049)).toBeDefined();
+  });
+});
 ```
 
 - [ ] **Step 7: Run the integration test against the real project**
 
 ```bash
-RUN_DB_TESTS=1 npx dotenv -e .env.local -- npm test -- tests/db/repositories.integration.test.ts
+RUN_DB_TESTS=1 node --env-file=.env.local node_modules/vitest/vitest.mjs run tests/db/repositories.integration.test.ts
 ```
 
-Expected: PASS, 4 tests. Without `RUN_DB_TESTS=1` they skip, which is what keeps CI free of live calls.
+Expected: PASS, 5 tests (4 from the general repository suite, plus the
+1,100-row pagination-cap test). Without `RUN_DB_TESTS=1` they skip, which is
+what keeps CI free of live calls. Both `describe` blocks clean up their own
+synthetic rows in `afterAll` — including deleting the 1,100 seeded players and
+asserting the count is back to 0 — so no manual SQL cleanup step is needed.
 
-- [ ] **Step 8: Clean up the test rows**
-
-In the Supabase SQL Editor:
-
-```sql
-delete from fixtures where fd_id = 999997;
-delete from teams    where fd_id = 999998;
-delete from leagues  where fd_code = 'TEST';
-delete from ingest_run where job = 'test-job';
-```
-
-- [ ] **Step 9: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 git add lib/db/ tests/db/

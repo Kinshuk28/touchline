@@ -4,6 +4,7 @@ import { upsertLeagues, getLeagueIdMap } from '@/lib/db/repositories/leagues';
 import { upsertTeams, getTeamIdMap } from '@/lib/db/repositories/teams';
 import { upsertFixtures } from '@/lib/db/repositories/fixtures';
 import { startRun, finishRun } from '@/lib/db/repositories/runs';
+import { upsertPlayersByFdId, getPlayerIdByFdId, type PlayerRow } from '@/lib/db/repositories/players';
 
 const live = process.env.RUN_DB_TESTS === '1';
 const d = live ? describe : describe.skip;
@@ -73,5 +74,58 @@ d('repositories against a real Supabase project', () => {
     const id = await startRun('test-job');
     await finishRun(id, 'ok', null, 3);
     expect(id).toBeGreaterThan(0);
+  });
+});
+
+// PostgREST caps a plain `select` at 1,000 rows by default. `getPlayerIdByFdId`
+// (like the other id-map helpers) used to do a single unpaginated select, so on
+// a table with more than 1,000 rows it silently returned a partial map — no
+// error, just missing entries. This seeds past that boundary to prove pages
+// beyond the first are actually fetched, not just that a count matches.
+d('getPlayerIdByFdId beyond the 1,000-row PostgREST cap', () => {
+  const BASE_FD_ID = 90_000_000; // far outside any real football-data.org id range
+  const SEED_COUNT = 1100;
+  const BATCH_SIZE = 500;
+
+  beforeAll(async () => {
+    const rows: PlayerRow[] = Array.from({ length: SEED_COUNT }, (_, i) => ({
+      fd_id: BASE_FD_ID + i,
+      fpl_id: null,
+      team_id: null,
+      slug: `pg-cap-test-player-${i}`,
+      name: `Pagination Cap Test Player ${i}`,
+      position: null,
+      nationality: null,
+      date_of_birth: null,
+      photo_url: null,
+    }));
+    for (let i = 0; i < rows.length; i += BATCH_SIZE) {
+      await upsertPlayersByFdId(rows.slice(i, i + BATCH_SIZE));
+    }
+  });
+
+  afterAll(async () => {
+    const db = serviceClient();
+    await db.from('players').delete().gte('fd_id', BASE_FD_ID).lt('fd_id', BASE_FD_ID + SEED_COUNT);
+
+    const { count, error } = await db
+      .from('players')
+      .select('*', { count: 'exact', head: true })
+      .gte('fd_id', BASE_FD_ID)
+      .lt('fd_id', BASE_FD_ID + SEED_COUNT);
+    expect(error).toBeNull();
+    expect(count).toBe(0);
+  });
+
+  it('returns all 1,100 seeded rows, including one from beyond the first page', async () => {
+    const map = await getPlayerIdByFdId();
+    const seededIds = [...map.keys()].filter((k) => k >= BASE_FD_ID && k < BASE_FD_ID + SEED_COUNT);
+
+    expect(map.size).toBe(SEED_COUNT);
+    expect(seededIds).toHaveLength(SEED_COUNT);
+
+    // The 1,050th seeded player (index 1049) is past the first 1,000-row page.
+    // A truncated, unpaginated select would never see it.
+    expect(map.get(BASE_FD_ID + 1049)).toBeDefined();
   });
 });

@@ -1,4 +1,5 @@
 import { serviceClient } from '@/lib/db/client';
+import { fetchAllRows } from '@/lib/db/paginate';
 
 export interface LeagueRow {
   fd_code: string;
@@ -21,7 +22,10 @@ export async function upsertLeagues(rows: LeagueRow[]): Promise<void> {
 }
 
 export async function getLeagueIdMap(): Promise<Map<string, number>> {
-  const { data, error } = await serviceClient().from('leagues').select('id, fd_code');
-  if (error) throw new Error(`getLeagueIdMap: ${error.message}`);
-  return new Map((data ?? []).map((r) => [r.fd_code as string, r.id as number]));
+  const rows = await fetchAllRows<{ id: number; fd_code: string }>(
+    'getLeagueIdMap',
+    (from, to) =>
+      serviceClient().from('leagues').select('id, fd_code').order('id', { ascending: true }).range(from, to),
+  );
+  return new Map(rows.map((r) => [r.fd_code, r.id]));
 }
