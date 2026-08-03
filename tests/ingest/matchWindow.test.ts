@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isMatchWindowOpen } from '@/lib/ingest/matchWindow';
+import { isMatchWindowOpen, isLiveRelevant } from '@/lib/ingest/matchWindow';
 
 const at = (iso: string) => new Date(iso);
 
@@ -120,5 +120,75 @@ describe('isMatchWindowOpen', () => {
     const f = [{ status: 'FINISHED' as const, kickoffUtc: '2026-08-21T14:00:00Z' }];
     // Exactly 150 minutes after: 14:00:00 + 150min = 16:30:00
     expect(isMatchWindowOpen(f, at('2026-08-21T16:30:00Z'))).toBe(true);
+  });
+});
+
+describe('isLiveRelevant', () => {
+  it('IN_PLAY is always relevant, regardless of kickoff time', () => {
+    const f = { status: 'IN_PLAY' as const, kickoffUtc: '2026-08-21T14:00:00Z' };
+    // Two hours after kickoff
+    expect(isLiveRelevant(f, at('2026-08-21T16:00:00Z'))).toBe(true);
+    // Three weeks after kickoff
+    expect(isLiveRelevant(f, at('2026-09-11T14:00:00Z'))).toBe(true);
+  });
+
+  it('PAUSED is always relevant, regardless of kickoff time', () => {
+    const f = { status: 'PAUSED' as const, kickoffUtc: '2026-08-21T14:00:00Z' };
+    // Two hours after kickoff
+    expect(isLiveRelevant(f, at('2026-08-21T16:00:00Z'))).toBe(true);
+  });
+
+  it('FINISHED is relevant 30 minutes after kickoff (recently finished, score may still settle)', () => {
+    const f = { status: 'FINISHED' as const, kickoffUtc: '2026-08-21T14:00:00Z' };
+    // 30 minutes after: 14:00:00 + 30min = 14:30:00
+    expect(isLiveRelevant(f, at('2026-08-21T14:30:00Z'))).toBe(true);
+  });
+
+  it('FINISHED is NOT relevant three weeks after kickoff (ancient match, this is the bug)', () => {
+    const f = { status: 'FINISHED' as const, kickoffUtc: '2026-08-21T14:00:00Z' };
+    // 21 days + 0 minutes = 30,240 minutes after kickoff
+    expect(isLiveRelevant(f, at('2026-09-11T14:00:00Z'))).toBe(false);
+  });
+
+  it('SCHEDULED is never relevant', () => {
+    const f = { status: 'SCHEDULED' as const, kickoffUtc: '2026-08-21T14:00:00Z' };
+    expect(isLiveRelevant(f, at('2026-08-21T14:30:00Z'))).toBe(false);
+  });
+
+  it('TIMED is never relevant', () => {
+    const f = { status: 'TIMED' as const, kickoffUtc: '2026-08-21T14:00:00Z' };
+    expect(isLiveRelevant(f, at('2026-08-21T14:30:00Z'))).toBe(false);
+  });
+
+  it('POSTPONED is never relevant', () => {
+    const f = { status: 'POSTPONED' as const, kickoffUtc: '2026-08-21T14:00:00Z' };
+    expect(isLiveRelevant(f, at('2026-08-21T14:30:00Z'))).toBe(false);
+  });
+
+  it('SUSPENDED is never relevant', () => {
+    const f = { status: 'SUSPENDED' as const, kickoffUtc: '2026-08-21T14:00:00Z' };
+    expect(isLiveRelevant(f, at('2026-08-21T14:30:00Z'))).toBe(false);
+  });
+
+  it('CANCELLED is never relevant', () => {
+    const f = { status: 'CANCELLED' as const, kickoffUtc: '2026-08-21T14:00:00Z' };
+    expect(isLiveRelevant(f, at('2026-08-21T14:30:00Z'))).toBe(false);
+  });
+
+  it('FINISHED: boundary at exactly 150 minutes after kickoff (relevant)', () => {
+    const f = { status: 'FINISHED' as const, kickoffUtc: '2026-08-21T14:00:00Z' };
+    // Exactly 150 minutes after: 14:00:00 + 150min = 16:30:00
+    expect(isLiveRelevant(f, at('2026-08-21T16:30:00Z'))).toBe(true);
+  });
+
+  it('FINISHED: boundary at 150 minutes + 1 second after kickoff (not relevant)', () => {
+    const f = { status: 'FINISHED' as const, kickoffUtc: '2026-08-21T14:00:00Z' };
+    // 150 minutes + 1 second: 16:30:01
+    expect(isLiveRelevant(f, at('2026-08-21T16:30:01Z'))).toBe(false);
+  });
+
+  it('FINISHED with unparseable kickoff time is not relevant', () => {
+    const f = { status: 'FINISHED' as const, kickoffUtc: 'not-a-date' };
+    expect(isLiveRelevant(f, at('2026-08-21T14:30:00Z'))).toBe(false);
   });
 });

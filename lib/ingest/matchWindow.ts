@@ -1,4 +1,4 @@
-import { IN_PLAY_STATUSES, type FixtureStatus } from '@/lib/providers/types';
+import { IN_PLAY_STATUSES, type FixtureStatus, type RawFixture } from '@/lib/providers/types';
 
 export interface WindowFixture {
   status: FixtureStatus;
@@ -12,6 +12,13 @@ export interface WindowFixture {
 // Keeping SUSPENDED "relevant" means its kickoff time contributes to the window bounds like SCHEDULED,
 // ensuring the window stays open through the suspension and any resumption.
 const DEAD_STATUSES: FixtureStatus[] = ['POSTPONED', 'CANCELLED'];
+
+// Fixtures are upserted only if their status is in-play/paused (always relevant)
+// or if they finished recently enough (within 150 minutes of kickoff) to plausibly
+// belong to the current polling window. Finished fixtures older than 150 minutes
+// must not be re-upserted on every poll, which would cause a steadily growing
+// volume of pointless database writes as the season progresses.
+export const LIVE_RELEVANCE_TRAIL_MINUTES = 150;
 
 export function isMatchWindowOpen(
   fixtures: WindowFixture[],
@@ -40,4 +47,38 @@ export function isMatchWindowOpen(
   const t = now.getTime();
 
   return t >= earliest - leadMinutes * 60_000 && t <= latest + trailMinutes * 60_000;
+}
+
+/**
+ * Determines whether a fixture should be upserted during the live polling window.
+ *
+ * IN_PLAY and PAUSED fixtures are always relevant — match state changes on every poll.
+ * FINISHED fixtures are relevant only if they finished recently (within LIVE_RELEVANCE_TRAIL_MINUTES
+ * of kickoff), to avoid re-upserts of hundreds of completed matches every five minutes
+ * once the season progresses. A fixture that finished three weeks ago must not appear
+ * in the live job's writes — that would cause a steadily growing database write volume
+ * as the season accumulates finished matches.
+ *
+ * SCHEDULED/TIMED/POSTPONED/SUSPENDED/CANCELLED fixtures are never written by the live job.
+ */
+export function isLiveRelevant(fixture: { status: FixtureStatus; kickoffUtc: string }, now: Date): boolean {
+  // In-play or paused: always relevant, regardless of kickoff time.
+  if (IN_PLAY_STATUSES.includes(fixture.status)) {
+    return true;
+  }
+
+  // Finished: relevant only if recent.
+  if (fixture.status === 'FINISHED') {
+    const kickoffTime = new Date(fixture.kickoffUtc).getTime();
+    if (Number.isNaN(kickoffTime)) {
+      return false;
+    }
+    const nowTime = now.getTime();
+    const elapsedMs = nowTime - kickoffTime;
+    const trailMs = LIVE_RELEVANCE_TRAIL_MINUTES * 60_000;
+    return elapsedMs <= trailMs;
+  }
+
+  // Everything else: not relevant (SCHEDULED, TIMED, POSTPONED, SUSPENDED, CANCELLED, AWARDED).
+  return false;
 }
