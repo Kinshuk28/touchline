@@ -115,7 +115,12 @@ export class FootballDataClient {
 
   async getScorers(code: LeagueCode, season: number): Promise<RawScorer[]> {
     const data = await this.get<{ scorers?: FdScorer[] }>(
-      `/competitions/${code}/scorers?season=${season}&limit=50`,
+      // limit=100 (the API's actual ceiling, confirmed live) rather than 50:
+      // for La Liga and Serie A — where `getSquad` returns an empty array
+      // for every club — this scorers list is the ONLY source of players at
+      // all, so doubling it doubles the entire player roster those two
+      // leagues get.
+      `/competitions/${code}/scorers?season=${season}&limit=100`,
     );
     return (data.scorers ?? []).map((s) => ({
       playerFdId: s.player.id,
@@ -124,6 +129,12 @@ export class FootballDataClient {
       goals: s.goals ?? null,
       assists: s.assists ?? null,
       playedMatches: s.playedMatches ?? null,
+      firstName: s.player.firstName ?? null,
+      lastName: s.player.lastName ?? null,
+      dateOfBirth: s.player.dateOfBirth ?? null,
+      nationality: s.player.nationality ?? null,
+      position: s.player.position ?? null,
+      shirtNumber: s.player.shirtNumber ?? null,
     }));
   }
 }
@@ -169,6 +180,12 @@ interface FdTeam {
   squad?: Array<{ id: number; name: string; position?: string; nationality?: string; dateOfBirth?: string }>;
 }
 interface FdScorer {
-  player: { id: number; name: string }; team: { id: number };
+  player: {
+    id: number; name: string;
+    firstName?: string | null; lastName?: string | null;
+    dateOfBirth?: string | null; nationality?: string | null;
+    position?: string | null; shirtNumber?: number | null;
+  };
+  team: { id: number };
   goals?: number | null; assists?: number | null; playedMatches?: number | null;
 }

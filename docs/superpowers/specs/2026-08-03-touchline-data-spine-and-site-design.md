@@ -68,9 +68,10 @@ Rate limit confirmed from live response headers: `x-requests-available-minute: 9
 
 | Need | Source | Coverage |
 |---|---|---|
-| Fixtures, results, tables, squads, crests | football-data.org | All 5 leagues |
+| Fixtures, results, tables, crests | football-data.org | All 5 leagues |
+| Squads (full current roster) | football-data.org | **PL, Bundesliga, Ligue 1 only** — La Liga and Serie A return an empty `squad` array for every club (verified: Barcelona, Inter both 0; see §2.4) |
 | Historical (2025-26) | football-data.org | All 5 leagues |
-| Top scorers / assisters | football-data.org | All 5 leagues |
+| Top scorers / assisters (also the only player source for La Liga/Serie A) | football-data.org | All 5 leagues |
 | Deep per-player statistics + photos | FPL API | **Premier League only** |
 | News, transfers, injuries (as stories) | RSS (BBC, Guardian, Sky) | Global |
 
@@ -78,7 +79,15 @@ Rate limit confirmed from live response headers: `x-requests-available-minute: 9
 
 **In-play live scores.** No free source provides true minute-by-minute in-play data. football-data.org serves scores on a delay of unknown length — unmeasurable today because no league in the free set had a match in progress. Mitigation: poll `/v4/matches` every 60 seconds (1,440 requests/day against a 14,400 ceiling — comfortably affordable) and display whatever freshness the source provides, with a visible "updated N seconds ago" stamp so latency is honest rather than hidden. **Actual latency is to be measured on 2026-08-16, the first matchday, and this section updated with the observed figure.**
 
-**Per-player statistics outside the Premier League.** La Liga, Serie A, Bundesliga and Ligue 1 players get: full bio (name, position, date of birth, nationality), club, and — where they appear in the league's top scorers — goals and assists. They do not get minutes, xG, or shot data, because no free source provides it. Premier League players get the complete set from the FPL API.
+**No squad data at all for La Liga and Serie A.** This is sharper than "per-player statistics outside the Premier League are thinner" — it was originally recorded that way and that framing understated the gap. `getSquad` (`GET /v4/teams/{id}`) returns an **empty `squad` array for every La Liga and Serie A club**, verified directly: Barcelona (fd_id 81) squad 0, Inter (fd_id 108) squad 0, while a Premier League club in the same call (Arsenal, fd_id 57) returns squad 29. Bundesliga and Ligue 1 clubs are unaffected and get full squads, same as the Premier League. The Task 9 backfill's squad phase therefore wrote **zero player rows** for La Liga's and Serie A's 23 clubs each, and every scorer-id lookup against those two leagues resolved to nothing — the exact failure this section originally warned readers to watch for, not a hypothetical.
+
+The fix in place: the scorers endpoint (`GET /v4/competitions/{code}/scorers?season=YYYY&limit=100`) is the **only** free source of players for these two leagues, and it is now used as such — a `players` row is created directly from a scorer entry's embedded `player` object (bio: name, position, date of birth, nationality — position is null in practice for every observed entry so far; shirt number where the payload has one) whenever that player doesn't already exist, before writing `player_season_stats`. This means, concretely:
+
+- **La Liga and Serie A players are limited to roughly the top 100 scorers per league per season** (the API's per-request cap), not full ~25-man squads across 20+ clubs. A player who has never scored or assisted in that competition's covered season(s) will not have a page at all.
+- **Bundesliga and Ligue 1 get full current squads** (~18-25 players per club, all clubs) via `getSquad`, the same as the Premier League, *plus* any additional scorers this path surfaces.
+- **Premier League** gets full squads from football-data.org and the complete depth/statistics set from the FPL API on top.
+
+Phase B's player pages and team squad-list views must design for this asymmetry explicitly: a La Liga or Serie A club's squad page will show only the subset of its roster that has scored or assisted (typically a double-digit fraction of a real ~25-man squad), never a fabricated "full squad" — and copy on those pages should say so, rather than implying a gap that doesn't exist. Non-PL players (all four non-PL leagues) get bio and, where they appear in the league's top scorers, goals and assists; they do not get minutes, xG, or shot data, because no free source provides it. Premier League players get the complete set from the FPL API.
 
 This asymmetry is displayed honestly: non-PL player pages show the statistics that exist and state plainly which are unavailable, rather than rendering empty charts or fabricated values. **No statistic is ever estimated, interpolated, or invented.**
 

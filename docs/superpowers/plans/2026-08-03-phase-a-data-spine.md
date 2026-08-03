@@ -814,6 +814,26 @@ Expected: keys including `matches`, `standings`, `squad`, `matches`, `scorers` r
 
 **Why two more captures were needed:** `fd-matches-pl.json` is the 2026-27 season, captured before a ball was kicked (380 SCHEDULED, 0 FINISHED). It only proves the unplayed half of the null-vs-zero rule — that an unplayed match maps to `null` goals. The played half — a real match mapping to its actual goals, half-time score and `lastUpdated`, and specifically a genuine 0-0 FINISHED match mapping to `0` rather than `null` — was entirely untested. `fd-matches-pl-2025.json` (the complete, fully-played 2025-26 season: 380 FINISHED matches, 27 of them genuine 0-0 draws) closes that gap. Similarly, `getScorers` — the only free source of goals/assists for La Liga, Serie A, Bundesliga and Ligue 1 — had zero test coverage; `fd-scorers-pl-2025.json` (season=2025, since the 2026 season returns an empty scorers list) closes it. Both fixtures are committed alongside the code, same as the original three.
 
+**Amended 2026-08-03, after the backfill (Task 9) revealed `getSquad` returns
+an empty squad for every La Liga/Serie A club:** `RawScorer` gained six
+nullable bio fields — `firstName`, `lastName`, `dateOfBirth`, `nationality`,
+`position`, `shirtNumber` — mapped from the scorer entry's embedded `player`
+object in `getScorers`. These were not needed while scorers were only used
+for goals/assists on top of an existing squad-sourced player; once the
+scorers list became the *only* source of players at all for two leagues
+(see Task 9's follow-up note and Task 10), the payload's bio data is what
+makes a real `players` row possible from a scorer entry alone. The request's
+`limit` also moved from 50 to 100 — the API's actual ceiling, confirmed
+live — which doubles the player coverage those two leagues get from this
+path. A fresh fixture, `tests/fixtures/fd-scorers-pd-2025.json` (La Liga,
+season 2025, limit 100, 100 entries), was captured because the existing PL
+fixture (also captured at the time with limit 50) did not exercise every
+field at a useful value — e.g. `shirtNumber` is null for the top scorer in
+both fixtures, so the PD fixture's non-null example (Raphinha, shirt 7) is
+what actually exercises that mapping in `tests/providers/footballData.test.ts`.
+`position` was found to be `null` for every entry in both snapshots — the
+mapping stores that faithfully rather than inventing a value.
+
 - [ ] **Step 2: Write `lib/providers/types.ts`**
 
 ```ts
@@ -3089,6 +3109,34 @@ the player's move is reflected in their new club's squad listing, and building
 real reconciliation (e.g. "most recent squad listing wins" cross-referenced
 against transfer data) is complexity this one-time backfill does not need.
 
+**Follow-up gap found after this backfill ran (2026-08-03): `getSquad` returns
+an empty `squad` array for every La Liga and Serie A club, not just the
+relegated ones.** This is a different failure from the 403 rework above — no
+error is thrown, phase 5 completes "successfully," and `collectedSquads`
+genuinely contains a `squad: []` entry for every current PD/SA club (verified
+live: Barcelona fd_id 81 squad 0, Inter fd_id 108 squad 0; a Premier League
+club in the same call, Arsenal fd_id 57, squad 29 — so this is real,
+league-specific, and not a client bug). Net effect: this backfill wrote
+**zero player rows for La Liga's and Serie A's 23 clubs each**, silently,
+because `upsertPlayersByFdId(collectedSquads.flatMap(...))` receives no rows
+at all for those two leagues rather than an error — nothing here was equipped
+to notice a whole league contributing 0 squad members.
+
+The fix (Task 10 area, see `lib/ingest/scorerPlayers.ts` and
+`scripts/ingest/seedScorerPlayers.ts`) does not touch this backfill script.
+It was scoped as a **separate, dedicated script** rather than a new phase
+appended to `backfill.ts`, deliberately: this backfill's phases 1-7 already
+ran and are correct (110 teams, fixtures, standings all landed); re-running
+the whole script to reach one new final phase would re-spend ~116 requests
+re-fetching data that does not need to change, just to exercise a step that
+did not exist when it first ran. `seedScorerPlayers.ts` re-fetches only
+`getScorers` (season 2025, limit 100) per league — 5 requests — and creates
+any player missing from the id map straight from the scorer entry's own
+`player` object (bio fields, `null` where absent, `photo_url` always null —
+football-data.org has no player photography). See Task 10 for the full
+mechanism; it is identical in both the current-season (`core.ts`) and
+previous-season (`seedScorerPlayers.ts`) paths.
+
 - [ ] **Step 1: Write `lib/ingest/leagueSeed.ts`**
 
 ```ts
@@ -3348,6 +3396,37 @@ git commit -m "feat: one-time backfill of leagues, clubs, squads and 2025-26 his
 **Interfaces:**
 - Consumes: everything from Tasks 1–9.
 - Produces: four runnable entrypoints. Each logs a one-line summary and exits non-zero on failure so GitHub Actions marks the run red.
+
+**Amended 2026-08-03, closing the La Liga/Serie A player gap surfaced by
+Task 9's backfill:** `core.ts`'s scorer step originally assumed every scorer
+it saw already had a `players` row from the backfill's squad phase — true
+for PL/Bundesliga/Ligue 1, false for La Liga/Serie A, where `getSquad`
+returns an empty squad for every club. Any scorer whose `playerFdId` was not
+in `playerIds` silently produced zero stats rows (`flatMap` returning `[]`
+for that entry) — not a crash, just a page that never gets built.
+
+The fix, in `lib/ingest/scorerPlayers.ts` (`createMissingScorerPlayers` /
+`newPlayersFromScorers`), runs between fetching `scorers` and writing
+`player_season_stats`: it upserts a `players` row for every scorer id not
+already in the map — `fd_id`, `name`, `position`, `nationality`,
+`date_of_birth` straight off the scorer's own `player` object (Task 4's
+`RawScorer` extension), `team_id` resolved via the existing team-id map,
+`slug` as `${slugify(name)}-${fdId}` (identical convention to the backfill's
+squad-based players, so a player later found in a real squad upserts onto
+the same row instead of duplicating), `photo_url` always `null`. After the
+upsert, `playerIds` is re-fetched (only when `newPlayers > 0`, to avoid an
+unnecessary DB round trip) so the very same run's stats write resolves the
+players it just created, rather than needing a second invocation.
+
+The identical helper is reused, unchanged, by
+`scripts/ingest/seedScorerPlayers.ts` for the previous season (2025) — see
+Task 9's follow-up note for why that is a separate dedicated script rather
+than a new backfill phase. `core.ts`'s own scorer step processes the
+current season (2026) with this same fix in place; it created 0 players on
+its first live re-run simply because season 2026 has 0 scorers everywhere
+(no matches played yet), not because the fix is inert — `seedScorerPlayers.ts`
+against season 2025 is what actually exercises it (96 new La Liga players,
+97 new Serie A players, live-verified).
 
 - [ ] **Step 1: Write `scripts/ingest/core.ts`**
 

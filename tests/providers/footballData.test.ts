@@ -130,11 +130,73 @@ describe('FootballDataClient.getScorers', () => {
     expect(top.playedMatches).toBe(rawTop.playedMatches);
   });
 
-  it('sends the season parameter and hits the scorers endpoint', async () => {
+  it('sends the season parameter, the limit=100 param, and hits the scorers endpoint', async () => {
     const { client, calls } = clientFor(snap('fd-scorers-pl-2025'));
     await client.getScorers('PL', 2025);
     expect(calls[0]).toContain('/competitions/PL/scorers');
     expect(calls[0]).toContain('season=2025');
+    // 100, not 50: for La Liga and Serie A — where getSquad returns an empty
+    // squad for every club — this scorers list is the only source of
+    // players at all, so the higher ceiling doubles their entire roster.
+    expect(calls[0]).toContain('limit=100');
+  });
+
+  describe('bio fields from the player object — La Liga 2025 snapshot (100 entries, season with real bio data throughout)', () => {
+    const raw = snap('fd-scorers-pd-2025') as {
+      scorers: Array<{
+        player: {
+          id: number; name: string; firstName: string | null; lastName: string | null;
+          dateOfBirth: string | null; nationality: string | null;
+          position: string | null; shirtNumber: number | null;
+        };
+        team: { id: number; name: string };
+        goals: number | null; assists: number | null;
+      }>;
+    };
+
+    it('captured 100 scorers, confirming the limit=100 request param actually returns double the old limit=50 count', () => {
+      expect(raw.scorers.length).toBe(100);
+    });
+
+    it('maps the top scorer\'s bio exactly — Kylian Mbappé, Real Madrid', async () => {
+      const rawTop = raw.scorers[0]!;
+      expect(rawTop.player.name).toBe('Kylian Mbappé');
+      expect(rawTop.team.name).toBe('Real Madrid CF');
+
+      const { client } = clientFor(raw);
+      const out = await client.getScorers('PD', 2025);
+      const top = out[0]!;
+
+      expect(top.playerFdId).toBe(3374);
+      expect(top.goals).toBe(25);
+      expect(top.assists).toBe(4);
+      expect(top.teamFdId).toBe(86);
+      expect(top.firstName).toBe(rawTop.player.firstName);
+      expect(top.lastName).toBe(rawTop.player.lastName);
+      expect(top.dateOfBirth).toBe(rawTop.player.dateOfBirth);
+      expect(top.nationality).toBe(rawTop.player.nationality);
+    });
+
+    it('maps shirtNumber to a real non-null value when the payload has one — Raphinha, shirt 7', async () => {
+      const rawWithShirt = raw.scorers.find((s) => s.player.shirtNumber !== null)!;
+      expect(rawWithShirt).toBeDefined();
+      expect(rawWithShirt.player.name).toBe('Raphinha');
+      expect(rawWithShirt.player.shirtNumber).toBe(7);
+
+      const { client } = clientFor(raw);
+      const out = await client.getScorers('PD', 2025);
+      const mapped = out.find((s) => s.playerFdId === rawWithShirt.player.id)!;
+      expect(mapped).toBeDefined();
+      expect(mapped.shirtNumber).toBe(7);
+    });
+
+    it('maps position to null, never a fabricated string, when football-data.org sends position: null — true for every entry in this snapshot, including the top scorer', async () => {
+      expect(raw.scorers.every((s) => s.player.position === null)).toBe(true);
+
+      const { client } = clientFor(raw);
+      const out = await client.getScorers('PD', 2025);
+      expect(out.every((s) => s.position === null)).toBe(true);
+    });
   });
 
   it('feeds the rate-limit header back into the limiter', async () => {

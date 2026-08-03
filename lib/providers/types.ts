@@ -76,4 +76,17 @@ export interface RawScorer {
   goals: number | null;
   assists: number | null;
   playedMatches: number | null;
+  /**
+   * Bio fields carried on the scorer's embedded `player` object. This is the
+   * only per-player source available at all for La Liga and Serie A (see
+   * `getSquad`'s doc comment — their squads come back empty), so these are
+   * nullable: not every entry is guaranteed to populate every field, and a
+   * missing value must be stored as `null`, never invented.
+   */
+  firstName: string | null;
+  lastName: string | null;
+  dateOfBirth: string | null;
+  nationality: string | null;
+  position: string | null;
+  shirtNumber: number | null;
 }

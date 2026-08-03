@@ -9,6 +9,7 @@ import { getPlayerIdByFdId } from '@/lib/db/repositories/players';
 import { upsertFixtures } from '@/lib/db/repositories/fixtures';
 import { upsertStandings } from '@/lib/db/repositories/standings';
 import { upsertPlayerSeasonStats } from '@/lib/db/repositories/playerStats';
+import { createMissingScorerPlayers } from '@/lib/ingest/scorerPlayers';
 import { startRun, finishRun } from '@/lib/db/repositories/runs';
 
 const env = loadEnv();
@@ -22,7 +23,7 @@ let requests = 0;
 try {
   const leagueIds = await getLeagueIdMap();
   const teamIds = await getTeamIdMap();
-  const playerIds = await getPlayerIdByFdId();
+  let playerIds = await getPlayerIdByFdId();
 
   for (const s of LEAGUE_SEEDS) {
     const leagueId = leagueIds.get(s.code);
@@ -54,6 +55,16 @@ try {
     // with no statistics at all. Fields FPL provides and this does not
     // (minutes, xG) are written as null, never as zero.
     const scorers = await fd.getScorers(s.code, CURRENT_SEASON); requests++;
+
+    // La Liga and Serie A get an empty squad array from getSquad for every
+    // club, so this scorers list is the ONLY source of players those two
+    // leagues have at all. Create a player row for any scorer not already
+    // in the id map (from bio fields on the payload itself, null where
+    // absent — never invented) before resolving ids for the stats write
+    // below, or those scorers' stats would silently resolve to nothing.
+    const newPlayers = await createMissingScorerPlayers(scorers, teamIds, playerIds);
+    if (newPlayers > 0) playerIds = await getPlayerIdByFdId();
+
     await upsertPlayerSeasonStats(scorers.flatMap((sc) => {
       const playerId = playerIds.get(sc.playerFdId);
       if (playerId === undefined) return [];
@@ -66,7 +77,7 @@ try {
       }];
     }));
 
-    console.log(`${s.code}: ${matches.length} fixtures, ${table.length} table rows, ${scorers.length} scorers`);
+    console.log(`${s.code}: ${matches.length} fixtures, ${table.length} table rows, ${scorers.length} scorers, ${newPlayers} players created`);
   }
 
   await finishRun(runId, 'ok', null, requests);
