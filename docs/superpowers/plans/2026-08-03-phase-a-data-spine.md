@@ -925,15 +925,32 @@ describe('FootballDataClient.getMatches — played matches (2025 season, all FIN
 });
 
 describe('FootballDataClient.getScorers', () => {
-  it('returns a non-empty array of RawScorer with mapped fields', async () => {
-    const { client } = clientFor(snap('fd-scorers-pl-2025'));
+  it('reproduces the top scorer\'s real fields exactly — would catch a goals/assists/playedMatches field swap', async () => {
+    const raw = snap('fd-scorers-pl-2025') as {
+      scorers: Array<{
+        player: { id: number; name: string };
+        team: { id: number };
+        goals: number | null;
+        assists: number | null;
+        playedMatches: number | null;
+      }>;
+    };
+    const rawTop = raw.scorers[0]!;
+
+    const { client } = clientFor(raw);
     const out = await client.getScorers('PL', 2025);
     expect(out.length).toBeGreaterThan(0);
     const top = out[0]!;
-    expect(typeof top.playerFdId).toBe('number');
-    expect(top.playerName).toBeTruthy();
-    expect(typeof top.teamFdId).toBe('number');
-    expect(typeof top.goals).toBe('number');
+
+    // Exact-value assertions (not just `typeof`): goals, assists and
+    // playedMatches are all numeric, so a mapping that swapped two of them
+    // would still satisfy a bare `typeof === 'number'` check. Comparing
+    // against the real fixture values catches that.
+    expect(top.playerFdId).toBe(rawTop.player.id);
+    expect(top.playerName).toBe(rawTop.player.name);
+    expect(top.teamFdId).toBe(rawTop.team.id);
+    expect(top.goals).toBe(rawTop.goals);
+    expect(top.playedMatches).toBe(rawTop.playedMatches);
   });
 
   it('sends the season parameter and hits the scorers endpoint', async () => {
@@ -968,12 +985,44 @@ describe('FootballDataClient.getScorers', () => {
 });
 
 describe('FootballDataClient.getStandings', () => {
-  it('maps the total table', async () => {
-    const { client } = clientFor(snap('fd-standings-pl'));
+  it('maps the TOTAL table, not HOME or AWAY — verified against a fixture with all three groups', async () => {
+    const raw = snap('fd-standings-pl') as {
+      standings: Array<{
+        type: string;
+        table: Array<{ position: number; team: { id: number }; playedGames: number; points: number }>;
+      }>;
+    };
+    const totalGroup = raw.standings.find((g) => g.type === 'TOTAL');
+    const homeGroup = raw.standings.find((g) => g.type === 'HOME');
+    const awayGroup = raw.standings.find((g) => g.type === 'AWAY');
+    expect(totalGroup).toBeDefined();
+    expect(homeGroup).toBeDefined();
+    expect(awayGroup).toBeDefined();
+
+    // Confirm `played` is a genuine discriminator in this fixture (not an
+    // assumption): a completed 38-game season shows TOTAL.played = 38 while
+    // HOME/AWAY each show 19 (one leg apiece). Note: in this real fixture
+    // TOTAL happens to sit at index 0 of `standings`, so it is located here
+    // by `.find(type === 'TOTAL')` rather than by index — that keeps the
+    // assertions below meaningful even though index-0 luck can't be ruled
+    // out for this particular snapshot.
+    expect(totalGroup!.table[0]!.playedGames).toBe(38);
+    expect(homeGroup!.table[0]!.playedGames).toBe(19);
+    expect(awayGroup!.table[0]!.playedGames).toBe(19);
+
+    const { client } = clientFor(raw);
     const rows = await client.getStandings('PL', 2025);
     expect(rows).toHaveLength(20);
     expect(rows[0]!.position).toBe(1);
     expect(rows[0]!.points).toBeGreaterThan(0);
+
+    // `played` distinguishes TOTAL (38) from HOME/AWAY (19) — this fails if
+    // getStandings picks the wrong group.
+    expect(rows[0]!.played).toBe(38);
+    // Cross-check the mapped row against the raw TOTAL group directly,
+    // located by type rather than by array index.
+    expect(rows[0]!.points).toBe(totalGroup!.table[0]!.points);
+    expect(rows[0]!.teamFdId).toBe(totalGroup!.table[0]!.team.id);
   });
 });
 
