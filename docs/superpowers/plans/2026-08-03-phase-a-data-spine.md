@@ -1859,6 +1859,7 @@ Create `tests/db/repositories.integration.test.ts`:
 
 ```ts
 import { describe, it, expect, beforeAll } from 'vitest';
+import { serviceClient } from '@/lib/db/client';
 import { upsertLeagues, getLeagueIdMap } from '@/lib/db/repositories/leagues';
 import { upsertTeams, getTeamIdMap } from '@/lib/db/repositories/teams';
 import { upsertFixtures } from '@/lib/db/repositories/fixtures';
@@ -1908,7 +1909,13 @@ d('repositories against a real Supabase project', () => {
     };
     await upsertFixtures([row]);
     await upsertFixtures([{ ...row, status: 'FINISHED', home_goals: 2, away_goals: 1 }]);
-    expect(true).toBe(true);
+
+    const { data, error } = await serviceClient()
+      .from('fixtures').select('fd_id, status, home_goals').eq('fd_id', 999997);
+    expect(error).toBeNull();
+    expect(data).toHaveLength(1);           // upserted, not duplicated
+    expect(data![0]!.status).toBe('FINISHED'); // and the update landed
+    expect(data![0]!.home_goals).toBe(2);
   });
 
   it('records a run', async () => {
@@ -1995,11 +2002,12 @@ import { FootballDataClient } from '@/lib/providers/footballData';
 import { LEAGUE_SEEDS, CURRENT_SEASON, PREVIOUS_SEASON } from '@/lib/ingest/leagueSeed';
 import { slugify } from '@/lib/db/slug';
 import { upsertLeagues, getLeagueIdMap } from '@/lib/db/repositories/leagues';
-import { upsertTeams, getTeamIdMap } from '@/lib/db/repositories/teams';
+import { upsertTeams, getTeamIdMap, type TeamRow } from '@/lib/db/repositories/teams';
 import { upsertPlayersByFdId } from '@/lib/db/repositories/players';
 import { upsertFixtures } from '@/lib/db/repositories/fixtures';
 import { upsertStandings } from '@/lib/db/repositories/standings';
 import { startRun, finishRun } from '@/lib/db/repositories/runs';
+import type { RawSquadMember } from '@/lib/providers/types';
 
 const env = loadEnv();
 const limiter = new RateLimiter({ capacity: 10, windowMs: 60_000 });
@@ -2010,7 +2018,7 @@ const runId = await startRun('backfill');
 let requests = 0;
 
 try {
-  console.log('1/5  seeding leagues');
+  console.log('1/4  seeding leagues');
   await upsertLeagues(LEAGUE_SEEDS.map((s) => ({
     fd_code: s.code, fd_id: s.fdId, slug: s.slug, name: s.name, country: s.country,
     emblem_url: `https://crests.football-data.org/${s.code}.png`,
@@ -2018,38 +2026,42 @@ try {
   })));
   const leagueIds = await getLeagueIdMap();
 
-  console.log('2/5  current-season fixtures');
-  for (const s of LEAGUE_SEEDS) {
-    const matches = await fd.getMatches(s.code, CURRENT_SEASON); requests++;
-    // Teams must exist before fixtures can reference them.
-    const teamIds = new Set<number>();
-    for (const m of matches) { teamIds.add(m.homeTeamFdId); teamIds.add(m.awayTeamFdId); }
-    console.log(`     ${s.code}: ${matches.length} matches, ${teamIds.size} clubs`);
-  }
+  // Phase 1: discover every club and its squad. Last season's table is the
+  // cheapest complete roster of clubs in a league (the current table may be
+  // empty before matchday 1).
+  console.log('2/4  clubs and squads');
+  const collectedTeams: TeamRow[] = [];
+  const collectedSquads: Array<{ teamFdId: number; squad: RawSquadMember[] }> = [];
 
-  console.log('3/5  squads and clubs (one request per club)');
   for (const s of LEAGUE_SEEDS) {
-    const standings = await fd.getStandings(s.code, PREVIOUS_SEASON); requests++;
+    const table = await fd.getStandings(s.code, PREVIOUS_SEASON); requests++;
     const leagueId = leagueIds.get(s.code)!;
-    for (const row of standings) {
+    for (const row of table) {
       const { team, squad } = await fd.getSquad(row.teamFdId); requests++;
-      await upsertTeams([{
+      collectedTeams.push({
         fd_id: team.fdId, league_id: leagueId, slug: slugify(team.name), name: team.name,
         short_name: team.shortName, tla: team.tla, crest_url: team.crestUrl,
         venue: team.venue, founded: team.founded, club_colors: team.clubColors,
-      }]);
-      const teamIds = await getTeamIdMap();
-      await upsertPlayersByFdId(squad.map((p) => ({
-        fd_id: p.fdId, fpl_id: null, team_id: teamIds.get(team.fdId) ?? null,
-        slug: `${slugify(p.name)}-${p.fdId}`, name: p.name, position: p.position,
-        nationality: p.nationality, date_of_birth: p.dateOfBirth, photo_url: null,
-      })));
+      });
+      collectedSquads.push({ teamFdId: team.fdId, squad });
     }
-    console.log(`     ${s.code}: ${standings.length} clubs done`);
+    console.log(`     ${s.code}: ${table.length} clubs`);
   }
 
-  console.log('4/5  writing fixtures for both seasons');
+  // Phase 2: write clubs, then resolve ids ONCE, then write players.
+  await upsertTeams(collectedTeams);
   const teamIds = await getTeamIdMap();
+
+  await upsertPlayersByFdId(collectedSquads.flatMap(({ teamFdId, squad }) =>
+    squad.map((p) => ({
+      fd_id: p.fdId, fpl_id: null, team_id: teamIds.get(teamFdId) ?? null,
+      slug: `${slugify(p.name)}-${p.fdId}`, name: p.name, position: p.position,
+      nationality: p.nationality, date_of_birth: p.dateOfBirth, photo_url: null,
+    }))));
+  console.log(`     ${collectedTeams.length} clubs, ${collectedSquads.reduce((n, c) => n + c.squad.length, 0)} players`);
+
+  // Phase 3: fixtures for both seasons. Fetched once each, not twice.
+  console.log('3/4  fixtures');
   for (const s of LEAGUE_SEEDS) {
     for (const season of [PREVIOUS_SEASON, CURRENT_SEASON]) {
       const matches = await fd.getMatches(s.code, season); requests++;
@@ -2066,7 +2078,7 @@ try {
     }
   }
 
-  console.log('5/5  last season final tables');
+  console.log('4/4  last season final tables');
   for (const s of LEAGUE_SEEDS) {
     const rows = await fd.getStandings(s.code, PREVIOUS_SEASON); requests++;
     await upsertStandings(rows.map((r) => ({
