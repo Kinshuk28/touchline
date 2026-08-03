@@ -409,7 +409,7 @@ const db = serviceClient();
 let failed = false;
 
 for (const table of TABLES) {
-  const { error } = await db.from(table).select('*', { head: true, count: 'exact' });
+  const { error } = await db.from(table).select('*').limit(1);
   if (error) {
     console.error(`  MISSING  ${table}  (${error.message})`);
     failed = true;
