@@ -1814,12 +1814,15 @@ git commit -m "feat: /calendar with league filters and .ics subscription"
 ### Task 8: Landing page
 
 **Files:**
-- Create: `app/page.tsx` (replacing the placeholder), `components/Countdown.tsx`, `components/NewsCard.tsx`
-- Modify: `lib/site/queries/leagues.ts` (add `getNextKickoffPerLeague`)
+- Create: `app/page.tsx` (replacing the placeholder), `components/Countdown.tsx`, `components/NewsCard.tsx`, `lib/site/countdown.ts` (review-fixes pass)
+- Modify: `lib/site/queries/leagues.ts` (add `getNextKickoffPerLeague`, `earliestKickoffPerLeague`)
 
 **Interfaces:**
 - Consumes: `getTrendingNews`, `getUpcoming`, `getLiveAndRecent`, `getLeagues`, `ScoreRow`, `Crest`.
-- Produces: `getNextKickoffPerLeague(now: Date): Promise<Array<{ league: LeagueRow; kickoffUtc: string | null }>>`
+- Produces: `getNextKickoffPerLeague(now: Date): Promise<Array<{ league: LeagueRow; kickoffUtc: string | null }>>`,
+  `earliestKickoffPerLeague(leagues: LeagueRow[], fixtures: KickoffCandidate[]): Array<{ league: LeagueRow; kickoffUtc: string | null }>`
+  (review-fixes pass, Finding 1/2/3), `countdownParts(targetIso: string, now: Date): { days: number; hours: number } | null`
+  (review-fixes pass, Finding 3).
 
 - [ ] **Step 1: Add the query to `lib/site/queries/leagues.ts`**
 
@@ -1842,6 +1845,37 @@ export async function getNextKickoffPerLeague(
 }
 ```
 
+> **Review-fixes pass, Finding 1 (IMPORTANT):** the version above reduces
+> over *every* status returned by `getFixturesInRange` — unlike
+> `getUpcoming`, which explicitly scopes to `['SCHEDULED', 'TIMED']`
+> (Task 6). A `POSTPONED` or `CANCELLED` fixture keeps its original
+> `kickoff_utc`, which can sort earlier than the real next match, so the
+> reduction above can point the front-page countdown at a match that will
+> never be played — the most visible possible bug on a preseason landing
+> page. **The status filter is required because `kickoff_utc` on a
+> non-happening fixture is not "in the past," it is simply not a real
+> future kickoff — sorting by it at all is the bug.** Fixed by applying the
+> same `KICKOFF_STATUSES = ['SCHEDULED', 'TIMED']` rule inside a new pure
+> function, `earliestKickoffPerLeague(leagues, fixtures)`, extracted out of
+> `getNextKickoffPerLeague` so the reduction is unit-testable without a
+> database.
+>
+> **Review-fixes pass, Finding 2 (IMPORTANT):** the version above also calls
+> `getFixturesInRange`, which selects every column `buildFixtureSelect()`
+> returns — including both teams' full joined records — across a 60-day,
+> all-league window, purely to derive five scalar timestamps: measured at
+> **251 rows**, each with two joined team objects, on the site's
+> highest-traffic route. Fixed by querying only `league_id,kickoff_utc,status`
+> directly (no `buildFixtureSelect()`), scoped to `KICKOFF_STATUSES`
+> server-side too, and reducing in JS via `earliestKickoffPerLeague`. One
+> query for the two columns actually needed, reduced in JS, was chosen over
+> five per-league `.order().limit(1)` queries as simpler to read for the
+> same result. See `.superpowers/sdd/task-8-report.md`, "Fix: countdown
+> could target a postponed fixture", for the RED regression test and the
+> measured row count after the rewrite. See the current source
+> (`lib/site/queries/leagues.ts`) for the exact implementation — do not
+> hand-copy the version above.
+
 - [ ] **Step 2: Write `components/Countdown.tsx`**
 
 Rendered on the server from a fixed `now` so there is no hydration mismatch; it does not tick, which is correct for a multi-day countdown.
@@ -1859,6 +1893,18 @@ export function Countdown({ targetIso, now }: { targetIso: string; now: Date }) 
   );
 }
 ```
+
+> **Review-fixes pass, Finding 3 (IMPORTANT):** the day/hour arithmetic
+> above had no unit test — it lived only inside a component, untestable
+> without a DOM/rendering library, neither of which this project has
+> installed. Extracted the arithmetic verbatim into a new pure function,
+> `countdownParts(targetIso, now)` (`lib/site/countdown.ts`), returning
+> `{ days, hours } | null`; `Countdown` now calls it and additionally
+> renders an explicit "Under way" instead of `null` when the target has
+> passed (Finding 4, below) rather than returning `null` itself — `Countdown`
+> is a plain, hookless function component, so it can also be invoked
+> directly in a test and its returned element inspected without a DOM. See
+> `tests/site/countdown.test.ts`.
 
 - [ ] **Step 3: Write `components/NewsCard.tsx`**
 
@@ -1992,13 +2038,43 @@ export default async function Home() {
 }
 ```
 
-- [ ] **Step 5: Build and commit**
+> **Review-fixes pass, Finding 4 (IMPORTANT):** `pending`'s filter above
+> (`s.kickoffUtc !== null`) only excludes leagues with no qualifying
+> fixture; it never accounted for `Countdown` returning `null` once its
+> target passes, so an expired countdown rendered the league name with
+> nothing beside it — an unexplained blank, reachable via Finding 1's
+> postponed-fixture bug or via ISR staleness alone (`revalidate = 300` on a
+> low-traffic route can lag regeneration well past five minutes, leaving a
+> countdown frozen past real kickoff). Fixed inside `Countdown` itself
+> (Finding 3, above): it renders "Under way" instead of `null` when
+> `countdownParts` returns `null`, so the expired case is now always
+> explicit rather than blank, covered directly by
+> `tests/site/countdown.test.ts`. Separately, `pending` used to rely on
+> `kickoffUtc!` — a non-null assertion the compiler could not verify against
+> that exact `.filter()` — replaced with a type-predicate filter,
+> `hasKickoff`, so the invariant (every `pending` entry has a non-null
+> `kickoffUtc`) is compiler-enforced. See the current source
+> (`app/page.tsx`) for the exact implementation — do not hand-copy the
+> version above.
+
+- [ ] **Step 5: Add unit tests, build and commit**
 
 ```bash
+npm test -- tests/site/leagues.test.ts tests/site/countdown.test.ts
 npm run build && npm run typecheck
 git add -A
 git commit -m "feat: landing page with trending news, kickoff countdown and next fixtures"
 ```
+
+Expected: `tests/site/leagues.test.ts` covers `earliestKickoffPerLeague` —
+earliest per league, ignores other leagues, `null` for a league with no
+qualifying fixture, and excludes `POSTPONED`/`CANCELLED` even when earlier
+than a valid fixture (the Finding 1 regression test, RED against the
+pre-fix reduction — see `.superpowers/sdd/task-8-report.md`).
+`tests/site/countdown.test.ts` covers `countdownParts` (days+hours several
+days out, hours-only under a day, `null` in the past, `null` exactly at
+`now`) and `Countdown`'s "Under way" rendering for both expired cases
+(Finding 4). Build and typecheck clean.
 
 ---
 

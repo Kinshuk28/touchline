@@ -7,8 +7,24 @@ import { NewsCard } from '@/components/NewsCard';
 import { Countdown } from '@/components/Countdown';
 import { Crest } from '@/components/Crest';
 import { formatKickoff } from '@/lib/site/format';
+import type { LeagueRow } from '@/lib/site/rows';
 
 export const revalidate = 300;
+
+interface PendingKickoff {
+  league: LeagueRow;
+  kickoffUtc: string;
+}
+
+/**
+ * Narrows away the null-kickoff case so TypeScript enforces the invariant
+ * at compile time — previously `pending` kept `kickoffUtc: string | null`
+ * and the render relied on a non-null assertion (`kickoffUtc!`) that the
+ * compiler could not check against this exact `.filter()`.
+ */
+function hasKickoff(entry: { league: LeagueRow; kickoffUtc: string | null }): entry is PendingKickoff {
+  return entry.kickoffUtc !== null;
+}
 
 export default async function Home() {
   const now = new Date();
@@ -20,7 +36,7 @@ export default async function Home() {
   ]);
 
   const [lead, ...rest] = news;
-  const pending = seasons.filter((s) => s.kickoffUtc !== null);
+  const pending = seasons.filter(hasKickoff);
 
   return (
     <div className="space-y-8">
@@ -44,7 +60,7 @@ export default async function Home() {
               {pending.map(({ league, kickoffUtc }) => (
                 <li key={league.id} className="flex items-center justify-between gap-2 border-b border-border pb-2 last:border-b-0 last:pb-0">
                   <span className="truncate text-sm font-medium">{league.name}</span>
-                  <Countdown targetIso={kickoffUtc!} now={now} />
+                  <Countdown targetIso={kickoffUtc} now={now} />
                 </li>
               ))}
               {pending.length === 0 && <li className="text-sm text-muted">No fixtures scheduled.</li>}
