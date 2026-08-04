@@ -1,3 +1,5 @@
+import type { FixtureStatus } from '@/lib/providers/types';
+
 export interface LeagueRow {
   id: number;
   fd_code: string;
@@ -22,7 +24,7 @@ export interface FixtureWithTeams {
   league_id: number;
   season: number;
   kickoff_utc: string;
-  status: string;
+  status: FixtureStatus;
   matchday: number | null;
   home_goals: number | null;
   away_goals: number | null;

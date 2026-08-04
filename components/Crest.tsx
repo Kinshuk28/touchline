@@ -1,38 +1,15 @@
-'use client';
-
-import Image from 'next/image';
-import { useState } from 'react';
-import { monogram, monogramColor } from '@/lib/site/monogram';
+import { CrestImage } from '@/components/CrestImage';
+import { MonogramCrest } from '@/components/MonogramCrest';
 import type { TeamLite } from '@/lib/site/rows';
 
+/**
+ * A missing crest is the *normal* case — many clubs, and most players
+ * elsewhere in the app, have no image — so that branch is plain
+ * server-rendered markup with zero client hydration. Only the "a URL exists
+ * and might 404" branch needs a client component (`CrestImage`).
+ */
 export function Crest({ team, size = 24 }: { team: TeamLite | null; size?: number }) {
-  const [failed, setFailed] = useState(false);
   const name = team?.name ?? 'Unknown club';
-  const showImage = team?.crest_url != null && !failed;
-
-  if (showImage) {
-    return (
-      <Image
-        src={team!.crest_url!}
-        alt=""
-        width={size}
-        height={size}
-        onError={() => setFailed(true)}
-        className="shrink-0 object-contain"
-        /* Crests are small, already-optimised PNGs on a CDN. Next's optimizer
-           would bill Netlify credits per transform for no visual gain. */
-        unoptimized
-      />
-    );
-  }
-
-  return (
-    <span
-      aria-hidden="true"
-      style={{ width: size, height: size, background: monogramColor(name), fontSize: size * 0.38 }}
-      className="shrink-0 grid place-items-center rounded-full font-bold tracking-tight text-white"
-    >
-      {monogram(name)}
-    </span>
-  );
+  if (team?.crest_url) return <CrestImage url={team.crest_url} name={name} size={size} />;
+  return <MonogramCrest name={name} size={size} />;
 }

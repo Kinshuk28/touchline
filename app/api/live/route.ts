@@ -5,18 +5,15 @@ export const dynamic = 'force-dynamic';
 
 export async function GET() {
   const now = new Date();
+  // Full FixtureWithTeams rows, not a thin score patch: a fixture that kicks
+  // off after the page was rendered needs club names and crests to display
+  // at all, and getLiveAndRecent already joins them — discarding the join
+  // here is what let new fixtures vanish until a manual reload (see
+  // lib/site/livePatch.ts). The payload is a handful of live matches, so
+  // returning full rows costs almost nothing.
   const fixtures = await getLiveAndRecent(now);
   return NextResponse.json(
-    {
-      now: now.toISOString(),
-      fixtures: fixtures.map((f) => ({
-        id: f.id,
-        status: f.status,
-        home_goals: f.home_goals,
-        away_goals: f.away_goals,
-        updated_at: f.updated_at,
-      })),
-    },
+    { now: now.toISOString(), fixtures },
     { headers: { 'Cache-Control': 'no-store' } },
   );
 }

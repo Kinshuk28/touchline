@@ -857,50 +857,44 @@ git commit -m "feat: kickoff formatting and deterministic club monograms"
 ### Task 4: Shared presentation components
 
 **Files:**
-- Create: `components/Crest.tsx`, `components/ScoreRow.tsx`, `components/DataAge.tsx`, `components/ThemeToggle.tsx`
+- Create: `components/Crest.tsx`, `components/CrestImage.tsx`, `components/MonogramCrest.tsx`, `components/ScoreRow.tsx`, `components/DataAge.tsx`, `components/ThemeToggle.tsx`, `lib/site/scoreDisplay.ts`
 - Modify: `app/layout.tsx` (header, nav, footer)
+- Test: `tests/site/scoreDisplay.test.ts`
 
 **Interfaces:**
-- Consumes: `monogram`, `monogramColor`, `formatKickoff`, `dataAge`, `TeamLite`, `FixtureWithTeams`.
+- Consumes: `monogram`, `monogramColor`, `formatKickoff`, `dataAge`, `IN_PLAY_STATUSES` (from `@/lib/providers/types`), `TeamLite`, `FixtureWithTeams`.
 - Produces:
   - `<Crest team={TeamLite | null} size={number} />`
+  - `<CrestImage url={string} name={string} size={number} />` — client-only, used by `Crest` when a `crest_url` exists
+  - `<MonogramCrest name={string} size={number} />` — server-renderable fallback, shared by `Crest` and `CrestImage`
+  - `scoreCellText(fixture: FixtureWithTeams, now: Date): string`
+  - `stateLabel(fixture: FixtureWithTeams): { text: string; live: boolean } | null`
   - `<ScoreRow fixture={FixtureWithTeams} now={Date} />`
   - `<DataAge updatedAt={string} now={Date} />`
   - `<ThemeToggle />`
 
-- [ ] **Step 1: Write `components/Crest.tsx`**
+> **Revised in the review-fixes pass (see bottom of Task 5):** `Crest.tsx` was
+> originally a single `'use client'` file with `useState`, even on the
+> `crest_url == null` branch — the *normal* case for many clubs and most
+> players — which forced every crest, live or dead, to hydrate for nothing.
+> It is now split three ways: `Crest` (server component, decides which to
+> render), `MonogramCrest` (server-renderable fallback markup, no state), and
+> `CrestImage` (`'use client'`, only mounted when a URL exists and might
+> 404). The visual result is identical; only the hydration cost of the
+> common no-crest case changed. `ScoreRow`'s own `LIVE`/`PLAYED`/`DEAD` sets
+> were also replaced with `lib/site/scoreDisplay.ts`'s pure, unit-tested
+> `scoreCellText`/`stateLabel`, built on the canonical `IN_PLAY_STATUSES`
+> from `lib/providers/types.ts` instead of a locally duplicated list.
 
-A missing crest is the *normal* case for many clubs, so the fallback is designed rather than apologetic.
+- [ ] **Step 1: Write `components/MonogramCrest.tsx`, `components/CrestImage.tsx` and `components/Crest.tsx`**
+
+A missing crest is the *normal* case for many clubs, so the fallback is designed rather than apologetic — and it costs no client hydration, since it's the common case.
 
 ```tsx
-'use client';
-
-import Image from 'next/image';
-import { useState } from 'react';
+// components/MonogramCrest.tsx
 import { monogram, monogramColor } from '@/lib/site/monogram';
-import type { TeamLite } from '@/lib/site/rows';
 
-export function Crest({ team, size = 24 }: { team: TeamLite | null; size?: number }) {
-  const [failed, setFailed] = useState(false);
-  const name = team?.name ?? 'Unknown club';
-  const showImage = team?.crest_url != null && !failed;
-
-  if (showImage) {
-    return (
-      <Image
-        src={team!.crest_url!}
-        alt=""
-        width={size}
-        height={size}
-        onError={() => setFailed(true)}
-        className="shrink-0 object-contain"
-        /* Crests are small, already-optimised PNGs on a CDN. Next's optimizer
-           would bill Netlify credits per transform for no visual gain. */
-        unoptimized
-      />
-    );
-  }
-
+export function MonogramCrest({ name, size }: { name: string; size: number }) {
   return (
     <span
       aria-hidden="true"
@@ -910,6 +904,48 @@ export function Crest({ team, size = 24 }: { team: TeamLite | null; size?: numbe
       {monogram(name)}
     </span>
   );
+}
+```
+
+```tsx
+// components/CrestImage.tsx
+'use client';
+
+import Image from 'next/image';
+import { useState } from 'react';
+import { MonogramCrest } from '@/components/MonogramCrest';
+
+export function CrestImage({ url, name, size }: { url: string; name: string; size: number }) {
+  const [failed, setFailed] = useState(false);
+
+  if (failed) return <MonogramCrest name={name} size={size} />;
+
+  return (
+    <Image
+      src={url}
+      alt=""
+      width={size}
+      height={size}
+      onError={() => setFailed(true)}
+      className="shrink-0 object-contain"
+      /* Crests are small, already-optimised PNGs on a CDN. Next's optimizer
+         would bill Netlify credits per transform for no visual gain. */
+      unoptimized
+    />
+  );
+}
+```
+
+```tsx
+// components/Crest.tsx
+import { CrestImage } from '@/components/CrestImage';
+import { MonogramCrest } from '@/components/MonogramCrest';
+import type { TeamLite } from '@/lib/site/rows';
+
+export function Crest({ team, size = 24 }: { team: TeamLite | null; size?: number }) {
+  const name = team?.name ?? 'Unknown club';
+  if (team?.crest_url) return <CrestImage url={team.crest_url} name={name} size={size} />;
+  return <MonogramCrest name={name} size={size} />;
 }
 ```
 
@@ -927,19 +963,42 @@ export function DataAge({ updatedAt, now }: { updatedAt: string; now: Date }) {
 }
 ```
 
-- [ ] **Step 3: Write `components/ScoreRow.tsx`**
+- [ ] **Step 3: Write `lib/site/scoreDisplay.ts` and `components/ScoreRow.tsx`**
 
-Live state carries a dot, a pulsing indicator *and* the word "Live" — never colour alone.
+Live state carries a dot, a pulsing indicator *and* the word "Live" — never colour alone. The status→display decisions are pure functions in `lib/site/`, unit-tested directly in `tests/site/scoreDisplay.test.ts`, and built on the canonical `IN_PLAY_STATUSES` from `lib/providers/types.ts` (a zero-import pure-type module — importing it from `lib/site/` does not violate the "never import `lib/db/` or `lib/ingest/`" layering rule) rather than a locally duplicated status set that could silently drift from it.
 
-```tsx
-import Link from 'next/link';
-import { Crest } from '@/components/Crest';
+```ts
+// lib/site/scoreDisplay.ts
 import { formatKickoff } from '@/lib/site/format';
+import { IN_PLAY_STATUSES } from '@/lib/providers/types';
 import type { FixtureWithTeams } from '@/lib/site/rows';
 
-const LIVE = new Set(['IN_PLAY', 'PAUSED']);
-const PLAYED = new Set(['FINISHED', 'AWARDED']);
-const DEAD = new Set(['POSTPONED', 'CANCELLED', 'SUSPENDED']);
+const RECENT_FINISHED_STATUSES = new Set(['FINISHED', 'AWARDED']);
+const DEAD_STATUSES = new Set(['POSTPONED', 'CANCELLED', 'SUSPENDED']);
+
+export function scoreCellText(fixture: FixtureWithTeams, now: Date): string {
+  const hasScore = fixture.home_goals !== null && fixture.away_goals !== null;
+  if (hasScore) return `${fixture.home_goals}–${fixture.away_goals}`;
+  if (DEAD_STATUSES.has(fixture.status)) return '—';
+  return formatKickoff(fixture.kickoff_utc, now);
+}
+
+export function stateLabel(fixture: FixtureWithTeams): { text: string; live: boolean } | null {
+  if (IN_PLAY_STATUSES.includes(fixture.status)) return { text: 'Live', live: true };
+  if (DEAD_STATUSES.has(fixture.status)) {
+    return { text: fixture.status === 'POSTPONED' ? 'Postponed' : 'Off', live: false };
+  }
+  if (RECENT_FINISHED_STATUSES.has(fixture.status)) return { text: 'FT', live: false };
+  return null;
+}
+```
+
+```tsx
+// components/ScoreRow.tsx
+import Link from 'next/link';
+import { Crest } from '@/components/Crest';
+import { scoreCellText, stateLabel } from '@/lib/site/scoreDisplay';
+import type { FixtureWithTeams } from '@/lib/site/rows';
 
 function Side({ team }: { team: FixtureWithTeams['home'] }) {
   const label = team?.short_name ?? team?.name ?? 'TBC';
@@ -954,10 +1013,7 @@ function Side({ team }: { team: FixtureWithTeams['home'] }) {
 }
 
 export function ScoreRow({ fixture, now }: { fixture: FixtureWithTeams; now: Date }) {
-  const live = LIVE.has(fixture.status);
-  const played = PLAYED.has(fixture.status);
-  const dead = DEAD.has(fixture.status);
-  const hasScore = fixture.home_goals !== null && fixture.away_goals !== null;
+  const state = stateLabel(fixture);
 
   return (
     <li
@@ -967,27 +1023,29 @@ export function ScoreRow({ fixture, now }: { fixture: FixtureWithTeams; now: Dat
       <Side team={fixture.home} />
 
       <span className="shrink-0 text-center text-sm font-bold tabular-nums" data-role="score">
-        {hasScore ? `${fixture.home_goals}–${fixture.away_goals}`
-                  : dead ? '—'
-                  : formatKickoff(fixture.kickoff_utc, now)}
+        {scoreCellText(fixture, now)}
       </span>
 
       <Side team={fixture.away} />
 
-      <span className="w-16 shrink-0 text-right text-[11px] font-semibold uppercase tracking-wide" data-role="state">
-        {live && (
+      <span
+        className="w-16 shrink-0 whitespace-nowrap text-right text-[11px] font-semibold uppercase tracking-wide"
+        data-role="state"
+      >
+        {state?.live && (
           <span className="inline-flex items-center gap-1 text-live">
             <span className="size-1.5 rounded-full bg-live" aria-hidden="true" />
             Live
           </span>
         )}
-        {!live && dead && <span className="text-muted">{fixture.status === 'POSTPONED' ? 'Postponed' : 'Off'}</span>}
-        {!live && played && <span className="text-muted">FT</span>}
+        {state && !state.live && <span className="text-muted">{state.text}</span>}
       </span>
     </li>
   );
 }
 ```
+
+Note the `w-16` state cell carries `whitespace-nowrap` — without it, "Postponed" at that width can wrap and grow the row.
 
 - [ ] **Step 4: Write `components/ThemeToggle.tsx`**
 
@@ -1017,7 +1075,7 @@ export function ThemeToggle() {
   return (
     <button
       onClick={toggle}
-      className="rounded border border-border px-2 py-1 text-[11px] font-semibold uppercase tracking-wider text-muted hover:text-text"
+      className="min-w-16 rounded border border-border px-2 py-1 text-center text-[11px] font-semibold uppercase tracking-wider text-muted hover:text-text"
       aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`}
     >
       {theme === null ? '·' : theme === 'dark' ? 'Light' : 'Dark'}
@@ -1025,6 +1083,8 @@ export function ThemeToggle() {
   );
 }
 ```
+
+`min-w-16` is sized for the widest label ("Light"/"Dark") so the button does not visibly widen once the client mounts and replaces the `·` placeholder — otherwise that swap causes a layout shift next to it in the header.
 
 - [ ] **Step 5: Put the shell into `app/layout.tsx`**
 
@@ -1055,13 +1115,17 @@ Replace the `<body>` contents:
 
 and add `import { ThemeToggle } from '@/components/ThemeToggle';` at the top.
 
-- [ ] **Step 6: Verify the build**
+- [ ] **Step 6: Run `tests/site/scoreDisplay.test.ts` and verify the build**
 
 ```bash
+npm test -- tests/site/scoreDisplay.test.ts
 npm run build && npm run typecheck
 ```
 
-Expected: both clean.
+Expected: 11 tests pass (covering, at minimum: a 0-0 finished match shows the
+score not the kickoff time; an unplayed match shows the kickoff time;
+`POSTPONED` shows a dash and a "Postponed" label; `IN_PLAY`/`PAUSED` report
+live; `FINISHED`/`AWARDED` show "FT"); build and typecheck both clean.
 
 - [ ] **Step 7: Commit**
 
@@ -1081,14 +1145,17 @@ git commit -m "feat: crest with monogram fallback, score row, theme toggle and a
 **Interfaces:**
 - Consumes: `getLiveAndRecent`, `ScoreRow`, `DataAge`.
 - Produces:
-  - `interface LivePatch { id: number; status: string; home_goals: number | null; away_goals: number | null; updated_at: string }`
-  - `applyPatches(current: FixtureWithTeams[], patches: LivePatch[]): FixtureWithTeams[]`
-  - `GET /api/live` → `{ now: string, fixtures: LivePatch[] }`
+  - `mergeLiveFixtures(current: FixtureWithTeams[], incoming: FixtureWithTeams[]): FixtureWithTeams[]`
+  - `GET /api/live` → `{ now: string, fixtures: FixtureWithTeams[] }`
   - `<LiveScores initial={FixtureWithTeams[]} nowIso={string} />`
 
 **Why the patch logic lives in `lib/site/`, not in the component:** `components/LiveScores.tsx` is a client component that imports `next/link`, `next/image` and JSX. A Vitest test importing it would fail to resolve any of those under the node environment. The pure function is therefore its own module with no React dependency, which is also what makes it directly testable.
 
-The whole point of this task: a score changing must **not** re-render the page, reset scroll, or drop the league filter.
+**Why `/api/live` returns full `FixtureWithTeams` rows, not a thin score patch:** a fixture that kicks off after the page was server-rendered is not yet on the page at all, so patching it in place needs more than a score — it needs the joined club names and crests to render a new row from scratch, and `getLiveAndRecent` already has that join.
+
+The whole point of this task: a score changing must **not** re-render the page, reset scroll, or drop the league filter — and a fixture kicking off after the page loaded must still show up without a manual reload.
+
+> **Revised in the review-fixes pass:** the version below (originally shipped as `applyPatches`, taking a thin `LivePatch[]`) only ever updated fixtures already present in `current` — a patch for an unseen fixture id was silently dropped, so a match kicking off after page load never appeared until a full reload. It is renamed `mergeLiveFixtures`, takes full `FixtureWithTeams[]` on both sides, and additionally appends fixtures new to the page and removes fixtures the server no longer reports (aged out of the recent window, or postponed) — while preserving the original's object-identity guarantee for genuinely unchanged fixtures. `POLL_MS` moved from 60s to 120s (see the comment in `LiveScores.tsx` — the ingestion job writes every 5 minutes, so 60s was polling ~5x faster than the data could change), and polling now pauses via the Page Visibility API when the tab is hidden, resuming with an immediate fetch when it becomes visible again.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1096,7 +1163,7 @@ Create `tests/site/livePatch.test.ts`:
 
 ```ts
 import { describe, it, expect } from 'vitest';
-import { applyPatches } from '@/lib/site/livePatch';
+import { mergeLiveFixtures } from '@/lib/site/livePatch';
 import type { FixtureWithTeams } from '@/lib/site/rows';
 
 const base: FixtureWithTeams = {
@@ -1107,38 +1174,58 @@ const base: FixtureWithTeams = {
   away: { id: 11, slug: 'b', name: 'B', short_name: 'B', tla: 'BBB', crest_url: null },
 };
 
-describe('applyPatches', () => {
+describe('mergeLiveFixtures', () => {
   it('updates the score of a matching fixture', () => {
-    const out = applyPatches([base], [{ id: 1, status: 'IN_PLAY', home_goals: 1, away_goals: 0, updated_at: 'x' }]);
+    const out = mergeLiveFixtures([base], [{ ...base, home_goals: 1 }]);
     expect(out[0]!.home_goals).toBe(1);
   });
 
-  it('preserves joined team data the patch does not carry', () => {
-    const out = applyPatches([base], [{ id: 1, status: 'IN_PLAY', home_goals: 2, away_goals: 1, updated_at: 'x' }]);
+  it('preserves joined team data the server still sends back', () => {
+    const patched = { ...base, home_goals: 2, away_goals: 1 };
+    const out = mergeLiveFixtures([base], [patched]);
     expect(out[0]!.home!.name).toBe('A');
     expect(out[0]!.away!.slug).toBe('b');
   });
 
-  it('leaves fixtures with no patch untouched, by identity', () => {
+  it('leaves an unchanged fixture untouched, by identity', () => {
     const other = { ...base, id: 2 };
-    const out = applyPatches([base, other], [{ id: 1, status: 'IN_PLAY', home_goals: 3, away_goals: 0, updated_at: 'x' }]);
-    expect(out[1]).toBe(other);
+    const changed = { ...base, home_goals: 3 };
+    const out = mergeLiveFixtures([base, other], [changed, other]);
+    expect(out.find((f) => f.id === 2)).toBe(other);
   });
 
-  it('ignores a patch for a fixture not on the page', () => {
-    const out = applyPatches([base], [{ id: 999, status: 'IN_PLAY', home_goals: 9, away_goals: 9, updated_at: 'x' }]);
-    expect(out[0]!.home_goals).toBe(0);
+  it('appends a fixture the page has not seen yet', () => {
+    const kickedOff: FixtureWithTeams = {
+      ...base, id: 42, kickoff_utc: '2026-08-16T15:00:00Z',
+      home: { id: 20, slug: 'c', name: 'C', short_name: 'C', tla: 'CCC', crest_url: null },
+      away: { id: 21, slug: 'd', name: 'D', short_name: 'D', tla: 'DDD', crest_url: null },
+    };
+    const out = mergeLiveFixtures([base], [base, kickedOff]);
+    expect(out.some((f) => f.id === 42)).toBe(true);
+    expect(out.find((f) => f.id === 42)?.home?.name).toBe('C');
+  });
+
+  it('removes a fixture the server no longer returns', () => {
+    const other = { ...base, id: 2 };
+    const out = mergeLiveFixtures([base, other], [base]);
+    expect(out.some((f) => f.id === 2)).toBe(false);
     expect(out).toHaveLength(1);
   });
 
   it('carries a status transition through to full time', () => {
-    const out = applyPatches([base], [{ id: 1, status: 'FINISHED', home_goals: 2, away_goals: 2, updated_at: 'x' }]);
+    const out = mergeLiveFixtures([base], [{ ...base, status: 'FINISHED', home_goals: 2, away_goals: 2 }]);
     expect(out[0]!.status).toBe('FINISHED');
   });
 
   it('accepts a null score without coercing it to zero', () => {
-    const out = applyPatches([base], [{ id: 1, status: 'POSTPONED', home_goals: null, away_goals: null, updated_at: 'x' }]);
+    const out = mergeLiveFixtures([base], [{ ...base, status: 'POSTPONED', home_goals: null, away_goals: null }]);
     expect(out[0]!.home_goals).toBeNull();
+  });
+
+  it('keeps the result ordered by kickoff_utc ascending, matching the server', () => {
+    const earlier: FixtureWithTeams = { ...base, id: 99, kickoff_utc: '2026-08-16T12:00:00Z' };
+    const out = mergeLiveFixtures([base], [base, earlier]);
+    expect(out.map((f) => f.id)).toEqual([99, 1]);
   });
 });
 ```
@@ -1148,44 +1235,50 @@ describe('applyPatches', () => {
 Run: `npm test -- tests/site/livePatch.test.ts`
 Expected: FAIL — `Cannot find module '@/lib/site/livePatch'`
 
+> **Review-fixes pass, appended evidence:** before this rewrite, two
+> regression cases were added against the *original* `applyPatches` (thin
+> `LivePatch[]`, id-keyed, mapping only over `current`) to prove the
+> append/remove bug was real, not hypothetical — both failed as predicted:
+> `REGRESSION: appends a fixture the page has not seen yet` (expected `true`,
+> got `false` — the id-42 patch was silently dropped) and `REGRESSION:
+> removes a fixture the server no longer returns` (expected `false`, got
+> `true` — a fixture absent from the server's response stayed on the page
+> forever). See `.superpowers/sdd/task-5-report.md` for the full RED output.
+
 - [ ] **Step 3: Write `lib/site/livePatch.ts`**
 
 ```ts
 import type { FixtureWithTeams } from '@/lib/site/rows';
 
-/** The minimal shape /api/live returns — scores and status, nothing joined. */
-export interface LivePatch {
-  id: number;
-  status: string;
-  home_goals: number | null;
-  away_goals: number | null;
-  updated_at: string;
-}
-
 /**
- * Returns a new array only where something actually changed. Unchanged
- * fixtures keep their original object identity so React skips re-rendering
- * those rows — that is what keeps scroll position and open state intact
- * when a goal lands.
+ * Merges what `/api/live` currently reports into what the page is showing:
+ * updates fixtures already present (preserving object identity when nothing
+ * changed, so React skips re-rendering — that's what keeps scroll position
+ * and open filters intact), appends fixtures new to the page, removes
+ * fixtures the server no longer reports, and keeps the result ordered by
+ * kickoff_utc ascending.
  */
-export function applyPatches(
+export function mergeLiveFixtures(
   current: FixtureWithTeams[],
-  patches: LivePatch[],
+  incoming: FixtureWithTeams[],
 ): FixtureWithTeams[] {
-  if (patches.length === 0) return current;
-  const byId = new Map(patches.map((p) => [p.id, p]));
-  return current.map((f) => {
-    const p = byId.get(f.id);
-    if (!p) return f;
-    if (p.status === f.status && p.home_goals === f.home_goals && p.away_goals === f.away_goals) return f;
-    return {
-      ...f,
-      status: p.status,
-      home_goals: p.home_goals,
-      away_goals: p.away_goals,
-      updated_at: p.updated_at,
-    };
+  const currentById = new Map(current.map((f) => [f.id, f]));
+
+  const merged = incoming.map((next) => {
+    const prev = currentById.get(next.id);
+    if (
+      prev &&
+      prev.status === next.status &&
+      prev.home_goals === next.home_goals &&
+      prev.away_goals === next.away_goals
+    ) {
+      return prev;
+    }
+    return next;
   });
+
+  merged.sort((a, b) => a.kickoff_utc.localeCompare(b.kickoff_utc));
+  return merged;
 }
 ```
 
@@ -1199,18 +1292,12 @@ export const dynamic = 'force-dynamic';
 
 export async function GET() {
   const now = new Date();
+  // Full FixtureWithTeams rows, not a score-only patch — a fixture that
+  // kicks off after the page was rendered needs club names and crests to
+  // render at all, and getLiveAndRecent already joins them.
   const fixtures = await getLiveAndRecent(now);
   return NextResponse.json(
-    {
-      now: now.toISOString(),
-      fixtures: fixtures.map((f) => ({
-        id: f.id,
-        status: f.status,
-        home_goals: f.home_goals,
-        away_goals: f.away_goals,
-        updated_at: f.updated_at,
-      })),
-    },
+    { now: now.toISOString(), fixtures },
     { headers: { 'Cache-Control': 'no-store' } },
   );
 }
@@ -1224,10 +1311,25 @@ export async function GET() {
 import { useEffect, useState } from 'react';
 import { ScoreRow } from '@/components/ScoreRow';
 import { DataAge } from '@/components/DataAge';
-import { applyPatches, type LivePatch } from '@/lib/site/livePatch';
+import { mergeLiveFixtures } from '@/lib/site/livePatch';
 import type { FixtureWithTeams } from '@/lib/site/rows';
 
-const POLL_MS = 60_000;
+// The ingest job writes every 5 minutes; 2 minutes stays comfortably
+// fresher than the write cadence while halving request/DB-read volume
+// versus a 60s poll.
+const POLL_MS = 120_000;
+
+interface LiveResponse { now: string; fixtures: FixtureWithTeams[] }
+
+async function fetchLive(): Promise<LiveResponse | null> {
+  try {
+    const res = await fetch('/api/live', { cache: 'no-store' });
+    if (!res.ok) return null;
+    return (await res.json()) as LiveResponse;
+  } catch {
+    return null; // A failed poll is not worth disturbing the page for; the next one retries.
+  }
+}
 
 export function LiveScores({ initial, nowIso }: { initial: FixtureWithTeams[]; nowIso: string }) {
   const [fixtures, setFixtures] = useState(initial);
@@ -1235,19 +1337,32 @@ export function LiveScores({ initial, nowIso }: { initial: FixtureWithTeams[]; n
 
   useEffect(() => {
     let cancelled = false;
-    const id = setInterval(async () => {
-      try {
-        const res = await fetch('/api/live', { cache: 'no-store' });
-        if (!res.ok) return;
-        const body = (await res.json()) as { now: string; fixtures: LivePatch[] };
-        if (cancelled) return;
-        setFixtures((prev) => applyPatches(prev, body.fixtures));
-        setStamp(body.now);
-      } catch {
-        /* A failed poll is not worth disturbing the page for; the next one retries. */
-      }
-    }, POLL_MS);
-    return () => { cancelled = true; clearInterval(id); };
+    let intervalId: ReturnType<typeof setInterval> | null = null;
+
+    async function poll() {
+      const body = await fetchLive();
+      if (cancelled || !body) return;
+      setFixtures((prev) => mergeLiveFixtures(prev, body.fixtures));
+      setStamp(body.now);
+    }
+
+    function start() { if (intervalId === null) intervalId = setInterval(poll, POLL_MS); }
+    function stop() { if (intervalId !== null) { clearInterval(intervalId); intervalId = null; } }
+
+    // Pause while the tab is hidden/backgrounded; resume with an immediate
+    // fetch on return so the user sees current scores right away.
+    function handleVisibilityChange() {
+      if (document.visibilityState === 'hidden') stop();
+      else { start(); void poll(); }
+    }
+
+    if (document.visibilityState !== 'hidden') start();
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      cancelled = true;
+      stop();
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   }, []);
 
   const now = new Date(stamp);
@@ -1271,7 +1386,7 @@ export function LiveScores({ initial, nowIso }: { initial: FixtureWithTeams[]; n
 - [ ] **Step 6: Run the tests**
 
 Run: `npm test -- tests/site/livePatch.test.ts`
-Expected: PASS, 6 tests
+Expected: PASS, 8 tests
 
 - [ ] **Step 7: Verify the endpoint answers against real data**
 
@@ -1281,7 +1396,7 @@ curl -s localhost:3000/api/live | head -c 300; echo
 kill %1
 ```
 
-Expected: `{"now":"2026-…","fixtures":[]}` — an empty array is correct during preseason.
+Expected: `{"now":"2026-…","fixtures":[]}` — an empty array is correct during preseason; once matches exist, each entry is a full `FixtureWithTeams` row, not a bare score patch.
 
 - [ ] **Step 8: Commit**
 

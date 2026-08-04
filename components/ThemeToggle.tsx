@@ -23,7 +23,7 @@ export function ThemeToggle() {
   return (
     <button
       onClick={toggle}
-      className="rounded border border-border px-2 py-1 text-[11px] font-semibold uppercase tracking-wider text-muted hover:text-text"
+      className="min-w-16 rounded border border-border px-2 py-1 text-center text-[11px] font-semibold uppercase tracking-wider text-muted hover:text-text"
       aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`}
     >
       {theme === null ? '·' : theme === 'dark' ? 'Light' : 'Dark'}

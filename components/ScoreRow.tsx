@@ -1,11 +1,7 @@
 import Link from 'next/link';
 import { Crest } from '@/components/Crest';
-import { formatKickoff } from '@/lib/site/format';
+import { scoreCellText, stateLabel } from '@/lib/site/scoreDisplay';
 import type { FixtureWithTeams } from '@/lib/site/rows';
-
-const LIVE = new Set(['IN_PLAY', 'PAUSED']);
-const PLAYED = new Set(['FINISHED', 'AWARDED']);
-const DEAD = new Set(['POSTPONED', 'CANCELLED', 'SUSPENDED']);
 
 function Side({ team }: { team: FixtureWithTeams['home'] }) {
   const label = team?.short_name ?? team?.name ?? 'TBC';
@@ -20,10 +16,7 @@ function Side({ team }: { team: FixtureWithTeams['home'] }) {
 }
 
 export function ScoreRow({ fixture, now }: { fixture: FixtureWithTeams; now: Date }) {
-  const live = LIVE.has(fixture.status);
-  const played = PLAYED.has(fixture.status);
-  const dead = DEAD.has(fixture.status);
-  const hasScore = fixture.home_goals !== null && fixture.away_goals !== null;
+  const state = stateLabel(fixture);
 
   return (
     <li
@@ -33,22 +26,22 @@ export function ScoreRow({ fixture, now }: { fixture: FixtureWithTeams; now: Dat
       <Side team={fixture.home} />
 
       <span className="shrink-0 text-center text-sm font-bold tabular-nums" data-role="score">
-        {hasScore ? `${fixture.home_goals}–${fixture.away_goals}`
-                  : dead ? '—'
-                  : formatKickoff(fixture.kickoff_utc, now)}
+        {scoreCellText(fixture, now)}
       </span>
 
       <Side team={fixture.away} />
 
-      <span className="w-16 shrink-0 text-right text-[11px] font-semibold uppercase tracking-wide" data-role="state">
-        {live && (
+      <span
+        className="w-16 shrink-0 whitespace-nowrap text-right text-[11px] font-semibold uppercase tracking-wide"
+        data-role="state"
+      >
+        {state?.live && (
           <span className="inline-flex items-center gap-1 text-live">
             <span className="size-1.5 rounded-full bg-live" aria-hidden="true" />
             Live
           </span>
         )}
-        {!live && dead && <span className="text-muted">{fixture.status === 'POSTPONED' ? 'Postponed' : 'Off'}</span>}
-        {!live && played && <span className="text-muted">FT</span>}
+        {state && !state.live && <span className="text-muted">{state.text}</span>}
       </span>
     </li>
   );

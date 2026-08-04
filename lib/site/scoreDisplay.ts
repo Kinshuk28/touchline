@@ -1,0 +1,41 @@
+import { formatKickoff } from '@/lib/site/format';
+import { IN_PLAY_STATUSES } from '@/lib/providers/types';
+import type { FixtureWithTeams } from '@/lib/site/rows';
+
+// A terminal, recently-finished result — shown as "FT", never re-checked
+// against the recency window here (getLiveAndRecent already only returns
+// fixtures worth displaying, recent or otherwise).
+const RECENT_FINISHED_STATUSES = new Set(['FINISHED', 'AWARDED']);
+
+// Never shown as live and never carries a score worth trusting as final.
+const DEAD_STATUSES = new Set(['POSTPONED', 'CANCELLED', 'SUSPENDED']);
+
+/**
+ * The text shown in a score row's centre cell: the score once one exists
+ * (including a genuine 0–0), a dash for a fixture that will never resume,
+ * otherwise the kickoff time. A `null` score is never rendered as a score —
+ * only an actual pair of numbers counts as "has a score."
+ */
+export function scoreCellText(fixture: FixtureWithTeams, now: Date): string {
+  const hasScore = fixture.home_goals !== null && fixture.away_goals !== null;
+  if (hasScore) return `${fixture.home_goals}–${fixture.away_goals}`;
+  if (DEAD_STATUSES.has(fixture.status)) return '—';
+  return formatKickoff(fixture.kickoff_utc, now);
+}
+
+/**
+ * The right-hand state label ("Live", "FT", "Postponed", "Off") — `null`
+ * when a fixture is simply upcoming and has no state worth calling out.
+ */
+export function stateLabel(fixture: FixtureWithTeams): { text: string; live: boolean } | null {
+  if (IN_PLAY_STATUSES.includes(fixture.status)) {
+    return { text: 'Live', live: true };
+  }
+  if (DEAD_STATUSES.has(fixture.status)) {
+    return { text: fixture.status === 'POSTPONED' ? 'Postponed' : 'Off', live: false };
+  }
+  if (RECENT_FINISHED_STATUSES.has(fixture.status)) {
+    return { text: 'FT', live: false };
+  }
+  return null;
+}

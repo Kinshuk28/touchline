@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { applyPatches } from '@/lib/site/livePatch';
+import { mergeLiveFixtures } from '@/lib/site/livePatch';
 import type { FixtureWithTeams } from '@/lib/site/rows';
 
 const base: FixtureWithTeams = {
@@ -10,37 +10,59 @@ const base: FixtureWithTeams = {
   away: { id: 11, slug: 'b', name: 'B', short_name: 'B', tla: 'BBB', crest_url: null },
 };
 
-describe('applyPatches', () => {
+describe('mergeLiveFixtures', () => {
   it('updates the score of a matching fixture', () => {
-    const out = applyPatches([base], [{ id: 1, status: 'IN_PLAY', home_goals: 1, away_goals: 0, updated_at: 'x' }]);
+    const out = mergeLiveFixtures([base], [{ ...base, home_goals: 1 }]);
     expect(out[0]!.home_goals).toBe(1);
   });
 
-  it('preserves joined team data the patch does not carry', () => {
-    const out = applyPatches([base], [{ id: 1, status: 'IN_PLAY', home_goals: 2, away_goals: 1, updated_at: 'x' }]);
+  it('preserves joined team data the server still sends back', () => {
+    const patched = { ...base, home_goals: 2, away_goals: 1 };
+    const out = mergeLiveFixtures([base], [patched]);
     expect(out[0]!.home!.name).toBe('A');
     expect(out[0]!.away!.slug).toBe('b');
   });
 
-  it('leaves fixtures with no patch untouched, by identity', () => {
+  it('leaves an unchanged fixture untouched, by identity', () => {
     const other = { ...base, id: 2 };
-    const out = applyPatches([base, other], [{ id: 1, status: 'IN_PLAY', home_goals: 3, away_goals: 0, updated_at: 'x' }]);
-    expect(out[1]).toBe(other);
+    const changed = { ...base, home_goals: 3 };
+    const out = mergeLiveFixtures([base, other], [changed, other]);
+    expect(out.find((f) => f.id === 2)).toBe(other);
   });
 
-  it('ignores a patch for a fixture not on the page', () => {
-    const out = applyPatches([base], [{ id: 999, status: 'IN_PLAY', home_goals: 9, away_goals: 9, updated_at: 'x' }]);
-    expect(out[0]!.home_goals).toBe(0);
+  it('appends a fixture the page has not seen yet', () => {
+    const kickedOff: FixtureWithTeams = {
+      ...base,
+      id: 42,
+      kickoff_utc: '2026-08-16T15:00:00Z',
+      home: { id: 20, slug: 'c', name: 'C', short_name: 'C', tla: 'CCC', crest_url: null },
+      away: { id: 21, slug: 'd', name: 'D', short_name: 'D', tla: 'DDD', crest_url: null },
+    };
+    const out = mergeLiveFixtures([base], [base, kickedOff]);
+    expect(out.some((f) => f.id === 42)).toBe(true);
+    expect(out.find((f) => f.id === 42)?.home?.name).toBe('C');
+  });
+
+  it('removes a fixture the server no longer returns', () => {
+    const other = { ...base, id: 2 };
+    const out = mergeLiveFixtures([base, other], [base]);
+    expect(out.some((f) => f.id === 2)).toBe(false);
     expect(out).toHaveLength(1);
   });
 
   it('carries a status transition through to full time', () => {
-    const out = applyPatches([base], [{ id: 1, status: 'FINISHED', home_goals: 2, away_goals: 2, updated_at: 'x' }]);
+    const out = mergeLiveFixtures([base], [{ ...base, status: 'FINISHED', home_goals: 2, away_goals: 2 }]);
     expect(out[0]!.status).toBe('FINISHED');
   });
 
   it('accepts a null score without coercing it to zero', () => {
-    const out = applyPatches([base], [{ id: 1, status: 'POSTPONED', home_goals: null, away_goals: null, updated_at: 'x' }]);
+    const out = mergeLiveFixtures([base], [{ ...base, status: 'POSTPONED', home_goals: null, away_goals: null }]);
     expect(out[0]!.home_goals).toBeNull();
+  });
+
+  it('keeps the result ordered by kickoff_utc ascending, matching the server', () => {
+    const earlier: FixtureWithTeams = { ...base, id: 99, kickoff_utc: '2026-08-16T12:00:00Z' };
+    const out = mergeLiveFixtures([base], [base, earlier]);
+    expect(out.map((f) => f.id)).toEqual([99, 1]);
   });
 });
