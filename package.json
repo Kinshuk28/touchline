@@ -12,7 +12,8 @@
     "typecheck": "tsc --noEmit",
     "dev": "next dev",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "e2e": "playwright test"
   },
   "keywords": [],
   "author": "",
@@ -27,6 +28,8 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@netlify/plugin-nextjs": "^5.15.13",
+    "@playwright/test": "^1.62.1",
     "@tailwindcss/postcss": "^4.3.3",
     "@types/node": "^26.1.2",
     "@types/react": "^19.2.18",
@@ -36,5 +39,9 @@
     "tsx": "^4.23.5",
     "typescript": "^7.0.2",
     "vitest": "^4.1.10"
+  },
+  "allowScripts": {
+    "esbuild@0.28.1": true,
+    "fsevents@2.3.3": true
   }
 }
