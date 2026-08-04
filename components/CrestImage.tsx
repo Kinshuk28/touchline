@@ -10,7 +10,9 @@ import { MonogramCrest } from '@/components/MonogramCrest';
  * monogram. Split out of `Crest` so the far more common "no crest_url at
  * all" case never pays for hydration it doesn't need.
  */
-export function CrestImage({ url, name, size }: { url: string; name: string; size: number }) {
+export function CrestImage({
+  url, name, size, eager = false,
+}: { url: string; name: string; size: number; eager?: boolean }) {
   const [failed, setFailed] = useState(false);
 
   if (failed) return <MonogramCrest name={name} size={size} />;
@@ -21,6 +23,11 @@ export function CrestImage({ url, name, size }: { url: string; name: string; siz
       alt=""
       width={size}
       height={size}
+      // `eager`, set by an above-the-fold caller (e.g. the first screenful
+      // of /scores — see the redesign spec), so these crests don't lazy-pop
+      // in after the rest of the row has already painted. Every other
+      // caller leaves this at the default `false`, i.e. plain lazy loading.
+      loading={eager ? 'eager' : 'lazy'}
       onError={() => setFailed(true)}
       className="shrink-0 object-contain"
       /* Crests are small, already-optimised PNGs on a CDN. Next's optimizer

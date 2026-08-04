@@ -8,8 +8,10 @@ import type { TeamLite } from '@/lib/site/rows';
  * server-rendered markup with zero client hydration. Only the "a URL exists
  * and might 404" branch needs a client component (`CrestImage`).
  */
-export function Crest({ team, size = 24 }: { team: TeamLite | null; size?: number }) {
+export function Crest({
+  team, size = 24, eager = false,
+}: { team: TeamLite | null; size?: number; eager?: boolean }) {
   const name = team?.name ?? 'Unknown club';
-  if (team?.crest_url) return <CrestImage url={team.crest_url} name={name} size={size} />;
+  if (team?.crest_url) return <CrestImage url={team.crest_url} name={name} size={size} eager={eager} />;
   return <MonogramCrest name={name} size={size} />;
 }

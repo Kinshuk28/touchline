@@ -3,64 +3,133 @@
 :root {
   --bg:      #0B0E11;
   --surface: #14181D;
+  --surface-2: #1B2027;   /* elevated card, hover state */
   --border:  #232A31;
   --text:    #E8EDF2;
   --muted:   #8A94A0;
   --accent:  #C8FF00;
   --accent-ink: #0B0E11;   /* text placed ON the accent */
   --live:    #FF3B47;
+  --scrim:   rgba(11, 14, 17, .86);   /* image overlay so text stays AA */
+
+  /* Competition colours — chosen to read on #0B0E11, and deliberately
+     distinct from --accent (lime) and --live (red), which carry other
+     meanings. Mapped from leagues.fd_code by lib/site/competition.ts; a
+     league with no mapping falls back to --muted there, never an invented
+     colour. */
+  --comp-pl:  #C4A7E7;   /* Premier League */
+  --comp-pd:  #FF6B6B;   /* La Liga */
+  --comp-sa:  #4DA3FF;   /* Serie A */
+  --comp-bl1: #FF9F45;   /* Bundesliga */
+  --comp-fl1: #7DE2D1;   /* Ligue 1 */
 }
 
 @media (prefers-color-scheme: light) {
   :root:not([data-theme="dark"]) {
     --bg:      #FBFAF8;
     --surface: #FFFFFF;
+    --surface-2: #EDE8DE;
     --border:  #E4E0D8;
     --text:    #14181D;
     --muted:   #5F6772;
     --accent:  #3F6B00;
     --accent-ink: #FFFFFF;
     --live:    #C0392B;
+    --scrim:   rgba(11, 14, 17, .86);
+
+    /* Same hue/saturation as the dark-theme values above, lightness lowered
+       until each holds >=4.5:1 against #FFFFFF (measured ~4.98–5.00:1 — see
+       .superpowers/sdd/redesign-foundation-report.md for the exact ratios
+       and the script that derived them). */
+    --comp-pl:  #8B52D0;
+    --comp-pd:  #E10000;
+    --comp-sa:  #006CDF;
+    --comp-bl1: #B15600;
+    --comp-fl1: #1C7D6D;
   }
 }
 
 :root[data-theme="light"] {
   --bg:      #FBFAF8;
   --surface: #FFFFFF;
+  --surface-2: #EDE8DE;
   --border:  #E4E0D8;
   --text:    #14181D;
   --muted:   #5F6772;
   --accent:  #3F6B00;
   --accent-ink: #FFFFFF;
   --live:    #C0392B;
+  --scrim:   rgba(11, 14, 17, .86);
+  --comp-pl:  #8B52D0;
+  --comp-pd:  #E10000;
+  --comp-sa:  #006CDF;
+  --comp-bl1: #B15600;
+  --comp-fl1: #1C7D6D;
 }
 
 :root[data-theme="dark"] {
   --bg:      #0B0E11;
   --surface: #14181D;
+  --surface-2: #1B2027;
   --border:  #232A31;
   --text:    #E8EDF2;
   --muted:   #8A94A0;
   --accent:  #C8FF00;
   --accent-ink: #0B0E11;
   --live:    #FF3B47;
+  --scrim:   rgba(11, 14, 17, .86);
+  --comp-pl:  #C4A7E7;
+  --comp-pd:  #FF6B6B;
+  --comp-sa:  #4DA3FF;
+  --comp-bl1: #FF9F45;
+  --comp-fl1: #7DE2D1;
 }
 
 @theme inline {
   --color-bg: var(--bg);
   --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
   --color-border: var(--border);
   --color-text: var(--text);
   --color-muted: var(--muted);
   --color-accent: var(--accent);
   --color-accent-ink: var(--accent-ink);
   --color-live: var(--live);
-  /* app/layout.tsx loads Inter via next/font/google and exposes it as
-     --font-inter on <html>, but nothing previously mapped Tailwind's
-     `font-sans` utility (used by <body> below) to it — so font-sans
-     resolved to Tailwind's default system stack and the Inter woff2 was
-     downloaded on every page load and never actually applied. */
-  --font-sans: var(--font-inter);
+  --color-scrim: var(--scrim);
+
+  --color-comp-pl:  var(--comp-pl);
+  --color-comp-pd:  var(--comp-pd);
+  --color-comp-sa:  var(--comp-sa);
+  --color-comp-bl1: var(--comp-bl1);
+  --color-comp-fl1: var(--comp-fl1);
+
+  /* Three roles (app/layout.tsx loads all three via next/font/google and
+     exposes them on <html> as --font-archivo / --font-ibm-plex-sans /
+     --font-ibm-plex-mono): Archivo for display, IBM Plex Sans for body,
+     IBM Plex Mono for data. Mapping them here is what makes Tailwind's
+     font-display / font-sans / font-mono utilities actually resolve to
+     them. The previous build loaded Inter this same way but never added
+     this mapping, so `font-sans` (used on <body>) fell through to
+     Tailwind's default system stack and the Inter woff2 was downloaded on
+     every page load and never applied — verified in the built CSS, see the
+     redesign-foundation report.
+  */
+  --font-display: var(--font-archivo);
+  --font-sans: var(--font-ibm-plex-sans);
+  --font-mono: var(--font-ibm-plex-mono);
+
+  /* Type scale: 11 / 13 / 15 / 18 / 24 / 32 / 44 (rem, 16px root) — one
+     scale for every headline, label, price/score and data cell in the
+     redesign, replacing Tailwind's default text-sm/text-xl steps which
+     don't line up with it. Headlines sit at 32–44 and are meant to be the
+     only things at that size. */
+  --text-11: 0.6875rem;
+  --text-13: 0.8125rem;
+  --text-15: 0.9375rem;
+  --text-18: 1.125rem;
+  --text-24: 1.5rem;
+  --text-32: 2rem;
+  --text-44: 2.75rem;
 }
 
 html { color-scheme: dark light; }
