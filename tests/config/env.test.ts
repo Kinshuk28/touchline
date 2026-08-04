@@ -30,9 +30,8 @@ describe('loadEnv', () => {
     ).toThrow(/trailing slash/);
   });
 
-  it('does not require SUPABASE_ANON_KEY — no code path reads it, and workflows/scripts that only hold the service-role key must still load', () => {
+  it('requires SUPABASE_ANON_KEY — the site reads with it, so a missing key must fail loudly rather than at request time', () => {
     const { SUPABASE_ANON_KEY, ...rest } = valid;
-    expect(() => loadEnv(rest)).not.toThrow();
-    expect(loadEnv(rest).SUPABASE_ANON_KEY).toBeUndefined();
+    expect(() => loadEnv(rest)).toThrow(/SUPABASE_ANON_KEY/);
   });
 });
