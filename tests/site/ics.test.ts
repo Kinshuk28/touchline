@@ -45,3 +45,126 @@ describe('buildIcs', () => {
     expect(buildIcs([odd], () => 'X')).toContain('Club A\\, B');
   });
 });
+
+// RFC 5545 line folding (`fold()` in lib/site/ics.ts): content lines over 75
+// octets must be split with CRLF + a single leading space, and readers strip
+// that back out. A malformed fold is a silent-import-failure in real
+// calendar clients — nothing throws, the event just never appears — so this
+// is exactly the kind of defect that needs a direct regression test rather
+// than relying on the "is a well-formed calendar" smoke test above, which
+// never exercises a line anywhere near the 75-octet limit.
+//
+// `fold()` itself is not exported; every test here drives it indirectly
+// through `buildIcs`'s SUMMARY field, which is the one place a real, long
+// club name can push a content line over the limit.
+describe('buildIcs line folding (RFC 5545)', () => {
+  // Mirrors the unfolding algorithm real calendar clients use: a physical
+  // line that starts with a single space is a continuation of the previous
+  // logical line, not a property of its own. Deliberately independent of
+  // `fold()`'s implementation — this just walks CRLF-joined physical lines.
+  function unfoldLines(ics: string): string[] {
+    const physical = ics.split('\r\n');
+    const logical: string[] = [];
+    for (const line of physical) {
+      if (line.startsWith(' ') && logical.length > 0) {
+        logical[logical.length - 1] += line.slice(1);
+      } else if (line.length > 0) {
+        logical.push(line);
+      }
+    }
+    return logical;
+  }
+
+  it('folds a long SUMMARY so every physical line is <=75 octets, each continuation starting with exactly one space', () => {
+    const home = 'A'.repeat(60);
+    const away = 'B'.repeat(60);
+    const odd = { ...f, home: { ...f.home!, name: home }, away: { ...f.away!, name: away } };
+    const ics = buildIcs([odd], () => 'La Liga');
+
+    const physical = ics.split('\r\n');
+    // Sanity: this fixture must actually contain a line that needed folding,
+    // otherwise the test below would pass vacuously.
+    expect(physical.some((l) => l.startsWith(' '))).toBe(true);
+
+    for (const line of physical) {
+      expect(Buffer.byteLength(line, 'utf8')).toBeLessThanOrEqual(75);
+      if (line.startsWith(' ')) {
+        // Exactly one leading space: a second structural space would show up
+        // as a double space here, since none of this fixture's content
+        // (all-caps club names joined by " v ") contains a literal space at
+        // a fold boundary.
+        expect(line.startsWith('  ')).toBe(false);
+      }
+    }
+  });
+
+  it('round-trips: stripping the fold CRLF + single space recovers the original unfolded value exactly', () => {
+    const home = 'A'.repeat(60);
+    const away = 'B'.repeat(60);
+    const odd = { ...f, home: { ...f.home!, name: home }, away: { ...f.away!, name: away } };
+    const ics = buildIcs([odd], () => 'La Liga');
+
+    const summaryLine = unfoldLines(ics).find((l) => l.startsWith('SUMMARY:'));
+    expect(summaryLine).toBe(`SUMMARY:${home} v ${away}`);
+  });
+
+  it('never splits a multi-byte UTF-8 character even when it straddles the 75-octet cut', () => {
+    // Constructed so the accented character's first byte lands exactly at
+    // byte offset 74 (0-indexed): "SUMMARY:" is 8 octets, plus 66 ASCII
+    // octets = 74. A naive cut at the 75-octet limit would land between the
+    // two bytes of 'é' (0xC3 0xA9), splitting it. Verified below before
+    // relying on it.
+    const home = `${'X'.repeat(66)}é${'Y'.repeat(40)}`;
+    const away = 'Barcelona';
+    const value = `${home} v ${away}`;
+    const rawLine = `SUMMARY:${value}`;
+    const rawBytes = Buffer.from(rawLine, 'utf8');
+    expect(rawBytes[74]).toBe(0xc3); // first byte of 'é'
+    expect(rawBytes[75]! & 0xc0).toBe(0x80); // its continuation byte
+
+    const odd = { ...f, home: { ...f.home!, name: home }, away: { ...f.away!, name: away } };
+    const ics = buildIcs([odd], () => 'La Liga');
+    const physical = ics.split('\r\n');
+
+    for (const line of physical) {
+      expect(Buffer.byteLength(line, 'utf8')).toBeLessThanOrEqual(75);
+      // A byte-level split of a multi-byte sequence decodes to U+FFFD.
+      expect(line).not.toContain('�');
+    }
+
+    const summaryLine = unfoldLines(ics).find((l) => l.startsWith('SUMMARY:'));
+    expect(summaryLine).toBe(rawLine);
+  });
+
+  it('does not fold a line at exactly 75 octets', () => {
+    const home = 'A'.repeat(32);
+    const away = 'B'.repeat(32);
+    const value = `${home} v ${away}`;
+    expect(Buffer.byteLength(`SUMMARY:${value}`, 'utf8')).toBe(75);
+
+    const odd = { ...f, home: { ...f.home!, name: home }, away: { ...f.away!, name: away } };
+    const ics = buildIcs([odd], () => 'La Liga');
+
+    // Present verbatim as one physical line — folding would have broken
+    // this exact substring across a CRLF + space.
+    expect(ics.split('\r\n')).toContain(`SUMMARY:${value}`);
+  });
+
+  it('folds a line at 76 octets, one over the limit', () => {
+    const home = 'A'.repeat(32);
+    const away = 'B'.repeat(33);
+    const value = `${home} v ${away}`;
+    expect(Buffer.byteLength(`SUMMARY:${value}`, 'utf8')).toBe(76);
+
+    const odd = { ...f, home: { ...f.home!, name: home }, away: { ...f.away!, name: away } };
+    const ics = buildIcs([odd], () => 'La Liga');
+
+    // No longer present as a single physical line...
+    expect(ics.split('\r\n')).not.toContain(`SUMMARY:${value}`);
+    // ...but unfolding recovers it exactly, and every physical line stays in budget.
+    expect(unfoldLines(ics).find((l) => l.startsWith('SUMMARY:'))).toBe(`SUMMARY:${value}`);
+    for (const line of ics.split('\r\n')) {
+      expect(Buffer.byteLength(line, 'utf8')).toBeLessThanOrEqual(75);
+    }
+  });
+});

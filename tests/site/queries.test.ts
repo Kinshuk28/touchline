@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { buildFixtureSelect, isLiveOrRecent, RECENT_WINDOW_HOURS, getUpcoming } from '@/lib/site/queries/fixtures';
+import { buildFixtureSelect, isLiveOrRecent, RECENT_WINDOW_HOURS, getUpcoming, getFixturesInRange } from '@/lib/site/queries/fixtures';
 
 // A minimal, hand-rolled stand-in for the PostgREST query builder that
 // `readClient()` returns — not a mocking library, just enough chain surface
@@ -202,5 +202,54 @@ describe('getUpcoming scoping (Finding 1)', () => {
     ]);
     const upcoming = await getUpcoming(now, 20);
     expect(upcoming).toHaveLength(2);
+  });
+});
+
+// getFixturesInRange carries the exact same "empty leagueIds matches nothing,
+// not everything" rule as getUpcoming and getLiveAndRecent above (see the
+// `if (leagueIds && leagueIds.length === 0) return [];` guard in
+// lib/site/queries/fixtures.ts) — an unknown/unrecognised league code must
+// never silently widen back out to every league. getUpcoming already has
+// dedicated tests for this rule (Finding 1, above); getFixturesInRange had
+// none, even though `/calendar` and its `.ics` export both depend on it.
+describe('getFixturesInRange scoping', () => {
+  beforeEach(() => fakeDb.setRows([]));
+
+  const from = '2026-08-16T00:00:00Z';
+  const to = '2026-08-23T00:00:00Z';
+
+  it('an explicit empty leagueIds array returns [] without issuing a query', async () => {
+    fakeDb.setRows([fixtureRow({ id: 1, league_id: 1, kickoff_utc: '2026-08-17T00:00:00Z' })]);
+    const fromSpy = vi.spyOn(fakeDb.client, 'from');
+
+    const result = await getFixturesInRange(from, to, []);
+
+    expect(result).toEqual([]);
+    expect(fromSpy).not.toHaveBeenCalled();
+    fromSpy.mockRestore();
+  });
+
+  it('undefined leagueIds queries unscoped, returning every league in range', async () => {
+    fakeDb.setRows([
+      fixtureRow({ id: 1, league_id: 1, kickoff_utc: '2026-08-17T00:00:00Z' }),
+      fixtureRow({ id: 2, league_id: 2, kickoff_utc: '2026-08-18T00:00:00Z' }),
+    ]);
+
+    const result = await getFixturesInRange(from, to, undefined);
+
+    expect(result).toHaveLength(2);
+  });
+
+  it('applies the league filter when leagueIds is given', async () => {
+    fakeDb.setRows([
+      fixtureRow({ id: 1, league_id: 1, kickoff_utc: '2026-08-17T00:00:00Z' }),
+      fixtureRow({ id: 2, league_id: 2, kickoff_utc: '2026-08-18T00:00:00Z' }),
+      fixtureRow({ id: 3, league_id: 3, kickoff_utc: '2026-08-19T00:00:00Z' }),
+    ]);
+
+    const result = await getFixturesInRange(from, to, [1, 2]);
+
+    expect(result).toHaveLength(2);
+    expect(result.map((r) => r.league_id).sort()).toEqual([1, 2]);
   });
 });

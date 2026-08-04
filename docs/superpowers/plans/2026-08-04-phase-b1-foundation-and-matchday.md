@@ -1556,6 +1556,45 @@ describe('buildIcs', () => {
 });
 ```
 
+> **Review-fixes pass, regression-coverage gap (test-coverage review):** the
+> test list above never exercises `fold()`, the RFC 5545 line-folding helper
+> that splits any content line over 75 octets. That is not a hypothetical
+> edge case — real official club names plus the `SUMMARY`/`DESCRIPTION`
+> prefix cross 75 octets routinely — and a folding regression fails
+> *silently* in calendar clients: no error, the event just never imports.
+> `fold()` had zero coverage, so a broken fold could ship undetected. Add to
+> `tests/site/ics.test.ts`, alongside the tests above:
+> - a `SUMMARY` long enough to require folding: every physical line is
+>   `<=75` octets (measured with `Buffer.byteLength(line, 'utf8')`, never
+>   `.length` — `.length` counts UTF-16 code units, not octets, and would let
+>   the test pass against a broken implementation), and every continuation
+>   physical line begins with exactly one leading space
+> - round-trip: stripping `\r\n ` from a folded line and rejoining recovers
+>   the original unfolded value exactly, byte for byte
+> - an **accented** club name positioned so a naive byte-index cut would
+>   land mid-character (construct the fixture so a multi-byte UTF-8
+>   character straddles the 75-octet boundary), then assert every physical
+>   line decodes cleanly with no `U+FFFD` replacement characters and the
+>   round-trip still recovers the original value
+> - a line at exactly 75 octets is **not** folded; the same line at 76
+>   octets **is**
+>
+> Also: `getFixturesInRange`'s `if (leagueIds && leagueIds.length === 0)
+> return [];` guard (`lib/site/queries/fixtures.ts`) — the same
+> "unrecognised league code matches nothing, never silently widens to
+> everything" rule `getUpcoming` already has three dedicated tests for
+> (Task 6, Finding 1, above) — shipped with none of its own. Add to
+> `tests/site/queries.test.ts`, next to the `getUpcoming` scoping tests,
+> reusing the same fake query-builder:
+> - `getFixturesInRange(from, to, [])` returns `[]` and issues no query
+> - `getFixturesInRange(from, to, undefined)` queries unscoped
+> - `getFixturesInRange(from, to, [1, 2])` applies the league filter
+>
+> Both gaps were found in review with the underlying implementations
+> already judged correct — this is regression protection, not a bug fix.
+> See `.superpowers/sdd/task-7-report.md`, "Fix: regression tests for
+> fold() and the empty-league guard".
+
 - [ ] **Step 2: Run it and confirm it fails**
 
 Run: `npm test -- tests/site/ics.test.ts`
@@ -1750,7 +1789,8 @@ npm test -- tests/site/ics.test.ts
 npm run build
 ```
 
-Expected: 7 tests pass; build clean.
+Expected: 12 tests pass (7 original + 5 line-folding regression tests added
+per the review-fixes note above); build clean.
 
 - [ ] **Step 7: Verify the export against real data**
 

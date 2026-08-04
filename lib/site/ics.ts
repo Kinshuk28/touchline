@@ -58,6 +58,13 @@ export function buildIcs(
     lines.push(
       'BEGIN:VEVENT',
       `UID:fixture-${f.id}@touchline`,
+      // RFC 5545 defines DTSTAMP as creation time, which would normally mean
+      // wall-clock "now". Deliberately using the DB row's `updated_at`
+      // instead: the calendar.ics route is force-dynamic/no-store, so it
+      // regenerates on every fetch, and a wall-clock DTSTAMP would change on
+      // every single request even when nothing about the fixture changed —
+      // worse for calendar clients doing change detection than a stamp that
+      // only moves when the underlying data actually does.
       `DTSTAMP:${stamp(f.updated_at)}`,
       `DTSTART:${stamp(f.kickoff_utc)}`,
       `DTEND:${stamp(end)}`,
