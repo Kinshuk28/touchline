@@ -7,6 +7,13 @@ import { LiveScores } from '@/components/LiveScores';
 import { formatKickoff } from '@/lib/site/format';
 import { scoreCellText } from '@/lib/site/scoreDisplay';
 
+// Inert today: reading `searchParams` below forces this whole route to
+// dynamic rendering, so Next.js never applies a segment-level `revalidate`
+// to it (confirmed in .superpowers/sdd/task-6-report.md — the route still
+// renders `ƒ` dynamic under `next build` with zero DB credentials, meaning
+// the page body never runs at build time). Left in as documented intent: if
+// `searchParams` usage is ever removed and the page becomes ISR-eligible,
+// 60s is already a sane cap, comfortably below the 5-minute ingest cadence.
 export const revalidate = 60;
 
 export default async function ScoresPage({
@@ -16,27 +23,24 @@ export default async function ScoresPage({
   const selected = parseLeagueCodes(raw);
 
   const now = new Date();
-  const [leagues, recent, upcoming] = await Promise.all([
-    getLeagues(),
-    getLiveAndRecent(now),
-    getUpcoming(now, 20),
+  const leagues = await getLeagues();
+
+  // Resolved once, up front — `getUpcoming`'s `limit` must apply *after*
+  // this scoping, not before, or a league whose fixtures sort past the
+  // unscoped top N gets truncated away before it can be filtered to, and
+  // the page falsely renders "Nothing scheduled" for a league that has
+  // real fixtures in the database (Finding 1). `undefined` means every
+  // league, matching `getUpcoming`/`getLiveAndRecent`'s own "no filter"
+  // meaning; an unrecognised code resolves to `[]`, which both queries
+  // treat as "match nothing", never "everything".
+  const selectedLeagueIds = selected.length > 0 ? resolveLeagueIds(leagues, selected) : undefined;
+
+  const [recent, upcoming] = await Promise.all([
+    getLiveAndRecent(now, selectedLeagueIds),
+    getUpcoming(now, 20, selectedLeagueIds),
   ]);
 
-  const byId = new Map(leagues.map((l) => [l.id, l]));
-  const keep = (leagueId: number) =>
-    selected.length === 0 || selected.includes(byId.get(leagueId)?.fd_code ?? '');
-
-  const shownRecent = recent.filter((f) => keep(f.league_id));
-  const shownUpcoming = upcoming.filter((f) => keep(f.league_id));
-  const nextKickoff = shownUpcoming[0];
-
-  // Carried into <LiveScores> so the poll loop stays scoped to the same
-  // filter the initial render already applied — without this, a poll
-  // silently re-widens "Live & recent" to every competition regardless of
-  // what the user filtered to (Finding 1). `selectedLeagueIds` is the
-  // defensive backstop mergeLiveFixtures applies client-side; `selected`
-  // (codes) is what actually gets sent on the wire to `/api/live`.
-  const selectedLeagueIds = selected.length > 0 ? resolveLeagueIds(leagues, selected) : undefined;
+  const nextKickoff = upcoming[0];
 
   return (
     <div className="space-y-6">
@@ -45,9 +49,18 @@ export default async function ScoresPage({
         <LeagueFilter leagues={leagues} selected={selected} basePath="/scores" />
       </div>
 
-      {shownRecent.length > 0 ? (
+      {recent.length > 0 ? (
         <LiveScores
-          initial={shownRecent}
+          // Forces a clean remount on every filter change (Finding 2).
+          // `<LiveScores>` seeds its state from `initial`/`useRef` only on
+          // first mount; without a `key` tied to the selection, a
+          // client-side navigation between two `?leagues=` URLs reconciles
+          // it as the *same* instance and just updates props in place, so
+          // the panel keeps showing the previous filter's live fixtures
+          // until the next poll (or, since the ref merges rather than
+          // replaces, potentially longer).
+          key={selected.length > 0 ? selected.join(',') : 'all'}
+          initial={recent}
           nowIso={now.toISOString()}
           leagues={selected}
           leagueIds={selectedLeagueIds}
@@ -66,10 +79,10 @@ export default async function ScoresPage({
       <section>
         <h2 className="mb-2 text-[11px] font-bold uppercase tracking-[0.14em] text-muted">Upcoming</h2>
         <ul className="overflow-hidden rounded-xl border border-border bg-surface">
-          {shownUpcoming.length === 0 && (
+          {upcoming.length === 0 && (
             <li className="px-3 py-6 text-sm text-muted">Nothing scheduled.</li>
           )}
-          {shownUpcoming.map((f) => <ScoreRow key={f.id} fixture={f} scoreText={scoreCellText(f, now)} />)}
+          {upcoming.map((f) => <ScoreRow key={f.id} fixture={f} scoreText={scoreCellText(f, now)} />)}
         </ul>
       </section>
     </div>

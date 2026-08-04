@@ -98,14 +98,35 @@ export async function getLiveAndRecent(now: Date, leagueIds?: number[]): Promise
   return merged;
 }
 
-export async function getUpcoming(now: Date, limit = 12): Promise<FixtureWithTeams[]> {
-  const { data, error } = await readClient()
+/**
+ * `leagueIds`, when given, scopes the query to those leagues *before* `limit`
+ * is applied — the limit is a page size on an already-scoped result, not a
+ * global cutoff filtered afterward. Getting that order backwards is exactly
+ * Finding 1: `/scores` used to fetch an unscoped top-20 and filter it to the
+ * selected league in JavaScript, so any league whose fixtures sorted past
+ * global position 20 was truncated away before the filter ever saw them,
+ * and the page rendered "Nothing scheduled" for a league that had real
+ * fixtures in the database.
+ *
+ * `undefined` means every league (today's behaviour, unchanged). An
+ * explicit empty array means every requested league code was unrecognised:
+ * that must match nothing, not silently widen back to everything, so it
+ * short-circuits before any query runs — same rule as `getLiveAndRecent`
+ * and `getFixturesInRange` above, kept consistent for the same reason.
+ */
+export async function getUpcoming(now: Date, limit = 12, leagueIds?: number[]): Promise<FixtureWithTeams[]> {
+  if (leagueIds && leagueIds.length === 0) return [];
+
+  let q = readClient()
     .from('fixtures')
     .select(buildFixtureSelect())
     .gt('kickoff_utc', now.toISOString())
     .in('status', ['SCHEDULED', 'TIMED'])
-    .order('kickoff_utc', { ascending: true })
-    .limit(limit);
+    .order('kickoff_utc', { ascending: true });
+  if (leagueIds && leagueIds.length > 0) q = q.in('league_id', leagueIds);
+  q = q.limit(limit);
+
+  const { data, error } = await q;
   if (error) throw new Error(`getUpcoming: ${error.message}`);
   return (data ?? []) as unknown as FixtureWithTeams[];
 }

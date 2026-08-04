@@ -1,16 +1,11 @@
 import Link from 'next/link';
 import type { LeagueRow } from '@/lib/site/rows';
+import { hrefForLeagueFilter } from '@/lib/site/leagueFilter';
 
 export function LeagueFilter({
   leagues, selected, basePath,
 }: { leagues: LeagueRow[]; selected: string[]; basePath: string }) {
-  function hrefFor(code: string | null): string {
-    if (code === null) return basePath;
-    const next = selected.includes(code)
-      ? selected.filter((c) => c !== code)
-      : [...selected, code];
-    return next.length === 0 ? basePath : `${basePath}?leagues=${next.join(',')}`;
-  }
+  const hrefFor = (code: string | null) => hrefForLeagueFilter(basePath, selected, code);
 
   const allActive = selected.length === 0;
 

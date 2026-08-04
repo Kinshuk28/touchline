@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseLeagueCodes, resolveLeagueIds } from '@/lib/site/leagueFilter';
+import { parseLeagueCodes, resolveLeagueIds, hrefForLeagueFilter } from '@/lib/site/leagueFilter';
 import type { LeagueRow } from '@/lib/site/rows';
 
 const leagues: LeagueRow[] = [
@@ -41,5 +41,35 @@ describe('resolveLeagueIds', () => {
 
   it('an empty codes list resolves to no ids', () => {
     expect(resolveLeagueIds(leagues, [])).toEqual([]);
+  });
+});
+
+// Finding 3: this is the pure logic extracted from <LeagueFilter>'s inline
+// `hrefFor`, which previously lived inside a component with no test at all.
+describe('hrefForLeagueFilter', () => {
+  it('adds a league to an empty selection', () => {
+    expect(hrefForLeagueFilter('/scores', [], 'PD')).toBe('/scores?leagues=PD');
+  });
+
+  it('adds a league to an existing selection, keeping the others', () => {
+    expect(hrefForLeagueFilter('/scores', ['PL'], 'PD')).toBe('/scores?leagues=PL,PD');
+  });
+
+  it('removes one of several selected leagues, keeping the rest', () => {
+    expect(hrefForLeagueFilter('/scores', ['PL', 'PD', 'SA'], 'PD')).toBe('/scores?leagues=PL,SA');
+  });
+
+  it('removing the last selected league collapses to the bare basePath, no query string', () => {
+    expect(hrefForLeagueFilter('/scores', ['PD'], 'PD')).toBe('/scores');
+  });
+
+  it('the "All" pill (code null) always returns basePath, regardless of the current selection', () => {
+    expect(hrefForLeagueFilter('/scores', [], null)).toBe('/scores');
+    expect(hrefForLeagueFilter('/scores', ['PL', 'PD'], null)).toBe('/scores');
+  });
+
+  it('respects a non-default basePath', () => {
+    expect(hrefForLeagueFilter('/calendar', [], 'SA')).toBe('/calendar?leagues=SA');
+    expect(hrefForLeagueFilter('/calendar', ['SA'], 'SA')).toBe('/calendar');
   });
 });

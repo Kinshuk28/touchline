@@ -96,7 +96,20 @@ export function LiveScores({
       }
     }
 
-    if (document.visibilityState !== 'hidden') start();
+    // Poll once immediately rather than waiting a full POLL_MS: this effect
+    // re-runs on every mount, and thanks to the `key` app/scores/page.tsx
+    // now puts on <LiveScores> (Finding 2), a filter change is a mount —
+    // without an immediate poll here, switching filters would still show
+    // the correct *server-rendered* `initial` for the new selection, but
+    // then sit on it for up to two minutes before the panel could reflect
+    // anything that changed since that render. This only ever fires from
+    // mount, and `handleVisibilityChange`'s own immediate poll only ever
+    // fires from a later `visibilitychange` event, so the two cannot
+    // double-fire against each other.
+    if (document.visibilityState !== 'hidden') {
+      start();
+      void poll();
+    }
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {

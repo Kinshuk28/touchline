@@ -28,3 +28,23 @@ export function resolveLeagueIds(leagues: LeagueRow[], codes: string[]): number[
     return ids;
   }, []);
 }
+
+/**
+ * The pure href logic behind `<LeagueFilter>`'s pills — extracted here,
+ * alongside `parseLeagueCodes`/`resolveLeagueIds`, so it can be unit-tested
+ * without a DOM (Finding 3: this toggle logic used to live inline inside
+ * `components/LeagueFilter.tsx`, a component with no test at all).
+ *
+ * `code === null` is the "All" pill: it always resets to the bare
+ * `basePath`, regardless of the current selection. For a real code, it
+ * toggles the selection: adds it if not already present, removes it if it
+ * is — and removing the last remaining code collapses back to the bare
+ * `basePath` rather than leaving a dangling `?leagues=` with nothing in it.
+ */
+export function hrefForLeagueFilter(basePath: string, selected: string[], code: string | null): string {
+  if (code === null) return basePath;
+  const next = selected.includes(code)
+    ? selected.filter((c) => c !== code)
+    : [...selected, code];
+  return next.length === 0 ? basePath : `${basePath}?leagues=${next.join(',')}`;
+}
