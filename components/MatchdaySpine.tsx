@@ -76,33 +76,63 @@ export function MatchdaySpine({
                       className="flex h-11 items-center gap-2 border-b border-border pr-3 text-sm last:border-b-0"
                     >
                       <span className={`h-full w-[3px] shrink-0 ${comp.bgClass}`} aria-hidden="true" />
-                      <span className="w-11 shrink-0 font-mono text-13 tabular-nums text-muted">{time}</span>
+                      {/* Wide enough for the longest kickoff string this ever renders ("Sat
+                          19:30", via `dateContext`) with a little breathing room either side —
+                          was `w-11` (44px), sized only for same-day "17:30" and truncating the
+                          weekday-prefixed form used for everything beyond today. `w-[4.5rem]`
+                          (72px) measured as the exact text width with under 1px of slack, which
+                          read as the time running straight into the team name; `w-20` leaves a
+                          visible gap. */}
+                      <span className="w-20 shrink-0 font-mono text-13 tabular-nums text-muted">{time}</span>
 
-                      <span className="flex min-w-0 flex-1 items-center justify-end gap-2 text-right">
-                        <span className="truncate text-15 font-medium">
-                          {fixture.home?.short_name ?? fixture.home?.name ?? 'TBC'}
-                        </span>
-                        <Crest team={fixture.home} size={20} eager={eagerCrests} />
-                      </span>
-
-                      <span className="shrink-0 px-1 font-mono text-15 font-semibold tabular-nums">{center}</span>
-
-                      <span className="flex min-w-0 flex-1 items-center gap-2">
-                        <Crest team={fixture.away} size={20} eager={eagerCrests} />
-                        <span className="truncate text-15 font-medium">
-                          {fixture.away?.short_name ?? fixture.away?.name ?? 'TBC'}
-                        </span>
-                      </span>
-
-                      <span className="w-16 shrink-0 whitespace-nowrap text-right text-11 font-semibold uppercase tracking-wide">
-                        {kind === 'live' && (
-                          <span className="inline-flex items-center gap-1 text-live">
-                            <span className="size-1.5 rounded-full bg-live" aria-hidden="true" />
-                            Live
+                      {/* The home/score/away trio is centered as one unit in the space between
+                          the time column and the status column, with fixed-width team-name slots
+                          either side of the score from `sm:` up — so the score lands at the same
+                          horizontal position every row ("stay put down the column") and short
+                          team names no longer leave a lopsided gutter between the time and the
+                          teams (previously each team slot was its own flex-1, which let a short
+                          name's box stay mostly empty right after the time column).
+                          Below `sm`, the fixed widths revert to the original elastic `flex-1`:
+                          at 360px there isn't 2x160px-plus-crests of room between the time and
+                          status columns to begin with (the dead-gutter complaint this is fixing
+                          was specifically about the 1280px view), and forcing that width there
+                          made the shrink-0'd trio wider than its flex-1 parent, overflowing left
+                          and running the score cluster straight into the kickoff time. */}
+                      <span className="flex min-w-0 flex-1 items-center justify-center gap-2">
+                        <span className="flex min-w-0 flex-1 items-center justify-end gap-2 text-right sm:w-40 sm:flex-none">
+                          <span className="truncate text-15 font-medium">
+                            {fixture.home?.short_name ?? fixture.home?.name ?? 'TBC'}
                           </span>
-                        )}
-                        {kind === 'postponed' && <span className="text-muted">Postponed</span>}
+                          <Crest team={fixture.home} size={20} eager={eagerCrests} />
+                        </span>
+
+                        <span className="shrink-0 px-1 text-center font-mono text-15 font-semibold tabular-nums">{center}</span>
+
+                        <span className="flex min-w-0 flex-1 items-center gap-2 sm:w-40 sm:flex-none">
+                          <Crest team={fixture.away} size={20} eager={eagerCrests} />
+                          <span className="truncate text-15 font-medium">
+                            {fixture.away?.short_name ?? fixture.away?.name ?? 'TBC'}
+                          </span>
+                        </span>
                       </span>
+
+                      {/* Reclaimed rather than always reserved, same reasoning as
+                          /scores' CompetitionGroup: at 360px this row is already tight between
+                          a mandatory weekday-prefixed time column and two team names either
+                          side of the score, and the vast majority of rows — every upcoming
+                          fixture, which in preseason is nearly all of them — have no state text
+                          to show here at all. */}
+                      {(kind === 'live' || kind === 'postponed') && (
+                        <span className="w-16 shrink-0 whitespace-nowrap text-right text-11 font-semibold uppercase tracking-wide">
+                          {kind === 'live' && (
+                            <span className="inline-flex items-center gap-1 text-live">
+                              <span className="size-1.5 rounded-full bg-live" aria-hidden="true" />
+                              Live
+                            </span>
+                          )}
+                          {kind === 'postponed' && <span className="text-muted">Postponed</span>}
+                        </span>
+                      )}
 
                       {/* Competition colour is never the only carrier of meaning — the league name is always present as text, here for assistive tech. */}
                       <span className="sr-only">{comp.name}</span>

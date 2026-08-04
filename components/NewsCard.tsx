@@ -39,66 +39,89 @@ function CategoryPill({ category }: { category: Category }) {
 }
 
 /**
- * Two variants sharing one footprint — a 16:9 media block plus the same text
- * block beneath — so a grid mixing image and type-only cards (127 of 198
- * news items have an image; the other 36% do not) never gaps or staggers.
- * The image variant gets `news_items.image_url` at 16:9 with the category
- * pill sitting on the image; the type-only variant fills that same block
- * with `--surface-2` and the pill/source instead of an empty frame.
+ * Two variants at the same overall footprint — an image card (16:9 media
+ * block plus a text block beneath) and a type-only card — so a grid mixing
+ * the two (127 of 198 news items have an image; the other 36% do not) never
+ * gaps or staggers. The image variant gets `news_items.image_url` at 16:9
+ * with the category pill sitting on the image.
+ *
+ * The type-only variant is deliberately *not* the image block's frame with
+ * an empty middle: that read as a failed image load, the exact impression
+ * the fallback exists to avoid. Instead — same cue as the hero's own
+ * type-only fallback (components/Hero.tsx) — the headline itself becomes
+ * the card's dominant element, set larger than the image variant's
+ * headline since it has the whole card to fill rather than sharing it with
+ * a photo. `h-full` (the `<a>` is a CSS grid item, stretched to its row's
+ * height by the grid's default `align-items: stretch`, which is what makes
+ * a percentage height on this child resolve to something real) plus a
+ * `min-h` floor means it fills whatever height its image-bearing siblings
+ * establish, or a sane minimum when a whole row is type-only cards, rather
+ * than stopping short and leaving a blank strip of `bg-surface` underneath.
  */
 export function NewsCard({ item, now, lead = false }: { item: NewsRow; now: Date; lead?: boolean }) {
   const age = relativeTime(item.published_at, now);
   const category = categoryOf(item);
+  const sourceLine = `${item.source}${age ? ` · ${age}` : ''}`;
 
   return (
     <a
       href={item.url}
       target="_blank"
       rel="noopener noreferrer"
-      className="group block overflow-hidden rounded-xl border border-border bg-surface transition-colors hover:border-muted"
+      className="group block h-full overflow-hidden rounded-xl border border-border bg-surface transition-colors hover:border-muted"
     >
       {item.image_url ? (
-        <div className="relative aspect-video w-full overflow-hidden bg-surface-2">
-          <Image
-            src={item.image_url}
-            alt=""
-            fill
-            sizes={
-              lead
-                ? '(min-width: 1024px) 62vw, 100vw'
-                : '(min-width: 1024px) 25vw, (min-width: 640px) 50vw, 100vw'
-            }
-            className="object-cover transition-transform duration-300 group-hover:scale-[1.03] motion-reduce:transition-none motion-reduce:group-hover:scale-100"
-          />
-          {category && (
-            <span className="absolute left-2 top-2">
-              <CategoryPill category={category} />
-            </span>
-          )}
-        </div>
+        <>
+          <div className="relative aspect-video w-full overflow-hidden bg-surface-2">
+            <Image
+              src={item.image_url}
+              alt=""
+              fill
+              sizes={
+                lead
+                  ? '(min-width: 1024px) 62vw, 100vw'
+                  : '(min-width: 1024px) 25vw, (min-width: 640px) 50vw, 100vw'
+              }
+              className="object-cover transition-transform duration-300 group-hover:scale-[1.03] motion-reduce:transition-none motion-reduce:group-hover:scale-100"
+            />
+            {category && (
+              <span className="absolute left-2 top-2">
+                <CategoryPill category={category} />
+              </span>
+            )}
+          </div>
+
+          <div className="p-3">
+            <h3
+              className={
+                lead
+                  ? 'font-display text-24 font-extrabold leading-tight tracking-[-0.02em] sm:text-32'
+                  : 'font-display text-18 font-bold leading-snug tracking-[-0.02em]'
+              }
+            >
+              {item.title}
+            </h3>
+            {lead && item.summary && <p className="mt-2 text-15 text-muted">{item.summary}</p>}
+            <p className="mt-2 font-mono text-11 text-muted">{sourceLine}</p>
+          </div>
+        </>
       ) : (
-        <div className="flex aspect-video w-full flex-col justify-between bg-surface-2 p-4">
+        <div className="flex h-full min-h-[230px] flex-col justify-between gap-4 bg-surface-2 p-4">
           <div>{category && <CategoryPill category={category} />}</div>
-          <span className="font-mono text-11 uppercase tracking-wider text-muted">{item.source}</span>
+          <div>
+            <h3
+              className={
+                lead
+                  ? 'font-display text-24 font-extrabold leading-tight tracking-[-0.02em] sm:text-44'
+                  : 'font-display text-24 font-extrabold leading-tight tracking-[-0.02em]'
+              }
+            >
+              {item.title}
+            </h3>
+            <p className="mt-2 font-mono text-11 uppercase tracking-wider text-muted">{sourceLine}</p>
+          </div>
         </div>
       )}
-
-      <div className="p-3">
-        <h3
-          className={
-            lead
-              ? 'font-display text-24 font-extrabold leading-tight tracking-[-0.02em] sm:text-32'
-              : 'font-display text-18 font-bold leading-snug tracking-[-0.02em]'
-          }
-        >
-          {item.title}
-        </h3>
-        {lead && item.summary && <p className="mt-2 text-15 text-muted">{item.summary}</p>}
-        <p className="mt-2 font-mono text-11 text-muted">
-          {item.source}
-          {age ? ` · ${age}` : ''}
-        </p>
-      </div>
     </a>
   );
 }

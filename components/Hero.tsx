@@ -45,6 +45,18 @@ function CategoryPill({ category }: { category: Category }) {
  * dark-theme `--text` value is near-white already, but light-theme `--text`
  * is near-black and would sit on the scrim at ~1.3:1. Overlay text must stay
  * light regardless of site theme, since the image behind it is arbitrary.
+ *
+ * Height is capped (`max-h-*` alongside the aspect ratio, not instead of
+ * it) so a full-bleed 16:9/21:9 image plus the headline block underneath
+ * can't eat the whole first viewport at a normal 1280x800 laptop size —
+ * the matchday spine below it needs to be at least partially visible above
+ * the fold. `object-cover` on the image is what makes capping the
+ * container height safe: the image still fills it edge to edge, just
+ * cropped more aggressively at wide viewports than a pure aspect ratio
+ * would produce. `priority` (eager, not lazy) plus a sized, `bg-surface-2`
+ * container is deliberate: this image is the single most important pixel
+ * on the page, and a load delay must show the surface colour underneath,
+ * never a bare unstyled black box.
  */
 export function Hero({ item, now }: { item: NewsRow; now: Date }) {
   const category = categoryOf(item);
@@ -57,7 +69,7 @@ export function Hero({ item, now }: { item: NewsRow; now: Date }) {
       rel="noopener noreferrer"
       className="group block overflow-hidden rounded-2xl border border-border"
     >
-      <div className="relative aspect-video w-full overflow-hidden bg-surface-2 sm:aspect-[21/9]">
+      <div className="relative aspect-video max-h-[280px] w-full overflow-hidden bg-surface-2 sm:aspect-[21/9] sm:max-h-[420px]">
         {item.image_url ? (
           <>
             <Image
@@ -65,6 +77,7 @@ export function Hero({ item, now }: { item: NewsRow; now: Date }) {
               alt=""
               fill
               priority
+              fetchPriority="high"
               sizes="100vw"
               className="object-cover transition-transform duration-300 group-hover:scale-[1.03] motion-reduce:transition-none motion-reduce:group-hover:scale-100"
             />

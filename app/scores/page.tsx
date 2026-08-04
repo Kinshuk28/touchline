@@ -58,15 +58,33 @@ function CompetitionGroup({
               data-fixture-id={f.id}
               className="flex h-11 items-center gap-1 border-b border-border px-2 text-sm last:border-b-0 sm:gap-2 sm:px-3"
             >
-              <span className="w-14 shrink-0 font-mono text-13 tabular-nums text-muted sm:w-16">{time}</span>
-              <span className="flex min-w-0 flex-1 items-center justify-end gap-1 text-right sm:gap-2">
-                <span className="truncate text-15 font-medium">{f.home?.short_name ?? f.home?.name ?? 'TBC'}</span>
-                <Crest team={f.home} size={28} eager={eager} />
-              </span>
-              <span className="shrink-0 px-1 font-mono text-15 font-semibold tabular-nums">{center}</span>
-              <span className="flex min-w-0 flex-1 items-center gap-1 sm:gap-2">
-                <Crest team={f.away} size={28} eager={eager} />
-                <span className="truncate text-15 font-medium">{f.away?.short_name ?? f.away?.name ?? 'TBC'}</span>
+              {/* `formatKickoffTime` with no `dateContext` (this page has no day heading
+                  to lean on) can render as long as "16 Aug 19:00" for anything more than a
+                  week out — the common case in preseason — at `sm:` and up, where there's
+                  room for it. Below `sm`, the same string would alone eat over half the row,
+                  so mobile keeps the shorter same-day-shaped width and simply lets a longer
+                  string wrap rather than collide with the score cluster next to it. */}
+              <span className="w-14 shrink-0 font-mono text-13 tabular-nums text-muted sm:w-32">{time}</span>
+              {/* Home/score/away centered as one unit in the remaining space, with
+                  fixed-width team-name slots either side of the score from `sm:` up, so the
+                  score lands at a consistent horizontal position down the list instead of each
+                  team's flex-1 box leaving a lopsided gutter between the time and the teams.
+                  Below `sm`, the slots revert to plain elastic `flex-1` (`sm:flex-none` cancels
+                  that back out once the fixed width applies): at 360px there isn't
+                  2x160px-plus-crests of room between the time and status columns, and forcing
+                  it there overflowed the flex-1 parent and ran the score cluster into the
+                  kickoff time — the dead-gutter complaint this fixes was specifically about the
+                  1280px view. */}
+              <span className="flex min-w-0 flex-1 items-center justify-center gap-1 sm:gap-2">
+                <span className="flex min-w-0 flex-1 items-center justify-end gap-1 text-right sm:w-40 sm:flex-none sm:gap-2">
+                  <span className="truncate text-15 font-medium">{f.home?.short_name ?? f.home?.name ?? 'TBC'}</span>
+                  <Crest team={f.home} size={28} eager={eager} />
+                </span>
+                <span className="shrink-0 px-1 text-center font-mono text-15 font-semibold tabular-nums">{center}</span>
+                <span className="flex min-w-0 flex-1 items-center gap-1 sm:w-40 sm:flex-none sm:gap-2">
+                  <Crest team={f.away} size={28} eager={eager} />
+                  <span className="truncate text-15 font-medium">{f.away?.short_name ?? f.away?.name ?? 'TBC'}</span>
+                </span>
               </span>
               {/* Reclaimed rather than always reserved (Important, mobile):
                   at 360px a fixed-width state column left almost nothing for

@@ -4,6 +4,7 @@ import { getLiveAndRecent, getUpcoming } from '@/lib/site/queries/fixtures';
 import { getNextKickoffPerLeague, getLeagues } from '@/lib/site/queries/leagues';
 import { getFollowingLeagues } from '@/lib/site/following';
 import { resolveLeagueIds } from '@/lib/site/leagueFilter';
+import { selectLeadStory } from '@/lib/site/leadStory';
 import { NewsCard } from '@/components/NewsCard';
 import { Hero } from '@/components/Hero';
 import { Ticker, type PendingKickoff } from '@/components/Ticker';
@@ -41,7 +42,12 @@ export default async function Home() {
     getLeagues(),
   ]);
 
-  const [lead, ...rest] = news;
+  // The hero slot gets its own selection (spec: prefer an image, deprioritise
+  // promo/meta titles, then recency) — the grid below stays purely
+  // chronological, so `rest` is every fetched item minus whichever one led,
+  // not simply `news.slice(1)` (the lead may not be `news[0]` any more).
+  const lead = selectLeadStory(news);
+  const rest = lead ? news.filter((n) => n.id !== lead.id) : news;
   const pending = seasons.filter(hasKickoff);
   // Following supplies the ticker's default scope (spec: "the landing
   // ticker ... default to those competitions"). Following nothing behaves
