@@ -5,14 +5,12 @@ import { getTeamsByLeagueId } from '@/lib/db/repositories/teams';
 import {
   getOrphanFplPlayers,
   getFdPlayersByTeamIds,
-  setPlayerFplIdentity,
   setPlayerTeam,
-  deletePlayersByIds,
 } from '@/lib/db/repositories/players';
-import { repointPlayerSeasonStats } from '@/lib/db/repositories/playerStats';
 import { startRun, finishRun } from '@/lib/db/repositories/runs';
 import { matchFplTeamsToClubs } from '@/lib/ingest/playerIdentity';
 import { matchPlayersTiered, type MatchSubject } from '@/lib/ingest/playerMatch';
+import { planFplIdentityAssignment, applyFplIdentityPlans } from '@/lib/ingest/fplIdentityMerge';
 
 interface OrphanRef {
   id: number;
@@ -51,11 +49,13 @@ type OrphanMatchSubject = MatchSubject & { orphan: OrphanRef };
  *   - for an orphan with no football-data match, sets team_id from the FPL
  *     team mapping instead so it at least stops being teamless.
  *
- * Ordering matters: player_season_stats.player_id is a foreign key onto
- * players(id), so every stats row referencing an orphan must be repointed
- * onto the surviving row *before* that orphan is deleted -- deleting first
- * would either violate the FK (if it's `restrict`) or, worse, cascade-delete
- * real stats data (the schema uses `on delete cascade`).
+ * The merge itself -- repoint stats, delete the orphan, then assign the
+ * fpl_id -- is shared with `scripts/ingest/players.ts` via
+ * `lib/ingest/fplIdentityMerge.ts` (`planFplIdentityAssignment` +
+ * `applyFplIdentityPlans`), rather than duplicated here: the two scripts
+ * used to each implement this ordering by hand, slightly differently, which
+ * is exactly how the recurring job ended up not doing what this repair does
+ * and crashing on the unique-constraint collision this repair exists to fix.
  *
  * The one FPL API call this makes (`bootstrap-static`, unmetered, no auth,
  * no football-data.org budget consumed) is what a genuinely-unmatched
@@ -106,23 +106,19 @@ try {
     console.warn(`repair: ${unmatchedOrphans.length} orphans had no football-data match, e.g. ${sample.join(', ')}`);
   }
 
-  // Merge matched orphans onto their football-data row. Order matters twice
-  // over here:
-  //   1. Stats must be repointed before the orphan is deleted -- player_
-  //      season_stats.player_id is a foreign key `on delete cascade`, so
-  //      deleting the orphan first would cascade-delete its own stats
-  //      instead of letting them move.
-  //   2. The orphan must be deleted *before* the football-data row is given
-  //      that fpl_id -- `players.fpl_id` is `unique`, and both rows would
-  //      briefly hold the same fpl_id otherwise (the orphan hasn't given it
-  //      up yet), which Postgres correctly rejects.
-  for (const m of matches) {
-    await repointPlayerSeasonStats(m.subject.orphan.id, m.playerId);
-  }
-  await deletePlayersByIds(matches.map((m) => m.subject.orphan.id));
-  await setPlayerFplIdentity(
-    matches.map((m) => ({ id: m.playerId, fpl_id: m.subject.orphan.fpl_id, photo_url: m.subject.orphan.photo_url })),
+  // Merge matched orphans onto their football-data row -- see
+  // lib/ingest/fplIdentityMerge.ts for why the ordering (repoint stats,
+  // delete the orphan, then assign the fpl_id) has to be exactly this. Every
+  // match here is, by construction, a merge: the orphan itself is always
+  // the current holder of its own fpl_id, and `m.playerId` is always a
+  // *different* row (a football-data candidate with no fpl_id of its own).
+  const plans = matches.map((m) =>
+    planFplIdentityAssignment(
+      { targetPlayerId: m.playerId, fplId: m.subject.orphan.fpl_id, photoUrl: m.subject.orphan.photo_url },
+      { id: m.subject.orphan.id, orphan: m.subject.orphan },
+    ),
   );
+  const { merged, skipped } = await applyFplIdentityPlans(plans, (msg) => console.warn(msg));
 
   // Unmatched orphans: at least give them a club, from the live FPL team
   // assignment already resolved onto each subject above.
@@ -136,7 +132,7 @@ try {
   }
 
   const message =
-    `${orphans.length} orphans, ${matches.length} merged ` +
+    `${orphans.length} orphans, ${matches.length} matched, ${merged} merged, ${skipped} skipped ` +
     `(exact=${tierCounts.exact} last-token=${tierCounts['last-token']} whole-token=${tierCounts['whole-token']}), ` +
     `${teamAssignments.length} re-teamed, ${stillOrphaned} still orphaned`;
   await finishRun(runId, 'ok', message, 0);
