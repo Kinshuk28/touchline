@@ -6,7 +6,9 @@
 
 **Architecture:** Next.js 15 App Router. Every page is a server component reading Postgres through a typed query layer; no third-party API is ever on a request path. Per-route revalidation keeps pages fresh, and live views additionally poll a lightweight JSON route handler that patches only changed values in place, preserving scroll position and filters.
 
-**Tech Stack:** Next.js 15, React 19, TypeScript, Tailwind CSS v4, `@supabase/supabase-js`, Vitest, Playwright, Netlify.
+**Tech Stack:** Next.js 16, React 19, TypeScript, Tailwind CSS v4, `@supabase/supabase-js`, Vitest, Playwright, Netlify.
+
+> **Why Next 16, not 15:** this repo pins TypeScript 7.0.2, which removed the classic compiler API that Next 15's `next.config.ts` loader depends on. Next 15 fails to build here and its own error recommends Next ≥16.2.11 or TypeScript 6. Upgrading Next is correct; downgrading the locked TypeScript would disturb the working Phase A toolchain.
 
 ## Global Constraints
 
@@ -89,7 +91,7 @@ netlify.toml
 
 ```bash
 cd /Users/kinshukkhandelwal/Desktop/Claude/football-app
-npm i next@15 react@19 react-dom@19
+npm i next@16 react@19 react-dom@19
 npm i -D @tailwindcss/postcss tailwindcss@4 @types/react @types/react-dom
 npm pkg set scripts.dev="next dev"
 npm pkg set scripts.build="next build"
