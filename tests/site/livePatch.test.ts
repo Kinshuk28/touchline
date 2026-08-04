@@ -6,8 +6,8 @@ const base: FixtureWithTeams = {
   id: 1, league_id: 1, season: 2026, kickoff_utc: '2026-08-16T14:00:00Z',
   status: 'IN_PLAY', matchday: 1, home_goals: 0, away_goals: 0,
   updated_at: '2026-08-16T14:30:00Z',
-  home: { id: 10, slug: 'a', name: 'A', short_name: 'A', tla: 'AAA', crest_url: null },
-  away: { id: 11, slug: 'b', name: 'B', short_name: 'B', tla: 'BBB', crest_url: null },
+  home: { id: 10, fd_id: 100, slug: 'a', name: 'A', short_name: 'A', tla: 'AAA', crest_url: null },
+  away: { id: 11, fd_id: 101, slug: 'b', name: 'B', short_name: 'B', tla: 'BBB', crest_url: null },
 };
 
 describe('mergeLiveFixtures', () => {
@@ -35,8 +35,8 @@ describe('mergeLiveFixtures', () => {
       ...base,
       id: 42,
       kickoff_utc: '2026-08-16T15:00:00Z',
-      home: { id: 20, slug: 'c', name: 'C', short_name: 'C', tla: 'CCC', crest_url: null },
-      away: { id: 21, slug: 'd', name: 'D', short_name: 'D', tla: 'DDD', crest_url: null },
+      home: { id: 20, fd_id: 200, slug: 'c', name: 'C', short_name: 'C', tla: 'CCC', crest_url: null },
+      away: { id: 21, fd_id: 201, slug: 'd', name: 'D', short_name: 'D', tla: 'DDD', crest_url: null },
     };
     const out = mergeLiveFixtures([base], [base, kickedOff]);
     expect(out.some((f) => f.id === 42)).toBe(true);

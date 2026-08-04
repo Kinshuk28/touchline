@@ -1,6 +1,12 @@
 import Image from 'next/image';
 import { relativeTime } from '@/lib/site/format';
+import { upgradeImageUrl } from '@/lib/site/imageUrl';
 import type { NewsRow } from '@/lib/site/rows';
+
+// News cards render at a fraction of the hero's footprint (at most a
+// quarter of the viewport width at desktop), so 800px is plenty — see
+// lib/site/imageUrl.ts for the measured BBC ichef renditions this maps to.
+const CARD_IMAGE_WIDTH = 800;
 
 type Category = 'transfer' | 'injury';
 
@@ -74,7 +80,7 @@ export function NewsCard({ item, now, lead = false }: { item: NewsRow; now: Date
         <>
           <div className="relative aspect-video w-full overflow-hidden bg-surface-2">
             <Image
-              src={item.image_url}
+              src={upgradeImageUrl(item.image_url, CARD_IMAGE_WIDTH)}
               alt=""
               fill
               sizes={

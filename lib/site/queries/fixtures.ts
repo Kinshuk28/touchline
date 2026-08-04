@@ -36,7 +36,10 @@ export const RECENT_WINDOW_HOURS = 6;
 export const KICKOFF_GRACE_STATUSES = ['SCHEDULED', 'TIMED'] as const;
 export const KICKOFF_GRACE_MINUTES = 30;
 
-const TEAM_FIELDS = 'id,slug,name,short_name,tla,crest_url';
+// fd_id added for the landing page's marquee-club fixture selection
+// (lib/site/marqueeClubs.ts), which is keyed by football-data.org's team
+// id rather than our internal one.
+const TEAM_FIELDS = 'id,fd_id,slug,name,short_name,tla,crest_url';
 
 /** One select, both teams joined — a crest must never cost a second query. */
 export function buildFixtureSelect(): string {

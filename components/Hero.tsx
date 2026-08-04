@@ -1,6 +1,14 @@
 import Image from 'next/image';
 import { relativeTime } from '@/lib/site/format';
+import { upgradeImageUrl } from '@/lib/site/imageUrl';
 import type { NewsRow } from '@/lib/site/rows';
+
+// The hero is the single largest image on the page (up to 21:9 full-bleed
+// at desktop widths), so it requests the largest rendition the BBC ichef
+// CDN measured as non-error (see lib/site/imageUrl.ts) — 1536px wide.
+// Sources this doesn't apply to (Sky, already 1920x1080; the Guardian,
+// which has no image) pass through unchanged.
+const HERO_IMAGE_WIDTH = 1536;
 
 type Category = 'transfer' | 'injury';
 
@@ -73,7 +81,7 @@ export function Hero({ item, now }: { item: NewsRow; now: Date }) {
         {item.image_url ? (
           <>
             <Image
-              src={item.image_url}
+              src={upgradeImageUrl(item.image_url, HERO_IMAGE_WIDTH)}
               alt=""
               fill
               priority

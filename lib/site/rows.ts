@@ -12,6 +12,14 @@ export interface LeagueRow {
 
 export interface TeamLite {
   id: number;
+  /**
+   * football-data.org's team id — added so the landing page's marquee
+   * fixture selection (lib/site/marqueeClubs.ts) can match a team against
+   * the curated club list, which is keyed by `fd_id` rather than our
+   * internal `id`. Selected by every fixture query alongside the other
+   * team fields (lib/site/queries/fixtures.ts's `TEAM_FIELDS`).
+   */
+  fd_id: number;
   slug: string;
   name: string;
   short_name: string | null;

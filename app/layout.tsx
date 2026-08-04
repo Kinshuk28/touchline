@@ -30,15 +30,27 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <head><script dangerouslySetInnerHTML={{ __html: themeBootstrap }} /></head>
       <body className="min-h-dvh font-sans antialiased">
         <header className="border-b border-border">
-          <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-3">
-            <a href="/" className="font-display text-lg font-extrabold tracking-[-0.02em]">
+          {/* `flex-wrap` plus an explicit `order` per child: at >=360px with
+              four nav links, brand + nav + toggle no longer fit on one line
+              (measured overflow: ~476px of content in a 360px viewport).
+              Below `sm`, the nav drops to its own full-width second row
+              (`order-3 w-full`); the brand and toggle stay on the first row
+              exactly as before. From `sm` up, `sm:order-2 sm:w-auto`
+              restores the original single-row [brand, nav, toggle] layout,
+              so nothing changes at the widths this always worked at. */}
+          <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-3">
+            <a href="/" className="order-1 font-display text-lg font-extrabold tracking-[-0.02em]">
               TOUCH<span className="text-accent">LINE</span>
             </a>
-            <nav className="flex gap-4 text-11 font-semibold uppercase tracking-wider text-muted">
+            <span className="order-2 sm:order-3">
+              <ThemeToggle />
+            </span>
+            <nav className="order-3 flex w-full flex-wrap gap-x-4 gap-y-1 text-11 font-semibold uppercase tracking-wider text-muted sm:order-2 sm:w-auto">
+              <a href="/news" className="hover:text-text">News</a>
               <a href="/scores" className="hover:text-text">Scores</a>
               <a href="/calendar" className="hover:text-text">Calendar</a>
+              <a href="/transfers" className="hover:text-text">Transfers</a>
             </nav>
-            <ThemeToggle />
           </div>
         </header>
         <main className="mx-auto max-w-6xl px-4 py-6">{children}</main>

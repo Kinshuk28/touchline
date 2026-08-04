@@ -14,10 +14,25 @@ test('landing page renders real data', async ({ page }) => {
   await expect(page.getByRole('link', { name: /TOUCHLINE/i })).toBeVisible();
   // Static section, present regardless of live/preseason state.
   await expect(page.getByRole('heading', { name: /Fantasy — coming soon/i })).toBeVisible();
-  // "Next fixtures" is the section heading over the upcoming-fixtures grid.
-  // It renders even when the grid itself falls back to "Nothing scheduled.",
-  // so this holds both now and once the season is under way.
-  await expect(page.getByText('Next fixtures')).toBeVisible();
+  // "Selected fixtures" is the section heading over the editorial
+  // marquee-club spine (lib/site/marqueeClubs.ts). It renders even when the
+  // spine itself falls back to "Nothing scheduled.", so this holds both now
+  // and once the season is under way.
+  await expect(page.getByText('Selected fixtures')).toBeVisible();
+});
+
+test('the News and Transfers routes are reachable from the header nav and render', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('link', { name: 'News' }).click();
+  await expect(page).toHaveURL(/\/news$/);
+  await expect(page.getByRole('heading', { name: 'News' })).toBeVisible();
+
+  await page.goto('/');
+  await page.getByRole('link', { name: 'Transfers' }).click();
+  await expect(page).toHaveURL(/\/transfers$/);
+  await expect(page.getByRole('heading', { name: 'Transfers' })).toBeVisible();
+  // Honest labelling (spec): these are aggregated reports, not confirmed deals.
+  await expect(page.getByText(/not confirmed deals/i)).toBeVisible();
 });
 
 // This is the test that matters: it proves the product requirement "when a
