@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { loadEnv } from '@/lib/config/env';
+import { loadIngestEnv } from '@/lib/config/env';
 import { RateLimiter } from '@/lib/ingest/rateLimiter';
 import { FootballDataClient } from '@/lib/providers/footballData';
 import { LEAGUE_SEEDS, PREVIOUS_SEASON } from '@/lib/ingest/leagueSeed';
@@ -37,7 +37,7 @@ import { startRun, finishRun } from '@/lib/db/repositories/runs';
  * `team_id` resolved via the team-id map, `slug` as
  * `${slugify(name)}-${fdId}`, `photo_url` always null.
  */
-const env = loadEnv();
+const env = loadIngestEnv();
 const limiter = new RateLimiter({ capacity: 10, windowMs: 60_000 });
 const fd = new FootballDataClient({ apiKey: env.FOOTBALL_DATA_KEY, limiter });
 const now = () => new Date().toISOString();

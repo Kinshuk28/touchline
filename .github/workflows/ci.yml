@@ -11,6 +11,19 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: '24', cache: 'npm' }
       - run: npm ci
+      # Diagnostic for Cause 2: `npm run build` fails in CI for an unknown
+      # reason but succeeds locally with these exact two vars, so the code
+      # is right and something about the *values* CI holds is wrong (a
+      # dashboard URL instead of the API URL, a trailing newline from a
+      # copy-paste, etc). This reports what CI actually received — never a
+      # secret value, see scripts/preflight-env.ts — and fails fast with a
+      # readable message instead of letting a bad value surface as an
+      # opaque build error.
+      - run: npx tsx scripts/preflight-env.ts site
+        continue-on-error: false
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
       - run: npm run build
         env:
           # From Task 6 onward, /scores executes server components that read

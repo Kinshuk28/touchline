@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { loadEnv } from '@/lib/config/env';
+import { loadIngestEnv } from '@/lib/config/env';
 import { RateLimiter } from '@/lib/ingest/rateLimiter';
 import { FootballDataClient } from '@/lib/providers/footballData';
 import { LEAGUE_SEEDS } from '@/lib/ingest/leagueSeed';
@@ -9,7 +9,7 @@ import { getTeamIdMap, upsertTeams, type TeamRow } from '@/lib/db/repositories/t
 import { upsertPlayersByFdId } from '@/lib/db/repositories/players';
 import { startRun, finishRun } from '@/lib/db/repositories/runs';
 
-const env = loadEnv();
+const env = loadIngestEnv();
 const limiter = new RateLimiter({ capacity: 10, windowMs: 60_000 });
 const fd = new FootballDataClient({ apiKey: env.FOOTBALL_DATA_KEY, limiter });
 

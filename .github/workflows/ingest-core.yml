@@ -28,6 +28,16 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: '24', cache: 'npm' }
       - run: npm ci
+      # Diagnostic (see scripts/preflight-env.ts): reports what this job
+      # actually received for the three ingestion credentials — never a
+      # secret value — and fails fast with a readable message rather than
+      # letting a bad value surface as an opaque ingestion crash.
+      - run: npx tsx scripts/preflight-env.ts ingest
+        continue-on-error: false
+        env:
+          FOOTBALL_DATA_KEY: ${{ secrets.FOOTBALL_DATA_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
       - run: npx tsx scripts/ingest/core.ts
         env:
           FOOTBALL_DATA_KEY: ${{ secrets.FOOTBALL_DATA_KEY }}
