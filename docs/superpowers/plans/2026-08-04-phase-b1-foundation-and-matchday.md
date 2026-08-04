@@ -79,7 +79,7 @@ netlify.toml
 **Files:**
 - Create: `next.config.ts`, `app/layout.tsx`, `app/globals.css`, `app/page.tsx`, `postcss.config.mjs`
 - Modify: `package.json`, `tsconfig.json`
-- Test: `e2e/smoke.spec.ts` (placeholder assertion only; real E2E lands in Task 9)
+- Test: none — this task's deliverable is a clean `npm run build`; E2E lands in Task 9
 
 **Interfaces:**
 - Consumes: nothing.
