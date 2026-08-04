@@ -110,11 +110,21 @@ export async function getUpcoming(now: Date, limit = 12): Promise<FixtureWithTea
   return (data ?? []) as unknown as FixtureWithTeams[];
 }
 
+/**
+ * `leagueIds`, when given, scopes the range to those leagues — `undefined`
+ * means every league. An explicit empty array means every requested league
+ * code was unrecognised: that must match nothing, not silently widen back
+ * to everything, so it short-circuits before any query runs. Same rule as
+ * `getLiveAndRecent` above, kept consistent so `/calendar` and its `.ics`
+ * export agree with `/scores` about what an unknown league code means.
+ */
 export async function getFixturesInRange(
   fromIso: string,
   toIso: string,
   leagueIds?: number[],
 ): Promise<FixtureWithTeams[]> {
+  if (leagueIds && leagueIds.length === 0) return [];
+
   let q = readClient()
     .from('fixtures')
     .select(buildFixtureSelect())
