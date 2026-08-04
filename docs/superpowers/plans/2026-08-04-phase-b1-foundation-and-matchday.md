@@ -274,6 +274,18 @@ Append to `.gitignore`:
 next-env.d.ts
 ```
 
+- [ ] **Step 8a: Fix `tsconfig.json` to include `app/**/*` and `components/**/*`**
+
+Add these two entries to the `include` array in `tsconfig.json` so TypeScript checks `app/` files directly instead of relying on `.next/` types generated during build. `components/` does not exist yet (Task 4 creates it), but the glob is added now to prevent the same gap reappearing when it does. TypeScript tolerates an empty glob.
+
+Reason: CI runs `npm ci` → `npm run typecheck` → `npm test` with no build step, so without direct includes, every file under `app/` was silently untypechecked in CI (checked only as a transitive side effect if `.next/` happened to exist).
+
+- [ ] **Step 8b: Fix `.github/workflows/ci.yml` to run `npm run build` before typecheck**
+
+Add a `- run: npm run build` step **after** `npm ci` and **before** `npm run typecheck` so CI exercises the real Next build and generates route types Next itself validates. Keep the workflow referencing no secrets — that property is what guarantees CI never makes a live provider call.
+
+Reason: Same as above — without the build step, CI's typecheck was a no-op for `app/` files.
+
 - [ ] **Step 9: Verify it builds and the existing suite still passes**
 
 ```bash
