@@ -1,9 +1,11 @@
 import { getLeagues } from '@/lib/site/queries/leagues';
 import { getLiveAndRecent, getUpcoming } from '@/lib/site/queries/fixtures';
+import { parseLeagueCodes, resolveLeagueIds } from '@/lib/site/leagueFilter';
 import { LeagueFilter } from '@/components/LeagueFilter';
 import { ScoreRow } from '@/components/ScoreRow';
 import { LiveScores } from '@/components/LiveScores';
 import { formatKickoff } from '@/lib/site/format';
+import { scoreCellText } from '@/lib/site/scoreDisplay';
 
 export const revalidate = 60;
 
@@ -11,7 +13,7 @@ export default async function ScoresPage({
   searchParams,
 }: { searchParams: Promise<{ leagues?: string }> }) {
   const { leagues: raw } = await searchParams;
-  const selected = raw ? raw.split(',').filter(Boolean) : [];
+  const selected = parseLeagueCodes(raw);
 
   const now = new Date();
   const [leagues, recent, upcoming] = await Promise.all([
@@ -28,6 +30,14 @@ export default async function ScoresPage({
   const shownUpcoming = upcoming.filter((f) => keep(f.league_id));
   const nextKickoff = shownUpcoming[0];
 
+  // Carried into <LiveScores> so the poll loop stays scoped to the same
+  // filter the initial render already applied — without this, a poll
+  // silently re-widens "Live & recent" to every competition regardless of
+  // what the user filtered to (Finding 1). `selectedLeagueIds` is the
+  // defensive backstop mergeLiveFixtures applies client-side; `selected`
+  // (codes) is what actually gets sent on the wire to `/api/live`.
+  const selectedLeagueIds = selected.length > 0 ? resolveLeagueIds(leagues, selected) : undefined;
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-baseline justify-between gap-3">
@@ -36,7 +46,12 @@ export default async function ScoresPage({
       </div>
 
       {shownRecent.length > 0 ? (
-        <LiveScores initial={shownRecent} nowIso={now.toISOString()} />
+        <LiveScores
+          initial={shownRecent}
+          nowIso={now.toISOString()}
+          leagues={selected}
+          leagueIds={selectedLeagueIds}
+        />
       ) : (
         <section className="rounded-xl border border-border bg-surface p-6">
           <p className="text-sm font-semibold">No matches in progress</p>
@@ -54,7 +69,7 @@ export default async function ScoresPage({
           {shownUpcoming.length === 0 && (
             <li className="px-3 py-6 text-sm text-muted">Nothing scheduled.</li>
           )}
-          {shownUpcoming.map((f) => <ScoreRow key={f.id} fixture={f} now={now} />)}
+          {shownUpcoming.map((f) => <ScoreRow key={f.id} fixture={f} scoreText={scoreCellText(f, now)} />)}
         </ul>
       </section>
     </div>

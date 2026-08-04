@@ -1143,17 +1143,25 @@ git commit -m "feat: crest with monogram fallback, score row, theme toggle and a
 - Test: `tests/site/livePatch.test.ts`
 
 **Interfaces:**
-- Consumes: `getLiveAndRecent`, `ScoreRow`, `DataAge`.
+- Consumes: `getLiveAndRecent`, `getLeagues`, `ScoreRow`, `DataAge`, `lib/site/leagueFilter.ts#parseLeagueCodes`/`resolveLeagueIds`.
 - Produces:
-  - `mergeLiveFixtures(current: FixtureWithTeams[], incoming: FixtureWithTeams[]): FixtureWithTeams[]`
-  - `GET /api/live` → `{ now: string, fixtures: FixtureWithTeams[] }`
-  - `<LiveScores initial={FixtureWithTeams[]} nowIso={string} />`
+  - `mergeLiveFixtures(current: FixtureWithTeams[], incoming: FixtureWithTeams[], allowedLeagueIds?: number[]): FixtureWithTeams[]`
+  - `hasLiveChanges(prev: FixtureWithTeams[], merged: FixtureWithTeams[]): boolean`
+  - `parseLiveResponse(body: unknown): { now: string; fixtures: FixtureWithTeams[] } | null`
+  - `GET /api/live?leagues=PD,SA` → `{ now: string, fixtures: FixtureWithTeams[] }`, scoped to those leagues; no `leagues` param means every league (unchanged); an unrecognised code resolves to zero fixtures, never "everything" — see `lib/site/leagueFilter.ts`.
+  - `<LiveScores initial={FixtureWithTeams[]} nowIso={string} leagues?={string[]} leagueIds?={number[]} />`
 
 **Why the patch logic lives in `lib/site/`, not in the component:** `components/LiveScores.tsx` is a client component that imports `next/link`, `next/image` and JSX. A Vitest test importing it would fail to resolve any of those under the node environment. The pure function is therefore its own module with no React dependency, which is also what makes it directly testable.
 
 **Why `/api/live` returns full `FixtureWithTeams` rows, not a thin score patch:** a fixture that kicks off after the page was server-rendered is not yet on the page at all, so patching it in place needs more than a score — it needs the joined club names and crests to render a new row from scratch, and `getLiveAndRecent` already has that join.
 
 The whole point of this task: a score changing must **not** re-render the page, reset scroll, or drop the league filter — and a fixture kicking off after the page loaded must still show up without a manual reload.
+
+> **Review-fixes pass #2, Finding 1 (CRITICAL):** the version below originally had `/api/live` call `getLiveAndRecent(now)` with no league scoping at all, so a poll returned fixtures from every competition regardless of what the page had filtered to — a user on `/scores?leagues=PD` would see La Liga and Bundesliga fixtures silently appear in "Live & recent" within one `POLL_MS`. **The filter must be carried into the poll because the poll is a second, independent request that does not inherit anything from the page's initial server-render** — `/scores` filtering its own initial `getLiveAndRecent(now)` result client-side does nothing for the fixtures `/api/live` fetches on tick two. Fixed by threading the filter through the whole loop: `/api/live` now accepts `?leagues=` in the same comma-separated code format the page URL uses, resolves codes to ids via `getLeagues()` and scopes its query (`lib/site/leagueFilter.ts` + `lib/site/queries/fixtures.ts#getLiveAndRecent`); `<LiveScores>` takes the selected codes as a `leagues` prop and includes them on every poll URL, plus the resolved ids as a `leagueIds` prop for a defensive client-side filter inside `mergeLiveFixtures` itself (belt-and-suspenders against a version-skewed `/api/live` widening the response); `/scores` passes both, derived from the exact same `resolveLeagueIds` call the route uses, so page and endpoint cannot disagree about what an unrecognised code means. See `.superpowers/sdd/task-5-report.md` for the RED tests proving this and the real `/api/live` responses.
+>
+> **Review-fixes pass #2, Finding 2 (IMPORTANT):** the "identity is what lets React skip re-rendering those rows" comment in `mergeLiveFixtures` was aspirational, not true — `ScoreRow` was a plain function component (no `React.memo`), and `LiveScores` recomputed `now = new Date(stamp)` fresh on every render while setting `stamp` on *every* successful poll whether or not anything changed, so a fresh `now` reference reached every row every `POLL_MS` regardless of identity. Fixed by: wrapping `ScoreRow` in `React.memo`; moving the only `now`-dependent row value (`scoreCellText`) into the parent as a plain `scoreText` string prop, so `now`'s object identity no longer matters to the memo comparison; and adding `hasLiveChanges`, which `LiveScores` uses to skip `setFixtures`/`setStamp` entirely when a poll changes nothing, so a no-op poll causes zero re-renders rather than zero *visible* changes.
+>
+> **Review-fixes pass #2, Finding 3 (MINOR):** `fetchLive()` caught network and JSON-parse errors but not a structurally malformed, validly-parsed body (plausible during a rolling deploy with client/server version skew) — that reached `mergeLiveFixtures(prev, body.fixtures)`, whose `.map()` on a non-array threw inside the `setFixtures` updater, uncaught, crashing the panel. Fixed with `parseLiveResponse`, which `Array.isArray`-checks `fixtures` (and type-checks `now`) before anything is trusted; a malformed body is now ignored exactly like a failed request.
 
 > **Revised in the review-fixes pass:** the version below (originally shipped as `applyPatches`, taking a thin `LivePatch[]`) only ever updated fixtures already present in `current` — a patch for an unseen fixture id was silently dropped, so a match kicking off after page load never appeared until a full reload. It is renamed `mergeLiveFixtures`, takes full `FixtureWithTeams[]` on both sides, and additionally appends fixtures new to the page and removes fixtures the server no longer reports (aged out of the recent window, or postponed) — while preserving the original's object-identity guarantee for genuinely unchanged fixtures. `POLL_MS` moved from 60s to 120s (see the comment in `LiveScores.tsx` — the ingestion job writes every 5 minutes, so 60s was polling ~5x faster than the data could change), and polling now pauses via the Page Visibility API when the tab is hidden, resuming with an immediate fetch when it becomes visible again.
 
@@ -1245,57 +1253,35 @@ Expected: FAIL — `Cannot find module '@/lib/site/livePatch'`
 > `true` — a fixture absent from the server's response stayed on the page
 > forever). See `.superpowers/sdd/task-5-report.md` for the full RED output.
 
-- [ ] **Step 3: Write `lib/site/livePatch.ts`**
+- [ ] **Step 3: Write `lib/site/livePatch.ts` and `lib/site/leagueFilter.ts`**
 
-```ts
-import type { FixtureWithTeams } from '@/lib/site/rows';
-
-/**
- * Merges what `/api/live` currently reports into what the page is showing:
- * updates fixtures already present (preserving object identity when nothing
- * changed, so React skips re-rendering — that's what keeps scroll position
- * and open filters intact), appends fixtures new to the page, removes
- * fixtures the server no longer reports, and keeps the result ordered by
- * kickoff_utc ascending.
- */
-export function mergeLiveFixtures(
-  current: FixtureWithTeams[],
-  incoming: FixtureWithTeams[],
-): FixtureWithTeams[] {
-  const currentById = new Map(current.map((f) => [f.id, f]));
-
-  const merged = incoming.map((next) => {
-    const prev = currentById.get(next.id);
-    if (
-      prev &&
-      prev.status === next.status &&
-      prev.home_goals === next.home_goals &&
-      prev.away_goals === next.away_goals
-    ) {
-      return prev;
-    }
-    return next;
-  });
-
-  merged.sort((a, b) => a.kickoff_utc.localeCompare(b.kickoff_utc));
-  return merged;
-}
-```
+> Corrected in the review-fixes pass #2 (Finding 1/2/3) below. `mergeLiveFixtures` now takes an optional `allowedLeagueIds` and filters `incoming` by it before merging; `hasLiveChanges` and `parseLiveResponse` are new, pure, and directly testable. `lib/site/leagueFilter.ts` is new — `parseLeagueCodes`/`resolveLeagueIds`, shared by `/api/live` and `/scores` so they cannot disagree about what an unrecognised league code means. See the current source for the exact implementation and doc comments; do not hand-copy an older version of this file from earlier in this plan's history.
 
 - [ ] **Step 4: Write `app/api/live/route.ts`**
 
 ```ts
 import { NextResponse } from 'next/server';
 import { getLiveAndRecent } from '@/lib/site/queries/fixtures';
+import { getLeagues } from '@/lib/site/queries/leagues';
+import { parseLeagueCodes, resolveLeagueIds } from '@/lib/site/leagueFilter';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+export async function GET(request: Request) {
   const now = new Date();
+
+  // Same comma-separated league-code format as the page's own `?leagues=`.
+  // No parameter means every league. Carrying this through is what stops a
+  // poll from silently re-widening "Live & recent" back to every
+  // competition regardless of what the user filtered to (Finding 1).
+  const { searchParams } = new URL(request.url);
+  const codes = parseLeagueCodes(searchParams.get('leagues'));
+  const leagueIds = codes.length > 0 ? resolveLeagueIds(await getLeagues(), codes) : undefined;
+
   // Full FixtureWithTeams rows, not a score-only patch — a fixture that
   // kicks off after the page was rendered needs club names and crests to
   // render at all, and getLiveAndRecent already joins them.
-  const fixtures = await getLiveAndRecent(now);
+  const fixtures = await getLiveAndRecent(now, leagueIds);
   return NextResponse.json(
     { now: now.toISOString(), fixtures },
     { headers: { 'Cache-Control': 'no-store' } },
@@ -1305,98 +1291,24 @@ export async function GET() {
 
 - [ ] **Step 5: Write `components/LiveScores.tsx`**
 
-```tsx
-'use client';
-
-import { useEffect, useState } from 'react';
-import { ScoreRow } from '@/components/ScoreRow';
-import { DataAge } from '@/components/DataAge';
-import { mergeLiveFixtures } from '@/lib/site/livePatch';
-import type { FixtureWithTeams } from '@/lib/site/rows';
-
-// The ingest job writes every 5 minutes; 2 minutes stays comfortably
-// fresher than the write cadence while halving request/DB-read volume
-// versus a 60s poll.
-const POLL_MS = 120_000;
-
-interface LiveResponse { now: string; fixtures: FixtureWithTeams[] }
-
-async function fetchLive(): Promise<LiveResponse | null> {
-  try {
-    const res = await fetch('/api/live', { cache: 'no-store' });
-    if (!res.ok) return null;
-    return (await res.json()) as LiveResponse;
-  } catch {
-    return null; // A failed poll is not worth disturbing the page for; the next one retries.
-  }
-}
-
-export function LiveScores({ initial, nowIso }: { initial: FixtureWithTeams[]; nowIso: string }) {
-  const [fixtures, setFixtures] = useState(initial);
-  const [stamp, setStamp] = useState(nowIso);
-
-  useEffect(() => {
-    let cancelled = false;
-    let intervalId: ReturnType<typeof setInterval> | null = null;
-
-    async function poll() {
-      const body = await fetchLive();
-      if (cancelled || !body) return;
-      setFixtures((prev) => mergeLiveFixtures(prev, body.fixtures));
-      setStamp(body.now);
-    }
-
-    function start() { if (intervalId === null) intervalId = setInterval(poll, POLL_MS); }
-    function stop() { if (intervalId !== null) { clearInterval(intervalId); intervalId = null; } }
-
-    // Pause while the tab is hidden/backgrounded; resume with an immediate
-    // fetch on return so the user sees current scores right away.
-    function handleVisibilityChange() {
-      if (document.visibilityState === 'hidden') stop();
-      else { start(); void poll(); }
-    }
-
-    if (document.visibilityState !== 'hidden') start();
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    return () => {
-      cancelled = true;
-      stop();
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-    };
-  }, []);
-
-  const now = new Date(stamp);
-  const newest = fixtures.reduce<string | null>(
-    (acc, f) => (acc === null || f.updated_at > acc ? f.updated_at : acc), null);
-
-  return (
-    <section>
-      <div className="mb-2 flex items-baseline justify-between">
-        <h2 className="text-[11px] font-bold uppercase tracking-[0.14em] text-muted">Live &amp; recent</h2>
-        {newest && <DataAge updatedAt={newest} now={now} />}
-      </div>
-      <ul className="overflow-hidden rounded-xl border border-border bg-surface">
-        {fixtures.map((f) => <ScoreRow key={f.id} fixture={f} now={now} />)}
-      </ul>
-    </section>
-  );
-}
-```
+> Corrected in the review-fixes pass #2 (Finding 1/2/3). `LiveScores` now takes `leagues?: string[]` (codes, sent on every poll URL) and `leagueIds?: number[]` (the defensive client-side filter passed into `mergeLiveFixtures`); it tracks a `fixturesRef` alongside state so `poll()` can compare against the latest merged result and skip `setFixtures`/`setStamp` entirely via `hasLiveChanges` when nothing changed; `fetchLive` validates the response shape with `parseLiveResponse` instead of trusting `res.json()` directly; and each row's `now`-dependent text (`scoreCellText`) is computed here and passed to `ScoreRow` as a plain `scoreText` prop rather than handing the row a raw `now: Date`, so `ScoreRow`'s `React.memo` (see Task 4) actually has something stable to compare. See the current source (`components/LiveScores.tsx`) for the exact implementation — do not hand-copy the version below, which is what shipped originally and is exactly what the review-fixes pass corrected.
 
 - [ ] **Step 6: Run the tests**
 
-Run: `npm test -- tests/site/livePatch.test.ts`
-Expected: PASS, 8 tests
+Run: `npm test -- tests/site/livePatch.test.ts tests/site/leagueFilter.test.ts`
+Expected: PASS, all cases including the Finding 1/2/3 regression cases added in the review-fixes pass.
 
 - [ ] **Step 7: Verify the endpoint answers against real data**
 
 ```bash
 npm run build && (npm start &) && sleep 6
-curl -s localhost:3000/api/live | head -c 300; echo
+curl -s "localhost:3000/api/live" | head -c 300; echo
+curl -s "localhost:3000/api/live?leagues=PD" | head -c 300; echo
+curl -s "localhost:3000/api/live?leagues=XYZ" | head -c 300; echo
 kill %1
 ```
 
-Expected: `{"now":"2026-…","fixtures":[]}` — an empty array is correct during preseason; once matches exist, each entry is a full `FixtureWithTeams` row, not a bare score patch.
+Expected: `{"now":"2026-…","fixtures":[]}` for all three during preseason (an empty array is correct); once matches exist, the unscoped call returns fixtures from every league, `?leagues=PD` returns only La Liga fixtures, and `?leagues=XYZ` (an unrecognised code) returns `"fixtures":[]` regardless of how many matches are live — never every league's fixtures. Each entry is a full `FixtureWithTeams` row, not a bare score patch.
 
 - [ ] **Step 8: Commit**
 
@@ -1413,7 +1325,7 @@ git commit -m "feat: live score patching that preserves page state"
 - Create: `app/scores/page.tsx`, `components/LeagueFilter.tsx`
 
 **Interfaces:**
-- Consumes: `getLeagues`, `getLiveAndRecent`, `getUpcoming` (Task 2); `ScoreRow`, `DataAge` (Task 4); `<LiveScores initial={FixtureWithTeams[]} nowIso={string} />` (Task 5).
+- Consumes: `getLeagues`, `getLiveAndRecent`, `getUpcoming` (Task 2); `ScoreRow`, `DataAge` (Task 4); `<LiveScores initial={FixtureWithTeams[]} nowIso={string} leagues?={string[]} leagueIds?={number[]} />`, `lib/site/leagueFilter.ts#parseLeagueCodes`/`resolveLeagueIds` (Task 5).
 - Produces: the `/scores` route, and `<LeagueFilter leagues={LeagueRow[]} selected={string[]} basePath={string} />`.
 
 - [ ] **Step 1: Write `components/LeagueFilter.tsx`**
@@ -1472,13 +1384,17 @@ export function LeagueFilter({
 
 The preseason state is a real designed view, not an empty list — during August that is the *only* thing anyone will see.
 
+> **Review-fixes pass #2, Finding 1 (CRITICAL):** the version below must pass its parsed league filter into `<LiveScores>`, not just use it for the page's own initial render. `getLiveAndRecent(now)` here only filters what the *server-rendered* page shows on first load; `<LiveScores>` polls `/api/live` on its own client-side timer afterward, a second, independent request that inherits nothing from this render unless the filter is explicitly threaded through as props. Use `parseLeagueCodes`/`resolveLeagueIds` from `lib/site/leagueFilter.ts` — the same functions `/api/live` itself uses — rather than re-deriving the parsing/resolution logic here, so the page and the endpoint cannot end up disagreeing about what an unrecognised league code means.
+
 ```tsx
 import { getLeagues } from '@/lib/site/queries/leagues';
 import { getLiveAndRecent, getUpcoming } from '@/lib/site/queries/fixtures';
+import { parseLeagueCodes, resolveLeagueIds } from '@/lib/site/leagueFilter';
 import { LeagueFilter } from '@/components/LeagueFilter';
 import { ScoreRow } from '@/components/ScoreRow';
 import { LiveScores } from '@/components/LiveScores';
 import { formatKickoff } from '@/lib/site/format';
+import { scoreCellText } from '@/lib/site/scoreDisplay';
 
 export const revalidate = 60;
 
@@ -1486,7 +1402,7 @@ export default async function ScoresPage({
   searchParams,
 }: { searchParams: Promise<{ leagues?: string }> }) {
   const { leagues: raw } = await searchParams;
-  const selected = raw ? raw.split(',').filter(Boolean) : [];
+  const selected = parseLeagueCodes(raw);
 
   const now = new Date();
   const [leagues, recent, upcoming] = await Promise.all([
@@ -1503,6 +1419,11 @@ export default async function ScoresPage({
   const shownUpcoming = upcoming.filter((f) => keep(f.league_id));
   const nextKickoff = shownUpcoming[0];
 
+  // Carried into <LiveScores> so its poll loop stays scoped to the same
+  // filter this render already applied to shownRecent — otherwise a poll
+  // silently re-widens "Live & recent" to every competition (Finding 1).
+  const selectedLeagueIds = selected.length > 0 ? resolveLeagueIds(leagues, selected) : undefined;
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-baseline justify-between gap-3">
@@ -1511,7 +1432,12 @@ export default async function ScoresPage({
       </div>
 
       {shownRecent.length > 0 ? (
-        <LiveScores initial={shownRecent} nowIso={now.toISOString()} />
+        <LiveScores
+          initial={shownRecent}
+          nowIso={now.toISOString()}
+          leagues={selected}
+          leagueIds={selectedLeagueIds}
+        />
       ) : (
         <section className="rounded-xl border border-border bg-surface p-6">
           <p className="text-sm font-semibold">No matches in progress</p>
@@ -1529,7 +1455,7 @@ export default async function ScoresPage({
           {shownUpcoming.length === 0 && (
             <li className="px-3 py-6 text-sm text-muted">Nothing scheduled.</li>
           )}
-          {shownUpcoming.map((f) => <ScoreRow key={f.id} fixture={f} now={now} />)}
+          {shownUpcoming.map((f) => <ScoreRow key={f.id} fixture={f} scoreText={scoreCellText(f, now)} />)}
         </ul>
       </section>
     </div>

@@ -56,25 +56,40 @@ export function isLiveOrRecent(status: string, kickoffUtc: string, now: Date): b
   return false;
 }
 
-/** Anything in play, plus anything that finished recently enough to still matter. */
-export async function getLiveAndRecent(now: Date): Promise<FixtureWithTeams[]> {
+/**
+ * Anything in play, plus anything that finished recently enough to still matter.
+ *
+ * `leagueIds`, when given, scopes both branches to those leagues — `undefined` means
+ * every league (today's behaviour, unchanged). An explicit empty array means every
+ * requested league code was unrecognised: that must match nothing, not silently widen
+ * back to everything, so it short-circuits before any query runs. See
+ * `lib/site/leagueFilter.ts#resolveLeagueIds` for how callers arrive at that empty array.
+ */
+export async function getLiveAndRecent(now: Date, leagueIds?: number[]): Promise<FixtureWithTeams[]> {
+  if (leagueIds && leagueIds.length === 0) return [];
+
   // Two queries merged in JS rather than one `.or()` string: PostgREST's `.or()` syntax
   // for "status in (A,B) OR (status in (C,D) AND kickoff_utc between X and Y)" needs a
   // hand-built nested and()/in() filter string that's easy to get subtly wrong and can't
   // be typo-checked by TypeScript. Two plain, independently-readable queries plus a trivial
   // JS merge+sort is clearer and just as correct for a two-branch OR like this one.
-  const [live, recentFinished] = await Promise.all([
-    readClient()
-      .from('fixtures')
-      .select(buildFixtureSelect())
-      .in('status', LIVE_STATUSES),
-    readClient()
-      .from('fixtures')
-      .select(buildFixtureSelect())
-      .in('status', RECENT_FINISHED_STATUSES)
-      .gte('kickoff_utc', hoursAgo(now, RECENT_WINDOW_HOURS))
-      .lte('kickoff_utc', now.toISOString()),
-  ]);
+  let liveQuery = readClient()
+    .from('fixtures')
+    .select(buildFixtureSelect())
+    .in('status', LIVE_STATUSES);
+  let recentQuery = readClient()
+    .from('fixtures')
+    .select(buildFixtureSelect())
+    .in('status', RECENT_FINISHED_STATUSES)
+    .gte('kickoff_utc', hoursAgo(now, RECENT_WINDOW_HOURS))
+    .lte('kickoff_utc', now.toISOString());
+
+  if (leagueIds && leagueIds.length > 0) {
+    liveQuery = liveQuery.in('league_id', leagueIds);
+    recentQuery = recentQuery.in('league_id', leagueIds);
+  }
+
+  const [live, recentFinished] = await Promise.all([liveQuery, recentQuery]);
   if (live.error) throw new Error(`getLiveAndRecent: ${live.error.message}`);
   if (recentFinished.error) throw new Error(`getLiveAndRecent: ${recentFinished.error.message}`);
 

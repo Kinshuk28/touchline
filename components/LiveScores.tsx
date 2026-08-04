@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ScoreRow } from '@/components/ScoreRow';
 import { DataAge } from '@/components/DataAge';
-import { mergeLiveFixtures } from '@/lib/site/livePatch';
+import { mergeLiveFixtures, hasLiveChanges, parseLiveResponse, type LiveApiResponse } from '@/lib/site/livePatch';
+import { scoreCellText } from '@/lib/site/scoreDisplay';
 import type { FixtureWithTeams } from '@/lib/site/rows';
 
 // The ingest job (scripts/ingest/live.ts, run on the schedule in
@@ -13,34 +14,61 @@ import type { FixtureWithTeams } from '@/lib/site/rows';
 // volume versus the previous 60s interval.
 const POLL_MS = 120_000;
 
-interface LiveResponse {
-  now: string;
-  fixtures: FixtureWithTeams[];
+function liveUrl(leagues: string[]): string {
+  return leagues.length > 0 ? `/api/live?leagues=${leagues.join(',')}` : '/api/live';
 }
 
-async function fetchLive(): Promise<LiveResponse | null> {
+async function fetchLive(url: string): Promise<LiveApiResponse | null> {
   try {
-    const res = await fetch('/api/live', { cache: 'no-store' });
+    const res = await fetch(url, { cache: 'no-store' });
     if (!res.ok) return null;
-    return (await res.json()) as LiveResponse;
+    // A structurally malformed-but-valid body (client/server skew during a
+    // rolling deploy) must be ignored exactly like a failed request, not
+    // thrown at mergeLiveFixtures — see lib/site/livePatch.ts#parseLiveResponse.
+    return parseLiveResponse(await res.json());
   } catch {
     // A failed poll is not worth disturbing the page for; the next one retries.
     return null;
   }
 }
 
-export function LiveScores({ initial, nowIso }: { initial: FixtureWithTeams[]; nowIso: string }) {
+export function LiveScores({
+  initial, nowIso, leagues = [], leagueIds,
+}: {
+  initial: FixtureWithTeams[];
+  nowIso: string;
+  /** League codes selected by the page's own filter, in the same `?leagues=` format. Carried into every poll so the league filter survives live updates (Finding 1). */
+  leagues?: string[];
+  /** Numeric ids for the same selection, used as a defensive backstop in mergeLiveFixtures. `undefined` means no filter. */
+  leagueIds?: number[];
+}) {
   const [fixtures, setFixtures] = useState(initial);
   const [stamp, setStamp] = useState(nowIso);
+  // Mirrors `fixtures` so `poll` always compares against the latest merged
+  // result without needing a stale closure or a functional setState update
+  // (which would have to perform the hasLiveChanges side effect from inside
+  // an updater — polls here are always sequential, never concurrent, so a
+  // plain ref is enough).
+  const fixturesRef = useRef(initial);
+  const url = liveUrl(leagues);
 
   useEffect(() => {
     let cancelled = false;
     let intervalId: ReturnType<typeof setInterval> | null = null;
 
     async function poll() {
-      const body = await fetchLive();
+      const body = await fetchLive(url);
       if (cancelled || !body) return;
-      setFixtures((prev) => mergeLiveFixtures(prev, body.fixtures));
+
+      const merged = mergeLiveFixtures(fixturesRef.current, body.fixtures, leagueIds);
+      // Only update state when something actually changed: a no-op poll
+      // (by far the common case at a 120s cadence) must cause zero
+      // re-renders, not push a fresh `now` through every row regardless of
+      // identity. See lib/site/livePatch.ts#hasLiveChanges.
+      if (!hasLiveChanges(fixturesRef.current, merged)) return;
+
+      fixturesRef.current = merged;
+      setFixtures(merged);
       setStamp(body.now);
     }
 
@@ -76,7 +104,7 @@ export function LiveScores({ initial, nowIso }: { initial: FixtureWithTeams[]; n
       stop();
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, []);
+  }, [url, leagueIds]);
 
   const now = new Date(stamp);
   const newest = fixtures.reduce<string | null>(
@@ -89,7 +117,7 @@ export function LiveScores({ initial, nowIso }: { initial: FixtureWithTeams[]; n
         {newest && <DataAge updatedAt={newest} now={now} />}
       </div>
       <ul className="overflow-hidden rounded-xl border border-border bg-surface">
-        {fixtures.map((f) => <ScoreRow key={f.id} fixture={f} now={now} />)}
+        {fixtures.map((f) => <ScoreRow key={f.id} fixture={f} scoreText={scoreCellText(f, now)} />)}
       </ul>
     </section>
   );

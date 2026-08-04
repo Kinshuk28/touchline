@@ -1,6 +1,7 @@
+import { memo } from 'react';
 import Link from 'next/link';
 import { Crest } from '@/components/Crest';
-import { scoreCellText, stateLabel } from '@/lib/site/scoreDisplay';
+import { stateLabel } from '@/lib/site/scoreDisplay';
 import type { FixtureWithTeams } from '@/lib/site/rows';
 
 function Side({ team }: { team: FixtureWithTeams['home'] }) {
@@ -15,7 +16,14 @@ function Side({ team }: { team: FixtureWithTeams['home'] }) {
               : <span className="min-w-0 flex-1">{body}</span>;
 }
 
-export function ScoreRow({ fixture, now }: { fixture: FixtureWithTeams; now: Date }) {
+// `scoreText` is computed by the caller (via `scoreDisplay.ts#scoreCellText`)
+// rather than taking a raw `now: Date` here. `now` changes identity on every
+// render of the caller, which would defeat `React.memo` below for every row
+// regardless of whether that row's own data changed; a `now`-derived *string*
+// stays reference- and value-stable for a fixture whose score/state haven't
+// moved (scoreCellText only actually consults `now` for a fixture with no
+// score yet, which live/recent fixtures always have). See lib/site/livePatch.ts.
+function ScoreRowImpl({ fixture, scoreText }: { fixture: FixtureWithTeams; scoreText: string }) {
   const state = stateLabel(fixture);
 
   return (
@@ -26,7 +34,7 @@ export function ScoreRow({ fixture, now }: { fixture: FixtureWithTeams; now: Dat
       <Side team={fixture.home} />
 
       <span className="shrink-0 text-center text-sm font-bold tabular-nums" data-role="score">
-        {scoreCellText(fixture, now)}
+        {scoreText}
       </span>
 
       <Side team={fixture.away} />
@@ -46,3 +54,5 @@ export function ScoreRow({ fixture, now }: { fixture: FixtureWithTeams; now: Dat
     </li>
   );
 }
+
+export const ScoreRow = memo(ScoreRowImpl);
