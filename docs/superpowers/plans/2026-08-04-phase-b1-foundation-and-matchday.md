@@ -702,13 +702,13 @@ const now = new Date('2026-08-16T12:00:00Z');
 
 describe('formatKickoff', () => {
   it('shows only a time for a fixture later today', () => {
-    expect(formatKickoff('2026-08-16T19:00:00Z', now)).toMatch(/^\d{2}:\d{2}$/);
+    expect(formatKickoff('2026-08-16T19:00:00Z', now)).toBe('19:00');
   });
   it('shows a weekday and time within the coming week', () => {
-    expect(formatKickoff('2026-08-18T19:00:00Z', now)).toMatch(/^[A-Z][a-z]{2} \d{2}:\d{2}$/);
+    expect(formatKickoff('2026-08-18T19:00:00Z', now)).toBe('Tue 19:00');
   });
   it('shows a date for anything further out', () => {
-    expect(formatKickoff('2026-10-01T19:00:00Z', now)).toMatch(/\d{1,2} [A-Z][a-z]{2}/);
+    expect(formatKickoff('2026-10-01T19:00:00Z', now)).toBe('1 Oct');
   });
 });
 
@@ -728,6 +728,15 @@ describe('relativeTime', () => {
   it('reports days past a day', () => {
     expect(relativeTime('2026-08-14T12:00:00Z', now)).toBe('2 days ago');
   });
+  it('returns null for a future timestamp five minutes ahead', () => {
+    expect(relativeTime('2026-08-16T12:05:00Z', now)).toBeNull();
+  });
+  it('returns null for a future timestamp two days ahead', () => {
+    expect(relativeTime('2026-08-18T12:00:00Z', now)).toBeNull();
+  });
+  it('returns just now for exactly now', () => {
+    expect(relativeTime('2026-08-16T12:00:00Z', now)).toBe('just now');
+  });
 });
 
 describe('dataAge', () => {
@@ -736,6 +745,9 @@ describe('dataAge', () => {
   });
   it('otherwise reads as an update stamp', () => {
     expect(dataAge('2026-08-16T11:30:00Z', now)).toBe('updated 30 min ago');
+  });
+  it('returns update time unknown for a future timestamp', () => {
+    expect(dataAge('2026-08-16T12:05:00Z', now)).toBe('update time unknown');
   });
 });
 ```
@@ -806,11 +818,12 @@ export function formatKickoff(iso: string, now: Date): string {
   return `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]}`;
 }
 
-/** Null in, null out — a missing timestamp is never guessed at. */
+/** Null in, null out — a missing timestamp is never guessed at. A future timestamp returns null: an unelapsed duration is not a real "ago" value. */
 export function relativeTime(iso: string | null, now: Date): string | null {
   if (iso === null) return null;
   const diff = now.getTime() - utc(iso).getTime();
   if (Number.isNaN(diff)) return null;
+  if (diff < 0) return null;
   const mins = Math.floor(diff / 60_000);
   if (mins < 1) return 'just now';
   if (mins < 60) return `${mins} min ago`;
@@ -830,7 +843,7 @@ export function dataAge(updatedAt: string, now: Date): string {
 - [ ] **Step 5: Run the tests**
 
 Run: `npm test -- tests/site/`
-Expected: PASS, 19 tests
+Expected: PASS, 23 tests
 
 - [ ] **Step 6: Commit**
 
