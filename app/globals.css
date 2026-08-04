@@ -1,0 +1,76 @@
+@import "tailwindcss";
+
+:root {
+  --bg:      #0B0E11;
+  --surface: #14181D;
+  --border:  #232A31;
+  --text:    #E8EDF2;
+  --muted:   #8A94A0;
+  --accent:  #C8FF00;
+  --accent-ink: #0B0E11;   /* text placed ON the accent */
+  --live:    #FF3B47;
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --bg:      #FBFAF8;
+    --surface: #FFFFFF;
+    --border:  #E4E0D8;
+    --text:    #14181D;
+    --muted:   #5F6772;
+    --accent:  #3F6B00;
+    --accent-ink: #FFFFFF;
+    --live:    #C0392B;
+  }
+}
+
+:root[data-theme="light"] {
+  --bg:      #FBFAF8;
+  --surface: #FFFFFF;
+  --border:  #E4E0D8;
+  --text:    #14181D;
+  --muted:   #5F6772;
+  --accent:  #3F6B00;
+  --accent-ink: #FFFFFF;
+  --live:    #C0392B;
+}
+
+:root[data-theme="dark"] {
+  --bg:      #0B0E11;
+  --surface: #14181D;
+  --border:  #232A31;
+  --text:    #E8EDF2;
+  --muted:   #8A94A0;
+  --accent:  #C8FF00;
+  --accent-ink: #0B0E11;
+  --live:    #FF3B47;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-border: var(--border);
+  --color-text: var(--text);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-accent-ink: var(--accent-ink);
+  --color-live: var(--live);
+}
+
+html { color-scheme: dark light; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Visible focus for every interactive element, both themes. */
+:where(a, button, input, select, [tabindex]):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+}
