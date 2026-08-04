@@ -24,7 +24,13 @@ function CategoryPill({ category }: { category: Category }) {
   return (
     <span
       className={`inline-block rounded px-1.5 py-0.5 text-11 font-bold uppercase tracking-wider ${
-        category === 'injury' ? 'bg-live text-white' : 'bg-accent text-accent-ink'
+        // `text-live-ink`, not a hardcoded `text-white` — solid white on
+        // dark-theme `--live` (#FF3B47) measures 3.52:1, below the 4.5:1
+        // floor for text this small, since --live is a bright red in dark
+        // theme but a darker one in light theme. `--live-ink` mirrors the
+        // existing `--accent-ink` pattern: dark ink in dark theme, white ink
+        // in light theme, both independently verified >=5.4:1.
+        category === 'injury' ? 'bg-live text-live-ink' : 'bg-accent text-accent-ink'
       }`}
     >
       {CATEGORY_LABEL[category]}

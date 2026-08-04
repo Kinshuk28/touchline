@@ -65,3 +65,24 @@ export function dayRailParts(dateIso: string): DayRailParts {
     weekday: WEEKDAYS[d.getUTCDay()] ?? '',
   };
 }
+
+/**
+ * Groups fixtures into the `{ date, fixtures }[]` shape `<MatchdaySpine>`
+ * expects (structurally identical to its own `SpineDay`, so callers can pass
+ * this straight through with no import cycle between this module and the
+ * component). Assumes `fixtures` is already ordered ascending by
+ * `kickoff_utc` — true of every query that feeds this (`getUpcoming`,
+ * `getFixturesInRange`) — and preserves that order both across day groups
+ * (via `Map`'s insertion-order iteration) and within each group. Used by the
+ * landing page's spine section and by `/calendar`.
+ */
+export function groupFixturesByDay(
+  fixtures: FixtureWithTeams[],
+): Array<{ date: string; fixtures: FixtureWithTeams[] }> {
+  const byDay = new Map<string, FixtureWithTeams[]>();
+  for (const f of fixtures) {
+    const day = f.kickoff_utc.slice(0, 10);
+    byDay.set(day, [...(byDay.get(day) ?? []), f]);
+  }
+  return [...byDay.entries()].map(([date, dayFixtures]) => ({ date, fixtures: dayFixtures }));
+}

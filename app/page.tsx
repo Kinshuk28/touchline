@@ -1,26 +1,29 @@
 import Link from 'next/link';
-import { getTrendingNews } from '@/lib/site/queries/news';
+import { getTrendingNews, getTransferNews } from '@/lib/site/queries/news';
 import { getLiveAndRecent, getUpcoming } from '@/lib/site/queries/fixtures';
-import { getNextKickoffPerLeague } from '@/lib/site/queries/leagues';
-import { LiveScores } from '@/components/LiveScores';
+import { getNextKickoffPerLeague, getLeagues } from '@/lib/site/queries/leagues';
+import { getFollowingLeagues } from '@/lib/site/following';
+import { resolveLeagueIds } from '@/lib/site/leagueFilter';
 import { NewsCard } from '@/components/NewsCard';
-import { Countdown } from '@/components/Countdown';
-import { Crest } from '@/components/Crest';
-import { formatKickoffTime } from '@/lib/site/format';
+import { Hero } from '@/components/Hero';
+import { Ticker, type PendingKickoff } from '@/components/Ticker';
+import { TransfersRail } from '@/components/TransfersRail';
+import { MatchdaySpine } from '@/components/MatchdaySpine';
+import { groupFixturesByDay } from '@/lib/site/spine';
 import type { LeagueRow } from '@/lib/site/rows';
 
+// Reading the `touchline-following` cookie (lib/site/following.ts) opts this
+// route into dynamic rendering the same way app/scores/page.tsx's
+// `searchParams` read does — `revalidate` below is inert for the same
+// reason documented there, kept as a statement of intent (a 5-minute cap,
+// comfortably below the ingest cadence) rather than removed.
 export const revalidate = 300;
-
-interface PendingKickoff {
-  league: LeagueRow;
-  kickoffUtc: string;
-}
 
 /**
  * Narrows away the null-kickoff case so TypeScript enforces the invariant
- * at compile time — previously `pending` kept `kickoffUtc: string | null`
- * and the render relied on a non-null assertion (`kickoffUtc!`) that the
- * compiler could not check against this exact `.filter()`.
+ * at compile time — a league whose earliest scheduled kickoff is unknown
+ * (no upcoming fixture at all) has nothing for the ticker's countdown mode
+ * to show.
  */
 function hasKickoff(entry: { league: LeagueRow; kickoffUtc: string | null }): entry is PendingKickoff {
   return entry.kickoffUtc !== null;
@@ -28,76 +31,59 @@ function hasKickoff(entry: { league: LeagueRow; kickoffUtc: string | null }): en
 
 export default async function Home() {
   const now = new Date();
-  const [news, live, upcoming, seasons] = await Promise.all([
-    getTrendingNews(7),
+  const following = await getFollowingLeagues();
+  const [news, transfers, live, upcoming, seasons, leagues] = await Promise.all([
+    getTrendingNews(17),
+    getTransferNews(10),
     getLiveAndRecent(now),
-    getUpcoming(now, 6),
+    getUpcoming(now, 20),
     getNextKickoffPerLeague(now),
+    getLeagues(),
   ]);
 
   const [lead, ...rest] = news;
   const pending = seasons.filter(hasKickoff);
+  // Following supplies the ticker's default scope (spec: "the landing
+  // ticker ... default to those competitions"). Following nothing behaves
+  // exactly like today — every league shown, unfiltered.
+  const followedIds = following.length > 0 ? new Set(resolveLeagueIds(leagues, following)) : null;
+  const tickerLive = followedIds ? live.filter((f) => followedIds.has(f.league_id)) : live;
+  const tickerPending = followedIds ? pending.filter((p) => followedIds.has(p.league.id)) : pending;
+
+  const spineDays = groupFixturesByDay(upcoming);
 
   return (
-    <div className="space-y-8">
-      <div className="grid gap-4 lg:grid-cols-[1.55fr_1fr]">
-        <section className="space-y-4">
-          {lead ? <NewsCard item={lead} now={now} lead /> : (
-            <div className="rounded-xl border border-border bg-surface p-6 text-sm text-muted">
-              No headlines yet — the news job runs every 15 minutes.
-            </div>
-          )}
-        </section>
+    <div className="space-y-10">
+      <Ticker live={tickerLive} pending={tickerPending} leagues={leagues} now={now} />
 
-        <LiveScores
-          key="home"
-          initial={live}
-          nowIso={now.toISOString()}
-          // Always mounted now (Important 5) — the poll loop must start
-          // before kickoff, not only once the first fixture goes live, or
-          // this panel would never notice the season starting until a
-          // manual reload.
-          emptyState={
-            <section className="rounded-xl border border-border bg-surface p-4">
-              <h2 className="mb-3 text-[11px] font-bold uppercase tracking-[0.14em] text-muted">
-                Season kicks off
-              </h2>
-              <ul className="space-y-2">
-                {pending.map(({ league, kickoffUtc }) => (
-                  <li key={league.id} className="flex items-center justify-between gap-2 border-b border-border pb-2 last:border-b-0 last:pb-0">
-                    <span className="truncate text-sm font-medium">{league.name}</span>
-                    <Countdown targetIso={kickoffUtc} now={now} />
-                  </li>
-                ))}
-                {pending.length === 0 && <li className="text-sm text-muted">No fixtures scheduled.</li>}
-              </ul>
-            </section>
-          }
-        />
-      </div>
+      {lead ? <Hero item={lead} now={now} /> : (
+        <div className="rounded-xl border border-border bg-surface p-6 text-sm text-muted">
+          No headlines yet — the news job runs every 15 minutes.
+        </div>
+      )}
 
       <section>
         <div className="mb-2 flex items-baseline justify-between">
-          <h2 className="text-[11px] font-bold uppercase tracking-[0.14em] text-muted">Next fixtures</h2>
-          <Link href="/calendar" className="text-[11px] text-muted hover:text-text">Full calendar →</Link>
+          <h2 className="text-11 font-bold uppercase tracking-[0.14em] text-muted">Next fixtures</h2>
+          <Link href="/calendar" className="text-11 text-muted hover:text-text">Full calendar →</Link>
         </div>
-        <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-          {upcoming.map((f) => (
-            <li key={f.id} className="rounded-xl border border-border bg-surface p-3">
-              <p className="mb-2 text-[10px] font-bold uppercase tracking-[0.12em] text-accent">
-                {formatKickoffTime(f.kickoff_utc, now)}
-              </p>
-              <p className="flex items-center gap-2 text-sm"><Crest team={f.home} size={18} />{f.home?.short_name ?? f.home?.name}</p>
-              <p className="mt-1 flex items-center gap-2 text-sm"><Crest team={f.away} size={18} />{f.away?.short_name ?? f.away?.name}</p>
-            </li>
-          ))}
-          {upcoming.length === 0 && <li className="text-sm text-muted">Nothing scheduled.</li>}
-        </ul>
+        <MatchdaySpine days={spineDays} leagues={leagues} now={now} />
       </section>
 
-      <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        {rest.map((n) => <NewsCard key={n.id} item={n} now={now} />)}
+      <section>
+        <h2 className="mb-2 text-11 font-bold uppercase tracking-[0.14em] text-muted">Headlines</h2>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {rest.map((n) => <NewsCard key={n.id} item={n} now={now} />)}
+          {rest.length === 0 && <p className="text-sm text-muted">No further headlines yet.</p>}
+        </div>
       </section>
+
+      {transfers.length > 0 && (
+        <section>
+          <h2 className="mb-2 text-11 font-bold uppercase tracking-[0.14em] text-muted">Transfers</h2>
+          <TransfersRail items={transfers} leagues={leagues} now={now} />
+        </section>
+      )}
 
       <section className="rounded-xl border border-dashed border-border p-6">
         <h2 className="text-sm font-bold">Fantasy — coming soon</h2>

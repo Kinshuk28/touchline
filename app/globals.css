@@ -10,6 +10,9 @@
   --accent:  #C8FF00;
   --accent-ink: #0B0E11;   /* text placed ON the accent */
   --live:    #FF3B47;
+  --live-ink: #0B0E11;   /* text placed ON --live, e.g. the injury category pill —
+                             a real AA defect fix: solid white-on-#FF3B47 measures
+                             3.52:1, below the 4.5:1 floor for small bold text. */
   --scrim:   rgba(11, 14, 17, .86);   /* image overlay so text stays AA */
 
   /* Competition colours — chosen to read on #0B0E11, and deliberately
@@ -35,6 +38,7 @@
     --accent:  #3F6B00;
     --accent-ink: #FFFFFF;
     --live:    #C0392B;
+    --live-ink: #FFFFFF;
     --scrim:   rgba(11, 14, 17, .86);
 
     /* Same hue/saturation as the dark-theme values above, lightness lowered
@@ -59,6 +63,7 @@
   --accent:  #3F6B00;
   --accent-ink: #FFFFFF;
   --live:    #C0392B;
+  --live-ink: #FFFFFF;
   --scrim:   rgba(11, 14, 17, .86);
   --comp-pl:  #8B52D0;
   --comp-pd:  #E10000;
@@ -77,6 +82,7 @@
   --accent:  #C8FF00;
   --accent-ink: #0B0E11;
   --live:    #FF3B47;
+  --live-ink: #0B0E11;
   --scrim:   rgba(11, 14, 17, .86);
   --comp-pl:  #C4A7E7;
   --comp-pd:  #FF6B6B;
@@ -95,6 +101,7 @@
   --color-accent: var(--accent);
   --color-accent-ink: var(--accent-ink);
   --color-live: var(--live);
+  --color-live-ink: var(--live-ink);
   --color-scrim: var(--scrim);
 
   --color-comp-pl:  var(--comp-pl);

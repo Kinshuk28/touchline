@@ -14,11 +14,14 @@ import { countdownParts } from '@/lib/site/countdown';
 export function Countdown({ targetIso, now }: { targetIso: string; now: Date }) {
   const parts = countdownParts(targetIso, now);
   if (parts === null) {
-    return <span className="text-sm font-bold text-muted">Under way</span>;
+    return <span className="font-mono text-13 font-bold text-muted">Under way</span>;
   }
   const { days, hours } = parts;
   return (
-    <span className="text-sm font-bold tabular-nums">
+    // `font-mono` — the redesign spec's "every time, score and position uses
+    // font-mono" applies to a countdown too; this previously rendered in the
+    // body face despite being pure data.
+    <span className="font-mono text-13 font-bold tabular-nums">
       {days > 0 ? `${days}d ${hours}h` : `${hours}h`}
     </span>
   );
