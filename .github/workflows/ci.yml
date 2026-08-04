@@ -12,5 +12,12 @@ jobs:
         with: { node-version: '24', cache: 'npm' }
       - run: npm ci
       - run: npm run build
+        env:
+          # From Task 6 onward, /scores executes server components that read
+          # Postgres. The anon key is SELECT-only, enforced by grants and RLS,
+          # and already ships to browsers by design, so it is safe here.
+          # Never add SUPABASE_SERVICE_ROLE_KEY or FOOTBALL_DATA_KEY to CI.
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
       - run: npm run typecheck
       - run: npm test
