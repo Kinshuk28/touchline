@@ -1,4 +1,4 @@
-import { formatKickoff } from '@/lib/site/format';
+import { formatKickoffTime } from '@/lib/site/format';
 import { IN_PLAY_STATUSES } from '@/lib/providers/types';
 import type { FixtureWithTeams } from '@/lib/site/rows';
 
@@ -10,17 +10,32 @@ const RECENT_FINISHED_STATUSES = new Set(['FINISHED', 'AWARDED']);
 // Never shown as live and never carries a score worth trusting as final.
 const DEAD_STATUSES = new Set(['POSTPONED', 'CANCELLED', 'SUSPENDED']);
 
+// A fixture whose kickoff has passed but whose status hasn't flipped to
+// IN_PLAY yet — the normal state for up to a few minutes given the ingest
+// cadence (Important 7). Same status set `getLiveAndRecent`'s grace-window
+// branch uses to keep the fixture visible at all; this is what decides how
+// it reads once it is.
+const KICKOFF_PENDING_STATUSES = new Set(['SCHEDULED', 'TIMED']);
+
 /**
  * The text shown in a score row's centre cell: the score once one exists
  * (including a genuine 0–0), a dash for a fixture that will never resume,
- * otherwise the kickoff time. A `null` score is never rendered as a score —
- * only an actual pair of numbers counts as "has a score."
+ * "Kicked off" for a fixture whose kickoff has passed but has no score yet
+ * (never inventing a score it doesn't have), otherwise the kickoff time. A
+ * `null` score is never rendered as a score — only an actual pair of
+ * numbers counts as "has a score."
  */
 export function scoreCellText(fixture: FixtureWithTeams, now: Date): string {
   const hasScore = fixture.home_goals !== null && fixture.away_goals !== null;
   if (hasScore) return `${fixture.home_goals}–${fixture.away_goals}`;
   if (DEAD_STATUSES.has(fixture.status)) return '—';
-  return formatKickoff(fixture.kickoff_utc, now);
+  if (
+    KICKOFF_PENDING_STATUSES.has(fixture.status) &&
+    new Date(fixture.kickoff_utc).getTime() <= now.getTime()
+  ) {
+    return 'Kicked off';
+  }
+  return formatKickoffTime(fixture.kickoff_utc, now);
 }
 
 /**

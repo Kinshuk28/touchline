@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { ScoreRow } from '@/components/ScoreRow';
 import { DataAge } from '@/components/DataAge';
 import { mergeLiveFixtures, hasLiveChanges, parseLiveResponse, type LiveApiResponse } from '@/lib/site/livePatch';
@@ -33,7 +33,7 @@ async function fetchLive(url: string): Promise<LiveApiResponse | null> {
 }
 
 export function LiveScores({
-  initial, nowIso, leagues = [], leagueIds,
+  initial, nowIso, leagues = [], leagueIds, emptyState,
 }: {
   initial: FixtureWithTeams[];
   nowIso: string;
@@ -41,9 +41,25 @@ export function LiveScores({
   leagues?: string[];
   /** Numeric ids for the same selection, used as a defensive backstop in mergeLiveFixtures. `undefined` means no filter. */
   leagueIds?: number[];
+  /**
+   * Rendered instead of the fixture list when there is nothing live or
+   * recent to show. `LiveScores` always mounts now (Important 5) — the
+   * caller used to only render it inside a `fixtures.length > 0` branch,
+   * which meant a page opened before kickoff never started the poll loop
+   * at all, and the "No matches in progress" text seen at 14:50 was still
+   * showing at 15:30 with a match in progress. Owning the empty state here
+   * means the poll runs regardless and the panel swaps itself the moment a
+   * match goes IN_PLAY.
+   */
+  emptyState: ReactNode;
 }) {
   const [fixtures, setFixtures] = useState(initial);
-  const [stamp, setStamp] = useState(nowIso);
+  // Freshness of the *poll*, not of the data (Important 6). Set on every
+  // successful fetch regardless of whether anything changed, unlike the
+  // fixtures list below, so it never freezes during a goalless spell — a
+  // no-op poll (the common case at a 120s cadence) still proves the panel
+  // is alive even though it causes no other visible change.
+  const [lastPolledAt, setLastPolledAt] = useState(nowIso);
   // Mirrors `fixtures` so `poll` always compares against the latest merged
   // result without needing a stale closure or a functional setState update
   // (which would have to perform the hasLiveChanges side effect from inside
@@ -60,16 +76,19 @@ export function LiveScores({
       const body = await fetchLive(url);
       if (cancelled || !body) return;
 
+      // Every successful poll, whether or not it changed anything — this is
+      // the one state update that is *not* gated by hasLiveChanges below.
+      setLastPolledAt(body.now);
+
       const merged = mergeLiveFixtures(fixturesRef.current, body.fixtures, leagueIds);
-      // Only update state when something actually changed: a no-op poll
-      // (by far the common case at a 120s cadence) must cause zero
-      // re-renders, not push a fresh `now` through every row regardless of
-      // identity. See lib/site/livePatch.ts#hasLiveChanges.
+      // Only update the fixtures list when something actually changed: a
+      // no-op poll (by far the common case at a 120s cadence) must cause
+      // zero re-renders of the row list, not push a fresh `now` through
+      // every row regardless of identity. See lib/site/livePatch.ts#hasLiveChanges.
       if (!hasLiveChanges(fixturesRef.current, merged)) return;
 
       fixturesRef.current = merged;
       setFixtures(merged);
-      setStamp(body.now);
     }
 
     function start() {
@@ -119,15 +138,24 @@ export function LiveScores({
     };
   }, [url, leagueIds]);
 
-  const now = new Date(stamp);
-  const newest = fixtures.reduce<string | null>(
-    (acc, f) => (acc === null || f.updated_at > acc ? f.updated_at : acc), null);
+  const now = new Date(lastPolledAt);
+
+  // `emptyState` is the page's own card (different heading, different
+  // border/padding per caller — "No matches in progress" on /scores,
+  // "Season kicks off" with per-league countdowns on the landing page), not
+  // a variant of the "Live & recent" list below it. Rendered as-is, with no
+  // extra heading of our own, so the poll loop above keeps running (that is
+  // the whole point of always mounting this component) while the page
+  // controls what "nothing live" looks like.
+  if (fixtures.length === 0) {
+    return <>{emptyState}</>;
+  }
 
   return (
     <section>
       <div className="mb-2 flex items-baseline justify-between">
         <h2 className="text-[11px] font-bold uppercase tracking-[0.14em] text-muted">Live &amp; recent</h2>
-        {newest && <DataAge updatedAt={newest} now={now} />}
+        <DataAge updatedAt={lastPolledAt} now={now} variant="checked" />
       </div>
       <ul className="overflow-hidden rounded-xl border border-border bg-surface">
         {fixtures.map((f) => <ScoreRow key={f.id} fixture={f} scoreText={scoreCellText(f, now)} />)}

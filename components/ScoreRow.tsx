@@ -1,19 +1,22 @@
 import { memo } from 'react';
-import Link from 'next/link';
 import { Crest } from '@/components/Crest';
 import { stateLabel } from '@/lib/site/scoreDisplay';
 import type { FixtureWithTeams } from '@/lib/site/rows';
 
+// Deliberately a plain <span>, never a <Link>: there is no `app/team/`
+// route in Phase B1 (team pages arrive in Plan B2), so linking to
+// `/team/${team.slug}` here was a guaranteed 404 on every home and away
+// name across `/scores` and the landing live panel — and with no
+// `app/not-found.tsx` at the time, users landed on Next's unstyled
+// default 404. Reintroduce the `<Link>` only once `app/team/[slug]` exists.
 function Side({ team }: { team: FixtureWithTeams['home'] }) {
   const label = team?.short_name ?? team?.name ?? 'TBC';
-  const body = (
-    <span className="flex min-w-0 items-center gap-2">
+  return (
+    <span className="flex min-w-0 flex-1 items-center gap-2">
       <Crest team={team} size={22} />
       <span className="truncate text-sm font-medium">{label}</span>
     </span>
   );
-  return team ? <Link href={`/team/${team.slug}`} className="min-w-0 flex-1 hover:underline">{body}</Link>
-              : <span className="min-w-0 flex-1">{body}</span>;
 }
 
 // `scoreText` is computed by the caller (via `scoreDisplay.ts#scoreCellText`)

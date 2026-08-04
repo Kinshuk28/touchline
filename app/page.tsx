@@ -6,7 +6,7 @@ import { LiveScores } from '@/components/LiveScores';
 import { NewsCard } from '@/components/NewsCard';
 import { Countdown } from '@/components/Countdown';
 import { Crest } from '@/components/Crest';
-import { formatKickoff } from '@/lib/site/format';
+import { formatKickoffTime } from '@/lib/site/format';
 import type { LeagueRow } from '@/lib/site/rows';
 
 export const revalidate = 300;
@@ -49,24 +49,31 @@ export default async function Home() {
           )}
         </section>
 
-        {live.length > 0 ? (
-          <LiveScores key="home" initial={live} nowIso={now.toISOString()} />
-        ) : (
-          <section className="rounded-xl border border-border bg-surface p-4">
-            <h2 className="mb-3 text-[11px] font-bold uppercase tracking-[0.14em] text-muted">
-              Season kicks off
-            </h2>
-            <ul className="space-y-2">
-              {pending.map(({ league, kickoffUtc }) => (
-                <li key={league.id} className="flex items-center justify-between gap-2 border-b border-border pb-2 last:border-b-0 last:pb-0">
-                  <span className="truncate text-sm font-medium">{league.name}</span>
-                  <Countdown targetIso={kickoffUtc} now={now} />
-                </li>
-              ))}
-              {pending.length === 0 && <li className="text-sm text-muted">No fixtures scheduled.</li>}
-            </ul>
-          </section>
-        )}
+        <LiveScores
+          key="home"
+          initial={live}
+          nowIso={now.toISOString()}
+          // Always mounted now (Important 5) — the poll loop must start
+          // before kickoff, not only once the first fixture goes live, or
+          // this panel would never notice the season starting until a
+          // manual reload.
+          emptyState={
+            <section className="rounded-xl border border-border bg-surface p-4">
+              <h2 className="mb-3 text-[11px] font-bold uppercase tracking-[0.14em] text-muted">
+                Season kicks off
+              </h2>
+              <ul className="space-y-2">
+                {pending.map(({ league, kickoffUtc }) => (
+                  <li key={league.id} className="flex items-center justify-between gap-2 border-b border-border pb-2 last:border-b-0 last:pb-0">
+                    <span className="truncate text-sm font-medium">{league.name}</span>
+                    <Countdown targetIso={kickoffUtc} now={now} />
+                  </li>
+                ))}
+                {pending.length === 0 && <li className="text-sm text-muted">No fixtures scheduled.</li>}
+              </ul>
+            </section>
+          }
+        />
       </div>
 
       <section>
@@ -78,7 +85,7 @@ export default async function Home() {
           {upcoming.map((f) => (
             <li key={f.id} className="rounded-xl border border-border bg-surface p-3">
               <p className="mb-2 text-[10px] font-bold uppercase tracking-[0.12em] text-accent">
-                {formatKickoff(f.kickoff_utc, now)}
+                {formatKickoffTime(f.kickoff_utc, now)}
               </p>
               <p className="flex items-center gap-2 text-sm"><Crest team={f.home} size={18} />{f.home?.short_name ?? f.home?.name}</p>
               <p className="mt-1 flex items-center gap-2 text-sm"><Crest team={f.away} size={18} />{f.away?.short_name ?? f.away?.name}</p>

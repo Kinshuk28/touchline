@@ -27,3 +27,33 @@ export function loadEnv(source: Record<string, string | undefined> = process.env
   }
   return parsed.data;
 }
+
+// The public site (`lib/site/`) only ever reads the database, with the
+// anon key — SELECT-only, enforced by grants and row-level security. It
+// must never require, and structurally cannot obtain, `SUPABASE_SERVICE_ROLE_KEY`
+// or `FOOTBALL_DATA_KEY`: those belong exclusively to `scripts/ingest/*`
+// (via `loadEnv`/`lib/db/client.ts#serviceClient`). `.pick()` on the single
+// `schema` above keeps one source of truth for what a valid Supabase URL
+// and anon key look like, rather than duplicating those refinements here.
+//
+// Before this split, `lib/site/supabase.ts` called `loadEnv()` directly,
+// which validated all four variables — so a deploy target (or CI run) that
+// supplied only the two read credentials the site actually needs would fail
+// to render a single page. Worse, it meant the service-role key had to be
+// present just to serve a page at all, one `process.env` dump or error-
+// boundary leak away from exposure. `next build` executes these server
+// components' data-fetching code at build time for any statically
+// prerenderable route, so this was never a theoretical, request-time-only
+// concern.
+const siteSchema = schema.pick({ SUPABASE_URL: true, SUPABASE_ANON_KEY: true });
+
+export type SiteEnv = z.infer<typeof siteSchema>;
+
+export function loadSiteEnv(source: Record<string, string | undefined> = process.env): SiteEnv {
+  const parsed = siteSchema.safeParse(source);
+  if (!parsed.success) {
+    const lines = parsed.error.issues.map((i) => `  ${i.path.join('.')}: ${i.message}`);
+    throw new Error(`Invalid environment:\n${lines.join('\n')}`);
+  }
+  return parsed.data;
+}

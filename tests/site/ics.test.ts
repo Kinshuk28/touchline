@@ -46,6 +46,43 @@ describe('buildIcs', () => {
   });
 });
 
+// Important 4: getFixturesInRange (the only query behind /calendar and this
+// route) applies no status filter, and a postponed/cancelled/suspended
+// fixture keeps its original kickoff_utc — so without this exclusion, a
+// match that will never be played at that time creates a real VEVENT in
+// every subscriber's calendar.
+describe('buildIcs excludes non-playable fixtures (Important 4)', () => {
+  it('drops a POSTPONED fixture entirely — no VEVENT for a match that will not happen at its old kickoff', () => {
+    const postponed = { ...f, status: 'POSTPONED' as const };
+    const ics = buildIcs([postponed], () => 'La Liga');
+    expect(ics).not.toContain('BEGIN:VEVENT');
+    expect(ics).not.toContain('fixture-7@touchline');
+  });
+
+  it('drops CANCELLED and SUSPENDED fixtures too', () => {
+    const cancelled = { ...f, id: 8, status: 'CANCELLED' as const };
+    const suspended = { ...f, id: 9, status: 'SUSPENDED' as const };
+    const ics = buildIcs([cancelled, suspended], () => 'La Liga');
+    expect(ics).not.toContain('BEGIN:VEVENT');
+  });
+
+  it('keeps a playable fixture in the same batch as a postponed one', () => {
+    const postponed = { ...f, id: 8, status: 'POSTPONED' as const };
+    const ics = buildIcs([f, postponed], () => 'La Liga');
+    expect(ics).toContain('UID:fixture-7@touchline');
+    expect(ics).not.toContain('UID:fixture-8@touchline');
+    // Exactly one event, not two.
+    expect(ics.split('BEGIN:VEVENT')).toHaveLength(2);
+  });
+
+  it('still produces a well-formed (empty) calendar when every fixture is non-playable', () => {
+    const postponed = { ...f, status: 'POSTPONED' as const };
+    const ics = buildIcs([postponed], () => 'La Liga');
+    expect(ics.startsWith('BEGIN:VCALENDAR')).toBe(true);
+    expect(ics.trimEnd().endsWith('END:VCALENDAR')).toBe(true);
+  });
+});
+
 // RFC 5545 line folding (`fold()` in lib/site/ics.ts): content lines over 75
 // octets must be split with CRLF + a single leading space, and readers strip
 // that back out. A malformed fold is a silent-import-failure in real

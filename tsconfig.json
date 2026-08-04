@@ -37,6 +37,8 @@
     "lib/**/*",
     "scripts/**/*",
     "tests/**/*",
+    "e2e/**/*",
+    "*.ts",
     ".next/types/**/*.ts",
     ".next/dev/types/**/*.ts"
   ],

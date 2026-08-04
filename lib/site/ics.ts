@@ -2,6 +2,14 @@ import type { FixtureWithTeams } from '@/lib/site/rows';
 
 const MATCH_MINUTES = 120;
 
+// Important 4: `getFixturesInRange` — the only query behind both /calendar
+// and this route — applies no status filter. A postponed fixture keeps its
+// original kickoff_utc, so without this exclusion it would create a VEVENT
+// in every subscriber's calendar for a match that will never be played at
+// that time (or possibly ever). Same status set `scoreDisplay.ts`'s
+// DEAD_STATUSES uses for the equivalent "never a real score" rule.
+const NON_PLAYABLE_STATUSES = new Set(['POSTPONED', 'CANCELLED', 'SUSPENDED']);
+
 function stamp(iso: string): string {
   return new Date(iso).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
 }
@@ -51,7 +59,9 @@ export function buildIcs(
     'X-WR-CALNAME:Touchline fixtures',
   ];
 
-  for (const f of fixtures) {
+  const playable = fixtures.filter((f) => !NON_PLAYABLE_STATUSES.has(f.status));
+
+  for (const f of playable) {
     const home = f.home?.name ?? 'TBC';
     const away = f.away?.name ?? 'TBC';
     const end = new Date(new Date(f.kickoff_utc).getTime() + MATCH_MINUTES * 60_000).toISOString();

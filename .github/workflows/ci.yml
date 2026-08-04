@@ -21,3 +21,13 @@ jobs:
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
       - run: npm run typecheck
       - run: npm test
+      - run: npx playwright install --with-deps chromium
+      - run: npx playwright test
+        env:
+          # Playwright's webServer (playwright.config.ts) runs `npm run
+          # build && npm start` itself, so it needs the same two read
+          # credentials the build step above does — and, after Critical 1
+          # (lib/config/env.ts#loadSiteEnv), that is genuinely all it needs.
+          # Never add SUPABASE_SERVICE_ROLE_KEY or FOOTBALL_DATA_KEY here.
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}

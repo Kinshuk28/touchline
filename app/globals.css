@@ -55,6 +55,12 @@
   --color-accent: var(--accent);
   --color-accent-ink: var(--accent-ink);
   --color-live: var(--live);
+  /* app/layout.tsx loads Inter via next/font/google and exposes it as
+     --font-inter on <html>, but nothing previously mapped Tailwind's
+     `font-sans` utility (used by <body> below) to it — so font-sans
+     resolved to Tailwind's default system stack and the Inter woff2 was
+     downloaded on every page load and never actually applied. */
+  --font-sans: var(--font-inter);
 }
 
 html { color-scheme: dark light; }

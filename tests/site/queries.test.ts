@@ -1,5 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { buildFixtureSelect, isLiveOrRecent, RECENT_WINDOW_HOURS, getUpcoming, getFixturesInRange } from '@/lib/site/queries/fixtures';
+import {
+  buildFixtureSelect, isLiveOrRecent, RECENT_WINDOW_HOURS, KICKOFF_GRACE_MINUTES,
+  getUpcoming, getFixturesInRange, getLiveAndRecent,
+} from '@/lib/site/queries/fixtures';
 
 // A minimal, hand-rolled stand-in for the PostgREST query builder that
 // `readClient()` returns — not a mocking library, just enough chain surface
@@ -149,6 +152,28 @@ describe('isLiveOrRecent', () => {
   it('keeps a recent window wide enough to cover a full match plus stoppage', () => {
     expect(RECENT_WINDOW_HOURS).toBeGreaterThanOrEqual(3);
   });
+
+  // Important 7: a fixture whose kickoff has passed but whose status is
+  // still SCHEDULED/TIMED — the normal state for up to a few minutes given
+  // the ~5-minute ingest cadence — used to fall into neither getUpcoming
+  // (kickoff no longer in the future) nor getLiveAndRecent (status not
+  // IN_PLAY/PAUSED), so it vanished from /scores entirely between kickoff
+  // and the next ingest run.
+  it('TIMED 10 minutes past kickoff is shown (the exact gap Important 7 covers)', () => {
+    expect(isLiveOrRecent('TIMED', minutesAgo(10), now)).toBe(true);
+  });
+
+  it('SCHEDULED 1 minute past kickoff is shown', () => {
+    expect(isLiveOrRecent('SCHEDULED', minutesAgo(1), now)).toBe(true);
+  });
+
+  it('TIMED at the far edge of the grace window is still shown', () => {
+    expect(isLiveOrRecent('TIMED', minutesAgo(KICKOFF_GRACE_MINUTES), now)).toBe(true);
+  });
+
+  it('TIMED past the grace window is not shown — it is presumed stuck, not just slow to update', () => {
+    expect(isLiveOrRecent('TIMED', minutesAgo(KICKOFF_GRACE_MINUTES + 1), now)).toBe(false);
+  });
 });
 
 // Finding 1: `/scores` called getUpcoming(now, 20) with no league scoping at
@@ -202,6 +227,62 @@ describe('getUpcoming scoping (Finding 1)', () => {
     ]);
     const upcoming = await getUpcoming(now, 20);
     expect(upcoming).toHaveLength(2);
+  });
+});
+
+// Important 7: getLiveAndRecent's grace-window branch, exercised end to end
+// through the fake DB rather than only via the isLiveOrRecent pure function
+// above — this is what actually proves a fixture 10 minutes past kickoff,
+// still TIMED, comes back from the query the page calls, not merely that
+// the decision rule says it should.
+describe('getLiveAndRecent grace window (Important 7)', () => {
+  beforeEach(() => fakeDb.setRows([]));
+
+  const now = new Date('2026-08-16T15:00:00Z');
+  const minutesAgo = (m: number) => new Date(now.getTime() - m * 60_000).toISOString();
+
+  it('includes a TIMED fixture 10 minutes past kickoff — the gap it did not appear in either list before', async () => {
+    fakeDb.setRows([fixtureRow({ id: 1, league_id: 1, status: 'TIMED', kickoff_utc: minutesAgo(10) })]);
+
+    const result = await getLiveAndRecent(now);
+
+    expect(result.map((f) => f.id)).toEqual([1]);
+  });
+
+  it('includes a SCHEDULED fixture just past kickoff too', async () => {
+    fakeDb.setRows([fixtureRow({ id: 1, league_id: 1, status: 'SCHEDULED', kickoff_utc: minutesAgo(2) })]);
+
+    const result = await getLiveAndRecent(now);
+
+    expect(result.map((f) => f.id)).toEqual([1]);
+  });
+
+  it('excludes a TIMED fixture whose kickoff is still in the future — that belongs to getUpcoming', async () => {
+    const hoursFromNow = (h: number) => new Date(now.getTime() + h * 3600_000).toISOString();
+    fakeDb.setRows([fixtureRow({ id: 1, league_id: 1, status: 'TIMED', kickoff_utc: hoursFromNow(1) })]);
+
+    const result = await getLiveAndRecent(now);
+
+    expect(result).toEqual([]);
+  });
+
+  it('excludes a TIMED fixture well past the grace window — presumed stuck, not just slow to update', async () => {
+    fakeDb.setRows([fixtureRow({ id: 1, league_id: 1, status: 'TIMED', kickoff_utc: minutesAgo(KICKOFF_GRACE_MINUTES + 5) })]);
+
+    const result = await getLiveAndRecent(now);
+
+    expect(result).toEqual([]);
+  });
+
+  it('still scopes the grace branch to leagueIds like the other two branches', async () => {
+    fakeDb.setRows([
+      fixtureRow({ id: 1, league_id: 1, status: 'TIMED', kickoff_utc: minutesAgo(5) }),
+      fixtureRow({ id: 2, league_id: 2, status: 'TIMED', kickoff_utc: minutesAgo(5) }),
+    ]);
+
+    const result = await getLiveAndRecent(now, [2]);
+
+    expect(result.map((f) => f.id)).toEqual([2]);
   });
 });
 

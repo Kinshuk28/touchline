@@ -4,7 +4,8 @@ import { getLeagues } from '@/lib/site/queries/leagues';
 import { parseLeagueCodes, resolveLeagueIds } from '@/lib/site/leagueFilter';
 import { LeagueFilter } from '@/components/LeagueFilter';
 import { Crest } from '@/components/Crest';
-import { formatKickoff } from '@/lib/site/format';
+import { formatKickoffTime } from '@/lib/site/format';
+import { stateLabel } from '@/lib/site/scoreDisplay';
 
 export const revalidate = 900;
 
@@ -62,23 +63,42 @@ export default async function CalendarPage({
               {new Date(`${day}T00:00:00Z`).toUTCString().slice(0, 11)}
             </h2>
             <ul className="overflow-hidden rounded-xl border border-border bg-surface">
-              {list.map((f) => (
-                <li key={f.id} className="flex items-center gap-3 border-b border-border px-3 py-2 last:border-b-0">
-                  <span className="w-12 shrink-0 text-xs text-muted tabular-nums">{formatKickoff(f.kickoff_utc, now)}</span>
-                  <span className="flex min-w-0 flex-1 items-center gap-2">
-                    <Crest team={f.home} size={20} />
-                    <span className="truncate text-sm">{f.home?.name ?? 'TBC'}</span>
-                  </span>
-                  <span className="shrink-0 text-xs text-muted">v</span>
-                  <span className="flex min-w-0 flex-1 items-center gap-2">
-                    <Crest team={f.away} size={20} />
-                    <span className="truncate text-sm">{f.away?.name ?? 'TBC'}</span>
-                  </span>
-                  <span className="hidden w-28 shrink-0 text-right text-[11px] text-muted sm:block">
-                    {nameById.get(f.league_id)}
-                  </span>
-                </li>
-              ))}
+              {list.map((f) => {
+                // Important 4: getFixturesInRange applies no status filter,
+                // so a postponed/cancelled/suspended fixture shows up here
+                // exactly like a real one unless labelled. Chose to label
+                // rather than exclude (unlike buildIcs, which must exclude —
+                // a calendar subscription is fire-and-forget with no chance
+                // to re-check, but a page the user is looking at right now
+                // can just say so): the fixture stays visible with its
+                // originally scheduled time, honestly marked, rather than
+                // silently vanishing from a view the user already has open.
+                const state = stateLabel(f);
+                return (
+                  <li key={f.id} className="flex items-center gap-3 border-b border-border px-3 py-2 last:border-b-0">
+                    <span className="w-20 shrink-0 whitespace-nowrap text-xs text-muted tabular-nums">
+                      {formatKickoffTime(f.kickoff_utc, now, { dateContext: true })}
+                    </span>
+                    <span className="flex min-w-0 flex-1 items-center gap-2">
+                      <Crest team={f.home} size={20} />
+                      <span className="truncate text-sm">{f.home?.name ?? 'TBC'}</span>
+                    </span>
+                    <span className="shrink-0 text-xs text-muted">v</span>
+                    <span className="flex min-w-0 flex-1 items-center gap-2">
+                      <Crest team={f.away} size={20} />
+                      <span className="truncate text-sm">{f.away?.name ?? 'TBC'}</span>
+                    </span>
+                    {state && (
+                      <span className={`shrink-0 text-[10px] font-semibold uppercase tracking-wide ${state.live ? 'text-live' : 'text-muted'}`}>
+                        {state.text}
+                      </span>
+                    )}
+                    <span className="hidden w-28 shrink-0 text-right text-[11px] text-muted sm:block">
+                      {nameById.get(f.league_id)}
+                    </span>
+                  </li>
+                );
+              })}
             </ul>
           </section>
         ))}

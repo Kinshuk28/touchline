@@ -4,7 +4,7 @@ import { parseLeagueCodes, resolveLeagueIds } from '@/lib/site/leagueFilter';
 import { LeagueFilter } from '@/components/LeagueFilter';
 import { ScoreRow } from '@/components/ScoreRow';
 import { LiveScores } from '@/components/LiveScores';
-import { formatKickoff } from '@/lib/site/format';
+import { formatKickoffTime } from '@/lib/site/format';
 import { scoreCellText } from '@/lib/site/scoreDisplay';
 
 // Inert today: reading `searchParams` below forces this whole route to
@@ -49,32 +49,35 @@ export default async function ScoresPage({
         <LeagueFilter leagues={leagues} selected={selected} basePath="/scores" />
       </div>
 
-      {recent.length > 0 ? (
-        <LiveScores
-          // Forces a clean remount on every filter change (Finding 2).
-          // `<LiveScores>` seeds its state from `initial`/`useRef` only on
-          // first mount; without a `key` tied to the selection, a
-          // client-side navigation between two `?leagues=` URLs reconciles
-          // it as the *same* instance and just updates props in place, so
-          // the panel keeps showing the previous filter's live fixtures
-          // until the next poll (or, since the ref merges rather than
-          // replaces, potentially longer).
-          key={selected.length > 0 ? selected.join(',') : 'all'}
-          initial={recent}
-          nowIso={now.toISOString()}
-          leagues={selected}
-          leagueIds={selectedLeagueIds}
-        />
-      ) : (
-        <section className="rounded-xl border border-border bg-surface p-6">
-          <p className="text-sm font-semibold">No matches in progress</p>
-          <p className="mt-1 text-sm text-muted">
-            {nextKickoff
-              ? <>Next up: {nextKickoff.home?.name} v {nextKickoff.away?.name}, {formatKickoff(nextKickoff.kickoff_utc, now)}.</>
-              : <>No fixtures scheduled in the selected competitions.</>}
-          </p>
-        </section>
-      )}
+      <LiveScores
+        // Forces a clean remount on every filter change (Finding 2).
+        // `<LiveScores>` seeds its state from `initial`/`useRef` only on
+        // first mount; without a `key` tied to the selection, a
+        // client-side navigation between two `?leagues=` URLs reconciles
+        // it as the *same* instance and just updates props in place, so
+        // the panel keeps showing the previous filter's live fixtures
+        // until the next poll (or, since the ref merges rather than
+        // replaces, potentially longer).
+        key={selected.length > 0 ? selected.join(',') : 'all'}
+        initial={recent}
+        nowIso={now.toISOString()}
+        leagues={selected}
+        leagueIds={selectedLeagueIds}
+        // Always mounted now (Important 5), even when `recent` is empty —
+        // otherwise the poll loop never starts for a page opened before
+        // kickoff, and this card would still be showing at 15:30 with a
+        // match already in progress.
+        emptyState={
+          <section className="rounded-xl border border-border bg-surface p-6">
+            <p className="text-sm font-semibold">No matches in progress</p>
+            <p className="mt-1 text-sm text-muted">
+              {nextKickoff
+                ? <>Next up: {nextKickoff.home?.name} v {nextKickoff.away?.name}, {formatKickoffTime(nextKickoff.kickoff_utc, now)}.</>
+                : <>No fixtures scheduled in the selected competitions.</>}
+            </p>
+          </section>
+        }
+      />
 
       <section>
         <h2 className="mb-2 text-[11px] font-bold uppercase tracking-[0.14em] text-muted">Upcoming</h2>

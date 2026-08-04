@@ -22,6 +22,20 @@ export const RECENT_FINISHED_STATUSES = ['FINISHED', 'AWARDED'] as const;
 // polling it is correct, showing it in the "Live & recent" panel is not.
 export const RECENT_WINDOW_HOURS = 6;
 
+// Important 7: `getUpcoming` requires `kickoff_utc > now` and `getLiveAndRecent`
+// (until this branch existed) required `IN_PLAY`/`PAUSED`. A fixture whose
+// kickoff has just passed but whose status is still `SCHEDULED`/`TIMED` —
+// the normal state for up to a few minutes given the ~5-minute ingest
+// cadence — fell into neither list and vanished from `/scores` entirely
+// until ingestion flipped its status. This grace window keeps it visible,
+// honestly labelled "Kicked off" (see `scoreDisplay.ts#scoreCellText`)
+// rather than shown as either a stale kickoff time or a live score it
+// doesn't have yet. Deliberately short and separate from
+// `RECENT_WINDOW_HOURS`: this fixture has not finished, it has (as far as
+// we know) just started.
+export const KICKOFF_GRACE_STATUSES = ['SCHEDULED', 'TIMED'] as const;
+export const KICKOFF_GRACE_MINUTES = 30;
+
 const TEAM_FIELDS = 'id,slug,name,short_name,tla,crest_url';
 
 /** One select, both teams joined — a crest must never cost a second query. */
@@ -38,9 +52,13 @@ function hoursAgo(now: Date, h: number): string {
   return new Date(now.getTime() - h * 3600_000).toISOString();
 }
 
+function minutesAgo(now: Date, m: number): string {
+  return new Date(now.getTime() - m * 60_000).toISOString();
+}
+
 /**
  * The decision rule behind getLiveAndRecent, extracted as a pure function so it can be
- * unit-tested without a database. The query below is built from the exact same two
+ * unit-tested without a database. The query below is built from the exact same three
  * status sets, so this function and the query can never drift apart in what they select.
  */
 export function isLiveOrRecent(status: string, kickoffUtc: string, now: Date): boolean {
@@ -52,7 +70,17 @@ export function isLiveOrRecent(status: string, kickoffUtc: string, now: Date): b
     return kickoffTime >= nowTime - RECENT_WINDOW_HOURS * 3600_000 && kickoffTime <= nowTime;
   }
 
-  // SCHEDULED, TIMED, POSTPONED, CANCELLED, SUSPENDED: never live/recent for display.
+  // Important 7: SCHEDULED/TIMED whose kickoff has passed within the grace
+  // window — the gap between kickoff and ingestion catching up. Note the
+  // direction: only *past* kickoffs count here. A SCHEDULED fixture whose
+  // kickoff is still in the future belongs to the upcoming list, not here.
+  if ((KICKOFF_GRACE_STATUSES as readonly string[]).includes(status)) {
+    const kickoffTime = new Date(kickoffUtc).getTime();
+    const nowTime = now.getTime();
+    return kickoffTime <= nowTime && kickoffTime >= nowTime - KICKOFF_GRACE_MINUTES * 60_000;
+  }
+
+  // POSTPONED, CANCELLED, SUSPENDED: never live/recent for display.
   return false;
 }
 
@@ -68,11 +96,11 @@ export function isLiveOrRecent(status: string, kickoffUtc: string, now: Date): b
 export async function getLiveAndRecent(now: Date, leagueIds?: number[]): Promise<FixtureWithTeams[]> {
   if (leagueIds && leagueIds.length === 0) return [];
 
-  // Two queries merged in JS rather than one `.or()` string: PostgREST's `.or()` syntax
-  // for "status in (A,B) OR (status in (C,D) AND kickoff_utc between X and Y)" needs a
-  // hand-built nested and()/in() filter string that's easy to get subtly wrong and can't
-  // be typo-checked by TypeScript. Two plain, independently-readable queries plus a trivial
-  // JS merge+sort is clearer and just as correct for a two-branch OR like this one.
+  // Three queries merged in JS rather than one `.or()` string: PostgREST's `.or()` syntax
+  // for this three-branch OR needs a hand-built nested and()/in() filter string that's
+  // easy to get subtly wrong and can't be typo-checked by TypeScript. Three plain,
+  // independently-readable queries plus a trivial JS merge+sort is clearer and just as
+  // correct.
   let liveQuery = readClient()
     .from('fixtures')
     .select(buildFixtureSelect())
@@ -83,17 +111,30 @@ export async function getLiveAndRecent(now: Date, leagueIds?: number[]): Promise
     .in('status', RECENT_FINISHED_STATUSES)
     .gte('kickoff_utc', hoursAgo(now, RECENT_WINDOW_HOURS))
     .lte('kickoff_utc', now.toISOString());
+  // Important 7: the grace-window branch — see KICKOFF_GRACE_STATUSES above.
+  let graceQuery = readClient()
+    .from('fixtures')
+    .select(buildFixtureSelect())
+    .in('status', KICKOFF_GRACE_STATUSES)
+    .gte('kickoff_utc', minutesAgo(now, KICKOFF_GRACE_MINUTES))
+    .lte('kickoff_utc', now.toISOString());
 
   if (leagueIds && leagueIds.length > 0) {
     liveQuery = liveQuery.in('league_id', leagueIds);
     recentQuery = recentQuery.in('league_id', leagueIds);
+    graceQuery = graceQuery.in('league_id', leagueIds);
   }
 
-  const [live, recentFinished] = await Promise.all([liveQuery, recentQuery]);
+  const [live, recentFinished, grace] = await Promise.all([liveQuery, recentQuery, graceQuery]);
   if (live.error) throw new Error(`getLiveAndRecent: ${live.error.message}`);
   if (recentFinished.error) throw new Error(`getLiveAndRecent: ${recentFinished.error.message}`);
+  if (grace.error) throw new Error(`getLiveAndRecent: ${grace.error.message}`);
 
-  const merged = [...(live.data ?? []), ...(recentFinished.data ?? [])] as unknown as FixtureWithTeams[];
+  const merged = [
+    ...(live.data ?? []),
+    ...(recentFinished.data ?? []),
+    ...(grace.data ?? []),
+  ] as unknown as FixtureWithTeams[];
   merged.sort((a, b) => a.kickoff_utc.localeCompare(b.kickoff_utc));
   return merged;
 }

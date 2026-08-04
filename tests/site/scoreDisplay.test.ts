@@ -29,6 +29,29 @@ describe('scoreCellText', () => {
   it('shows the live score for an in-play match', () => {
     expect(scoreCellText(fixture({ status: 'IN_PLAY', home_goals: 1, away_goals: 0 }), now)).toBe('1–0');
   });
+
+  it('shows a date and time together for a kickoff more than a week out (Important 3)', () => {
+    expect(scoreCellText(fixture({ status: 'SCHEDULED', kickoff_utc: '2026-10-01T19:00:00Z' }), now)).toBe('1 Oct 19:00');
+  });
+
+  // Important 7: a fixture whose kickoff has passed but is still SCHEDULED
+  // or TIMED — the normal state for up to a few minutes given the ingest
+  // cadence — must read honestly rather than showing a stale kickoff time
+  // or inventing a score.
+  it('shows "Kicked off" for a TIMED fixture 10 minutes past its kickoff, not a stale time or a score', () => {
+    const kickoff = new Date(now.getTime() - 10 * 60_000).toISOString();
+    expect(scoreCellText(fixture({ status: 'TIMED', kickoff_utc: kickoff }), now)).toBe('Kicked off');
+  });
+
+  it('shows "Kicked off" for a SCHEDULED fixture just past its kickoff too', () => {
+    const kickoff = new Date(now.getTime() - 1 * 60_000).toISOString();
+    expect(scoreCellText(fixture({ status: 'SCHEDULED', kickoff_utc: kickoff }), now)).toBe('Kicked off');
+  });
+
+  it('still shows the kickoff time for a SCHEDULED fixture whose kickoff has not arrived yet', () => {
+    const kickoff = new Date(now.getTime() + 10 * 60_000).toISOString();
+    expect(scoreCellText(fixture({ status: 'SCHEDULED', kickoff_utc: kickoff }), now)).toBe('15:10');
+  });
 });
 
 describe('stateLabel', () => {

@@ -2217,16 +2217,153 @@ Confirm after deploy: the landing page renders, `/scores` shows the preseason st
 
 ---
 
+## Review-fixes pass #4: whole-branch review, matchday-invisible-today findings
+
+Run on 2026-08-04 (season starts 2026-08-16 — today is 12 days out, so every
+finding below was either invisible entirely or silently wrong until then).
+Nine findings, two CRITICAL. All fixed in the same pass; see
+`.superpowers/sdd/final-b1-fixes-report.md` for before/after build output and
+rendered strings. Recorded here so none of these regress:
+
+> **CRITICAL 1 — the public site required the service-role key to render at
+> all.** `lib/site/supabase.ts` called the monolithic `loadEnv()`
+> (`lib/config/env.ts`), which validated all four of `FOOTBALL_DATA_KEY`,
+> `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` — so any
+> environment supplying only the two the site actually reads with (CI,
+> correctly, per this doc's own Task 6 instruction; Netlify, which must
+> never hold the service-role key at all) failed to render a single page.
+> `next build` executes this code at build time for `/`, which is
+> statically prerendered, so the failure showed up before a server ever
+> started. Fixed by splitting the schema: `lib/config/env.ts` now also
+> exports `loadSiteEnv()`, a `.pick()` on the same `schema` validating only
+> `SUPABASE_URL`/`SUPABASE_ANON_KEY`, and `lib/site/supabase.ts` calls that
+> instead of `loadEnv()`. `lib/db/client.ts#serviceClient` (ingestion) keeps
+> calling the full `loadEnv()` unchanged. `tests/config/env.test.ts` has a
+> dedicated `loadSiteEnv` block proving it succeeds with only the two site
+> variables present and that its return type has no service-role field even
+> when one is in the source. **Do not merge `loadSiteEnv` back into
+> `loadEnv`, and do not let anything under `lib/site/` or `components/`
+> import `loadEnv` directly** — that is exactly this regression.
+
+> **CRITICAL 2 — every club name was a guaranteed 404.** `components/ScoreRow.tsx`
+> wrapped each team in `<Link href={`/team/${team.slug}`}>`, but
+> `app/team/[slug]` doesn't exist until Plan B2, and there was no
+> `app/not-found.tsx`, so every click landed on Next's unstyled default 404.
+> Fixed by rendering a plain `<span>` for both sides (no `<Link>` at all —
+> see the comment above `Side` in `components/ScoreRow.tsx`) and adding a
+> themed `app/not-found.tsx`. **Do not reintroduce the team link until
+> `app/team/[slug]/page.tsx` actually exists.**
+
+> **IMPORTANT 3 — no kickoff times were displayed anywhere.** `formatKickoff`
+> (`lib/site/format.ts`) drops the time entirely for anything more than 7
+> days out — invisible while every fixture in the database is within a week
+> of "now", which was never true before the season starts. Fixed by adding
+> `formatKickoffTime(iso, now, { dateContext? })`: same day-window rule, but
+> the time is never dropped. `dateContext: true` (used only by
+> `/calendar`, which already states the date via its day-grouping heading)
+> keeps the far-out branch at weekday+time ("Tue 19:00") instead of
+> repeating the date; the default (landing page's "Next fixtures" tiles,
+> `/scores`'s upcoming rows via `scoreDisplay.ts#scoreCellText`) spells the
+> date out ("16 Aug 19:00") since nothing else on those rows gives it.
+> `app/calendar/page.tsx`'s time column widened from `w-12` (48px, too
+> narrow for "Tue 19:00") to `w-20`. `formatKickoff` itself is unchanged and
+> still used by nothing outside its own tests — kept only so those tests
+> keep passing; do not add a new call site for it.
+
+> **IMPORTANT 4 — postponed fixtures reached users' calendars.**
+> `getFixturesInRange` (the only query behind both `/calendar` and
+> `/api/calendar.ics`) applies no status filter, unlike `getUpcoming`
+> (`['SCHEDULED','TIMED']`) and `getNextKickoffPerLeague`
+> (`KICKOFF_STATUSES`). A postponed fixture keeps its original
+> `kickoff_utc`, so it created a real `VEVENT` for a match that will never
+> be played at that time. Fixed two different ways deliberately: `buildIcs`
+> (`lib/site/ics.ts`) **excludes** `POSTPONED`/`CANCELLED`/`SUSPENDED`
+> fixtures outright — a calendar subscription is fire-and-forget with no
+> chance for the user to re-check, so a stale VEVENT is worse than a
+> missing one. `/calendar` (`app/calendar/page.tsx`) instead **labels**
+> them using the existing `stateLabel` helper (`lib/site/scoreDisplay.ts`)
+> — the user already has the page open and can just be told, and the
+> fixture stays visible with its originally scheduled time rather than
+> silently vanishing from a view they're looking at. Both are tested
+> (`tests/site/ics.test.ts`, and the fixture stays covered in
+> `tests/site/queries.test.ts`'s scoping tests).
+
+> **IMPORTANT 5 — a page opened before kickoff never went live.**
+> `app/scores/page.tsx` and `app/page.tsx` used to mount `<LiveScores>` only
+> inside a `fixtures.length > 0` ternary, so a page opened while nothing was
+> live never started the poll loop at all — the static "No matches in
+> progress" card seen at 14:50 was still showing at 15:30 with a match in
+> progress. Fixed by always mounting `<LiveScores>` and giving it a required
+> `emptyState: ReactNode` prop; it renders that instead of the fixture list
+> when `fixtures.length === 0`, with no heading of its own (the caller's
+> card supplies its own — "No matches in progress" on `/scores`, "Season
+> kicks off" with per-league countdowns on `/`), so the poll above keeps
+> running regardless. **Do not reintroduce a `fixtures.length > 0` ternary
+> around `<LiveScores>` — that is exactly this regression.**
+
+> **IMPORTANT 6 — the freshness stamp froze during a goalless spell.** A
+> seam between two earlier fixes: a no-op poll skips `setState` entirely
+> (correctly — see Task 5's Finding 2 above), and the merge compares only
+> status and goals, so neither the old shared `stamp` state nor the
+> row-derived `newest` timestamp advanced while the score stayed unchanged.
+> Fixed by tracking poll success separately from data change:
+> `components/LiveScores.tsx` now has its own `lastPolledAt` state, set on
+> *every* successful fetch regardless of whether `hasLiveChanges` says
+> anything moved. `components/DataAge.tsx` gained a `variant?: 'updated' |
+> 'checked'` prop; `LiveScores` uses `variant="checked"`, which reads via
+> the new `lib/site/format.ts#checkedAge` ("checked X ago") instead of
+> `dataAge` ("updated X ago") — the label now answers "is this panel still
+> polling", which a row `updated_at`-derived stamp cannot.
+
+> **IMPORTANT 7 — a fixture disappeared in the five minutes after kickoff.**
+> `getLiveAndRecent` required `IN_PLAY`/`PAUSED`; `getUpcoming` required
+> `kickoff_utc > now`. A fixture whose kickoff had passed but whose status
+> was still `TIMED` — the normal state for up to a few minutes given the
+> ~5-minute ingest cadence — fell into neither list and vanished from
+> `/scores` until the next ingest run. Fixed by adding a third,
+> intentionally short "grace window" branch: `KICKOFF_GRACE_STATUSES =
+> ['SCHEDULED', 'TIMED']` and `KICKOFF_GRACE_MINUTES = 30` in
+> `lib/site/queries/fixtures.ts`, folded into both the pure `isLiveOrRecent`
+> predicate and `getLiveAndRecent`'s query (a third `graceQuery` merged
+> alongside `liveQuery`/`recentQuery`). Displayed honestly: `scoreCellText`
+> (`lib/site/scoreDisplay.ts`) returns `"Kicked off"` — never a stale
+> kickoff time, never an invented score — for a `SCHEDULED`/`TIMED` fixture
+> whose kickoff has passed. Tested in `tests/site/queries.test.ts` (a TIMED
+> fixture 10 minutes past kickoff, at the exact edge of the grace window,
+> and past it) and `tests/site/scoreDisplay.test.ts`.
+
+> **IMPORTANT 8 — the E2E suite was untypechecked and never ran in CI.**
+> `e2e/**/*` and the root `*.ts` config files (`next.config.ts`,
+> `playwright.config.ts`, `vitest.config.ts`) were outside `tsconfig.json`'s
+> `include`, and `.github/workflows/ci.yml` never ran `npx playwright test`.
+> Fixed: `tsconfig.json`'s `include` now has `"e2e/**/*"` and `"*.ts"`; CI
+> gained an `npx playwright install --with-deps chromium` step and an `npx
+> playwright test` step scoped to only `SUPABASE_URL`/`SUPABASE_ANON_KEY` —
+> which, after Critical 1 above, is genuinely all the build-and-serve
+> `webServer` in `playwright.config.ts` needs.
+
+> **IMPORTANT 9 — Inter was downloaded on every page load and never
+> applied.** `app/layout.tsx` sets `--font-inter` via `next/font/google`,
+> but `app/globals.css`'s `@theme inline` block never mapped Tailwind's
+> `--font-sans` to it, so the `font-sans` utility on `<body>` resolved to
+> the default system stack and the woff2 download was pure dead weight.
+> Fixed with one line: `--font-sans: var(--font-inter);` added to the
+> `@theme inline` block.
+
+---
+
 ## Phase B1: definition of done
 
-- [ ] `npm run build`, `npm test`, `npm run typecheck` all clean
-- [ ] `npm run e2e` passes all five specs
-- [ ] `/`, `/scores`, `/calendar` render real data with real crests
-- [ ] Every club without a crest shows a coloured monogram, never a broken image
-- [ ] A league filter survives a hard refresh, in the URL
-- [ ] Live scores patch in place without resetting scroll or filters
-- [ ] Both themes meet WCAG AA and the choice persists
-- [ ] Deployed to Netlify with only the anon key present
+- [x] `npm run build`, `npm test`, `npm run typecheck` all clean
+- [x] `npm run e2e` passes all five specs (now also runs in CI, see IMPORTANT 8 above)
+- [x] `/`, `/scores`, `/calendar` render real data with real crests
+- [x] Every club without a crest shows a coloured monogram, never a broken image
+- [x] A league filter survives a hard refresh, in the URL
+- [x] Live scores patch in place without resetting scroll or filters
+- [x] Both themes meet WCAG AA and the choice persists
+- [x] Deploys with only the anon key present — the site cannot read the
+      service-role key even in principle (see CRITICAL 1 above:
+      `loadSiteEnv`'s schema structurally has no field for it)
 
 ---
 
