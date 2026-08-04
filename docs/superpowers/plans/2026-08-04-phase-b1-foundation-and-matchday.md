@@ -408,11 +408,19 @@ export interface NewsRow {
 
 - [ ] **Step 4: Write the failing test**
 
-Create `tests/site/queries.test.ts`. These verify query *shape* — that the right columns, filters and ordering are requested — without a database, by asserting on a fake client. The live data is exercised by the E2E suite in Task 9.
+Create `tests/site/queries.test.ts`. The `buildFixtureSelect` tests verify query *shape*
+without a database. **`getLiveAndRecent` must be tested as a decision rule, not as a
+constant's shape** — an earlier version of this step asserted `LIVE_STATUSES` merely
+`toContain('IN_PLAY')`, which passed even though the query never used the constant at
+all (a pure kickoff-time window, no status filter). That shipped a real bug: a
+`POSTPONED`/`CANCELLED`/`SUSPENDED` fixture kicking off in the past 6h was shown as
+live (false positive), and an `IN_PLAY` fixture resumed after a long suspension more
+than 6h after kickoff silently disappeared (false negative). Test the pure predicate
+`isLiveOrRecent(status, kickoffUtc, now)` instead, so the rule itself is pinned:
 
 ```ts
-import { describe, it, expect, vi } from 'vitest';
-import { buildFixtureSelect, LIVE_STATUSES, RECENT_WINDOW_HOURS } from '@/lib/site/queries/fixtures';
+import { describe, it, expect } from 'vitest';
+import { buildFixtureSelect, isLiveOrRecent, RECENT_WINDOW_HOURS } from '@/lib/site/queries/fixtures';
 
 describe('fixture select', () => {
   it('joins both teams so a crest never needs a second query', () => {
@@ -428,19 +436,14 @@ describe('fixture select', () => {
   });
 });
 
-describe('live status set', () => {
-  it('treats IN_PLAY and PAUSED as live', () => {
-    expect(LIVE_STATUSES).toContain('IN_PLAY');
-    expect(LIVE_STATUSES).toContain('PAUSED');
-  });
-
-  it('does not treat FINISHED as live', () => {
-    expect(LIVE_STATUSES).not.toContain('FINISHED');
-  });
-
-  it('keeps a recent window wide enough to cover a full match plus stoppage', () => {
-    expect(RECENT_WINDOW_HOURS).toBeGreaterThanOrEqual(3);
-  });
+describe('isLiveOrRecent', () => {
+  const now = new Date('2026-08-04T18:00:00Z');
+  // ... IN_PLAY/PAUSED always true regardless of elapsed time (including 9h after
+  // kickoff — a resumed suspension); FINISHED/AWARDED true only inside the recent
+  // window, false 3 days later; POSTPONED/CANCELLED/SUSPENDED always false even with
+  // a kickoff 1h ago; SCHEDULED/TIMED in the future always false. See
+  // tests/site/queries.test.ts for the full table, including the RECENT_WINDOW_HOURS
+  // sanity check.
 });
 ```
 
@@ -451,11 +454,29 @@ Expected: FAIL — `Cannot find module '@/lib/site/queries/fixtures'`
 
 - [ ] **Step 6: Write `lib/site/queries/fixtures.ts`**
 
+**Do not implement `getLiveAndRecent` as a pure kickoff-time window.** An earlier
+version of this step did exactly that — `.gte('kickoff_utc', ...).lte('kickoff_utc',
+now)` with no status filter — while its own doc comment claimed it returned "anything
+in play, plus anything that finished recently enough to still matter." It returned
+neither correctly: a `SUSPENDED` fixture is not "in play" for display purposes (unlike
+`lib/ingest/matchWindow.ts`'s ingestion guard, which deliberately keeps polling a
+`SUSPENDED` fixture because it might resume — that is "should we fetch," this is
+"should we display," and they answer differently on purpose), and an `IN_PLAY` fixture
+outside the window would wrongly disappear. Make the query genuinely status-aware,
+built from the same status sets the `isLiveOrRecent` predicate uses, so the two can
+never drift apart:
+
 ```ts
 import { readClient } from '@/lib/site/supabase';
 import type { FixtureWithTeams } from '@/lib/site/rows';
 
+// IN_PLAY/PAUSED are always shown, regardless of kickoff time.
 export const LIVE_STATUSES = ['IN_PLAY', 'PAUSED'] as const;
+// FINISHED/AWARDED are shown only inside the recent window.
+export const RECENT_FINISHED_STATUSES = ['FINISHED', 'AWARDED'] as const;
+// POSTPONED/CANCELLED/SUSPENDED are absent from both sets above and therefore never
+// shown, whatever their kickoff time — see the comment on isLiveOrRecent for why this
+// is the deliberate opposite of matchWindow.ts's SUSPENDED handling.
 export const RECENT_WINDOW_HOURS = 6;
 
 const TEAM_FIELDS = 'id,slug,name,short_name,tla,crest_url';
@@ -474,16 +495,37 @@ function hoursAgo(now: Date, h: number): string {
   return new Date(now.getTime() - h * 3600_000).toISOString();
 }
 
+/** The decision rule behind getLiveAndRecent, pure and DB-free so it is unit-testable. */
+export function isLiveOrRecent(status: string, kickoffUtc: string, now: Date): boolean {
+  if ((LIVE_STATUSES as readonly string[]).includes(status)) return true;
+  if ((RECENT_FINISHED_STATUSES as readonly string[]).includes(status)) {
+    const kickoffTime = new Date(kickoffUtc).getTime();
+    const nowTime = now.getTime();
+    return kickoffTime >= nowTime - RECENT_WINDOW_HOURS * 3600_000 && kickoffTime <= nowTime;
+  }
+  return false; // SCHEDULED, TIMED, POSTPONED, CANCELLED, SUSPENDED
+}
+
 /** Anything in play, plus anything that finished recently enough to still matter. */
 export async function getLiveAndRecent(now: Date): Promise<FixtureWithTeams[]> {
-  const { data, error } = await readClient()
-    .from('fixtures')
-    .select(buildFixtureSelect())
-    .gte('kickoff_utc', hoursAgo(now, RECENT_WINDOW_HOURS))
-    .lte('kickoff_utc', now.toISOString())
-    .order('kickoff_utc', { ascending: true });
-  if (error) throw new Error(`getLiveAndRecent: ${error.message}`);
-  return (data ?? []) as unknown as FixtureWithTeams[];
+  // Two queries merged in JS rather than one `.or()` string: a hand-built nested
+  // and()/in() PostgREST filter string is easy to get subtly wrong and TypeScript
+  // can't check it; two plain queries plus a trivial merge+sort are just as correct
+  // and much easier to read and test.
+  const [live, recentFinished] = await Promise.all([
+    readClient().from('fixtures').select(buildFixtureSelect()).in('status', LIVE_STATUSES),
+    readClient()
+      .from('fixtures')
+      .select(buildFixtureSelect())
+      .in('status', RECENT_FINISHED_STATUSES)
+      .gte('kickoff_utc', hoursAgo(now, RECENT_WINDOW_HOURS))
+      .lte('kickoff_utc', now.toISOString()),
+  ]);
+  if (live.error) throw new Error(`getLiveAndRecent: ${live.error.message}`);
+  if (recentFinished.error) throw new Error(`getLiveAndRecent: ${recentFinished.error.message}`);
+  const merged = [...(live.data ?? []), ...(recentFinished.data ?? [])] as unknown as FixtureWithTeams[];
+  merged.sort((a, b) => a.kickoff_utc.localeCompare(b.kickoff_utc));
+  return merged;
 }
 
 export async function getUpcoming(now: Date, limit = 12): Promise<FixtureWithTeams[]> {
