@@ -73,7 +73,10 @@ export default async function Home() {
           <h2 className="text-11 font-bold uppercase tracking-[0.14em] text-muted">Next fixtures</h2>
           <Link href="/calendar" className="text-11 text-muted hover:text-text">Full calendar →</Link>
         </div>
-        <MatchdaySpine days={spineDays} leagues={leagues} now={now} />
+        {/* Eager: this spine sits above the fold on a laptop viewport, so
+            lazy-loading its crests shows a row of blank gaps that reads as a
+            failed image load before they pop in. */}
+        <MatchdaySpine days={spineDays} leagues={leagues} now={now} eagerCrests />
       </section>
 
       <section>
