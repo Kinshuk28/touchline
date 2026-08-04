@@ -320,7 +320,7 @@ git commit -m "feat: Next.js scaffold with Broadcast design tokens and both them
   - `getLeagues(): Promise<LeagueRow[]>`
   - `getLiveAndRecent(now: Date): Promise<FixtureWithTeams[]>`
   - `getUpcoming(now: Date, limit?: number): Promise<FixtureWithTeams[]>`
-  - `getFixturesInRange(fromIso: string, toIso: string, leagueCodes?: string[]): Promise<FixtureWithTeams[]>`
+  - `getFixturesInRange(fromIso: string, toIso: string, leagueIds?: number[]): Promise<FixtureWithTeams[]>`
   - `getTrendingNews(limit?: number): Promise<NewsRow[]>`
 
 - [ ] **Step 1: Make the anon key required again for the site**
@@ -331,7 +331,9 @@ git commit -m "feat: Next.js scaffold with Broadcast design tokens and both them
   SUPABASE_ANON_KEY: z.string().min(20),
 ```
 
-and add a comment noting the site reads with it while ingestion writes with the service key. Existing env tests already cover a missing field, so no test change is needed — but re-run them.
+and add a comment noting the site reads with it while ingestion writes with the service key.
+
+**This breaks an existing test.** `tests/config/env.test.ts` currently asserts the anon key is *optional*; that assertion now states the opposite of the requirement and must be updated to assert it is required. Update it as part of this step.
 
 - [ ] **Step 2: Write `lib/site/supabase.ts`**
 
@@ -1365,7 +1367,13 @@ export default async function ScoresPage({
 }
 ```
 
-- [ ] **Step 3: Build and check the route renders**
+- [ ] **Step 3: Give CI the credentials the build now needs**
+
+CI runs `npm run build`, and from this task onward the build executes server components that read Postgres — so it needs Supabase credentials or it fails with a network error that looks nothing like a type error.
+
+Add `SUPABASE_URL` and `SUPABASE_ANON_KEY` to `.github/workflows/ci.yml`'s build step only. **This does not weaken CI's no-live-provider-call guarantee:** the anon key is SELECT-only, RLS-enforced, and ships to browsers by design, so it is not a secret in the sense the football-data key is. Do **not** add `SUPABASE_SERVICE_ROLE_KEY` or `FOOTBALL_DATA_KEY` — those must never reach a build.
+
+- [ ] **Step 4: Build and check the route renders**
 
 ```bash
 npm run build
@@ -1373,7 +1381,7 @@ npm run build
 
 Expected: build succeeds and lists `/scores` as a dynamic route.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add -A
