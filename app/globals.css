@@ -8,31 +8,69 @@
  * the one-purpose --live red. Token *names* (--bg, --surface, --surface-2,
  * --border, --text, --muted) are kept from the previous palette so the
  * rename stays contained to this file; only their values change, to the
- * turf/chalk hexes the spec gives. Dark theme is turf: a deep, desaturated
- * pitch green-black, floodlit-at-night rather than a generic void. Light
- * theme is paper: a warm off-white "matchday programme" ground, not an
- * inverted dark theme — ink, not grey-on-white.
+ * turf/chalk hexes the spec gives. Dark theme is turf: a deep pitch green,
+ * floodlit-at-night rather than a generic void. Light theme is paper: a
+ * warm off-white "matchday programme" ground, not an inverted dark theme —
+ * ink, not grey-on-white.
+ *
+ * TURF, RESATURATED (dashboard-rebuild spec, defect 3: "the turf green
+ * reads as grey-black — either push saturation until it genuinely reads as
+ * turf, or abandon it and pick a defensible ground. State which and why.")
+ *
+ * Kept and pushed, not abandoned. The concept wasn't the failure, the
+ * numbers were. The old ground #0C1512 is HSL(160, 27%, 6.5%) — a spread of
+ * 9/255 between its highest and lowest RGB channel. Nine levels of
+ * separation at that lightness is below what the eye resolves as a hue, so
+ * it arrives as black with an unplaceable cast: the reported symptom
+ * exactly. Abandoning green would also throw away the rest of Direction
+ * Two — the five competition colours and every parsed club colour were
+ * tuned to sit on a green-black ground, and a neutral or blue ground would
+ * need all of them re-derived.
+ *
+ * So: chroma first, lightness second. #092219 is HSL(158, 58%, 8.4%) — a
+ * spread of 25/255, nearly 3x the old one, for under two points of extra
+ * lightness. Surfaces follow the same curve, each still a clear step above
+ * the one below.
+ *
+ * Re-measured after the change (dark theme, every AA-relevant pair):
+ *
+ *   ground      chalk   muted   PL     PD     SA     BL1    FL1    live
+ *   --bg        14.79   6.16    7.99   5.70   6.38   9.49   10.64  4.89
+ *   --surface   13.53   5.64    7.31   5.21   5.83   8.68   9.74   4.47
+ *   --surface-2 11.93   4.97    6.45   4.60   5.14   7.65   8.58   (n/a)
+ *
+ * Every text pair clears 4.5:1. `--live` as text only ever sits on --bg or
+ * --surface — the live-state label in components/MatchdaySpine.tsx,
+ * components/ScoreRow.tsx and /scores, all on --surface-filled rows — and
+ * never on --surface-2, which is why that cell reads n/a rather than a
+ * 3.94 failure. Turf on --live (`--live-ink`, the pill fill) measures
+ * 4.89:1. Hairlines gained separation too: --border on --bg goes 1.38 ->
+ * 1.60, which a dense board needs more than the old sparse page did.
+ *
+ * Light theme is untouched — paper never had this problem.
  */
 :root {
-  --bg:      #0C1512;   /* turf — ground */
-  --surface: #121C18;   /* turf-2 — raised surface (cards) */
-  --surface-2: #18241F;   /* turf-3 — hover / elevated */
-  --border:  #23322B;   /* line — hairline rules */
+  --bg:      #092219;   /* turf — ground */
+  --surface: #0F2A1F;   /* turf-2 — raised surface (cards) */
+  --surface-2: #163428;   /* turf-3 — hover / elevated */
+  --border:  #254637;   /* line — hairline rules */
   --text:    #EEF2ED;   /* chalk — primary text */
   --muted:   #93A099;   /* chalk-dim — secondary text */
   --live:    #FF4438;   /* live only — never decorative */
-  --live-ink: #0C1512;   /* text placed ON --live: solid white-on-#FF4438
+  --live-ink: #092219;   /* text placed ON --live: solid white-on-#FF4438
                              measures 3.42:1 (below the 4.5:1 floor for
                              small bold text), turf-on-#FF4438 measures
-                             5.42:1. */
-  --scrim:   rgba(12, 21, 18, .86);   /* image overlay so text stays AA — turf, not neutral black */
+                             4.89:1 at the resaturated turf above (5.42:1
+                             at the old, darker one). */
+  --scrim:   rgba(9, 34, 25, .86);   /* image overlay so text stays AA — turf, not neutral black */
 
-  /* Competition colours — retuned to read on turf (#0C1512) and turf-2
-     (#121C18), and deliberately distinct from --live (red) and from each
+  /* Competition colours — retuned to read on turf (#092219) and turf-2
+     (#0F2A1F), and deliberately distinct from --live (red) and from each
      other. Mapped from leagues.fd_code by lib/site/competition.ts; a
      league with no mapping falls back to --muted there, never an invented
-     colour. Measured >=6.3:1 against both --bg and --surface (see this
-     piece's report for the full ratio table). */
+     colour. Values unchanged by the resaturation above — re-measured
+     against the new ground at >=5.2:1 on --bg and --surface (full table in
+     the file comment), still comfortably clear of 4.5:1. */
   --comp-pl:  #C4A7E7;   /* Premier League — violet */
   --comp-pd:  #FF5C8A;   /* La Liga — rose, kept clear of --live's orange-red */
   --comp-sa:  #4DA3FF;   /* Serie A — azure */
@@ -50,7 +88,7 @@
     --muted:   #5C665F;
     --live:    #E00E00;
     --live-ink: #FFFFFF;
-    --scrim:   rgba(12, 21, 18, .86);
+    --scrim:   rgba(9, 34, 25, .86);
 
     /* Same hue/saturation family as the dark-theme values above, lightness
        lowered until each holds >=4.5:1 against both #F7F5F0 (ground) and
@@ -73,7 +111,7 @@
   --muted:   #5C665F;
   --live:    #E00E00;
   --live-ink: #FFFFFF;
-  --scrim:   rgba(12, 21, 18, .86);
+  --scrim:   rgba(9, 34, 25, .86);
   --comp-pl:  #8B52D0;
   --comp-pd:  #C81E5C;
   --comp-sa:  #006CDF;
@@ -82,15 +120,15 @@
 }
 
 :root[data-theme="dark"] {
-  --bg:      #0C1512;
-  --surface: #121C18;
-  --surface-2: #18241F;
-  --border:  #23322B;
+  --bg:      #092219;
+  --surface: #0F2A1F;
+  --surface-2: #163428;
+  --border:  #254637;
   --text:    #EEF2ED;
   --muted:   #93A099;
   --live:    #FF4438;
-  --live-ink: #0C1512;
-  --scrim:   rgba(12, 21, 18, .86);
+  --live-ink: #092219;
+  --scrim:   rgba(9, 34, 25, .86);
   --comp-pl:  #C4A7E7;
   --comp-pd:  #FF5C8A;
   --comp-sa:  #4DA3FF;
