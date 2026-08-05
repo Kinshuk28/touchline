@@ -48,7 +48,7 @@ function ScoreRowImpl({ fixture, scoreText }: { fixture: FixtureWithTeams; score
       >
         {state?.live && (
           <span className="inline-flex items-center gap-1 text-live">
-            <span className="size-1.5 rounded-full bg-live" aria-hidden="true" />
+            <span className="tl-live-dot size-1.5 rounded-full bg-live" aria-hidden="true" />
             Live
           </span>
         )}

@@ -204,7 +204,7 @@ export function MatchdaySpine({
                         <span className="w-16 shrink-0 whitespace-nowrap text-right text-11 font-semibold uppercase tracking-wide">
                           {state.live ? (
                             <span className="inline-flex items-center gap-1 text-live">
-                              <span className="size-1.5 rounded-full bg-live" aria-hidden="true" />
+                              <span className="tl-live-dot size-1.5 rounded-full bg-live" aria-hidden="true" />
                               {state.text}
                             </span>
                           ) : (

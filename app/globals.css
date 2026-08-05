@@ -183,10 +183,104 @@
 }
 
 html { color-scheme: dark light; }
+
+/*
+ * THE GROUND HAS DEPTH NOW.
+ *
+ * It was a single flat fill, which is what made the page read as static
+ * even after the ground itself started reading as green. Three layers, all
+ * of them derived from a real pitch and all of them deliberately at the
+ * edge of perception — they must never compete with a fixture row:
+ *
+ * 1. Mown stripes. `--stripe` is a translucent white/ink wash, not a second
+ *    hex, so it layers over whatever `--bg` is and stays correct in both
+ *    themes for free. 88px bands at 5 degrees off vertical: straight
+ *    vertical bands line up with the board's column gaps and read as a
+ *    layout bug, a slight cant reads as turf.
+ * 2. A floodlight wash at the top of the page — the light falling on the
+ *    ground from above the stand, and the reason the board's top edge now
+ *    sits on something rather than in a void.
+ * 3. The centre circle: one hairline ring, 34rem across and centred on the
+ *    viewport, so it always runs off all four edges — you are standing
+ *    inside it, which is what stops it reading as a stray arc drawn on the
+ *    page. Direction Two asked for exactly one ambient pitch-marking motif
+ *    and it used to sit behind the hero; the hero is gone, so it moves here.
+ *
+ * `background-attachment: fixed` is what makes it a ground rather than a
+ * pattern printed on the page: the board scrolls, the pitch stays put.
+ *
+ * Contrast: `--stripe` is 2.2% white in dark theme, which moves the ground
+ * from #092219 to an effective #0E2620 under a band — chalk on that
+ * measures 14.31:1 against 14.79:1 on the base, and the lowest-contrast
+ * text pair on the page (`--muted`) goes 6.16:1 -> 5.96:1. Everything still
+ * clears AA with room to spare, and all real body text sits on `--surface`
+ * panels anyway, which are opaque and unaffected.
+ */
+:root {
+  --stripe: rgba(255, 255, 255, .022);
+  --line: rgba(255, 255, 255, .05);
+  --glow: rgba(146, 232, 195, .055);
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    /* Paper takes the same geometry at half the strength and in ink rather
+       than light — a programme printed on textured stock, not a floodlit
+       pitch. */
+    --stripe: rgba(18, 26, 22, .016);
+    --line: rgba(18, 26, 22, .045);
+    --glow: rgba(120, 96, 48, .05);
+  }
+}
+
+:root[data-theme="light"] {
+  --stripe: rgba(18, 26, 22, .016);
+  --line: rgba(18, 26, 22, .045);
+  --glow: rgba(120, 96, 48, .05);
+}
+
+:root[data-theme="dark"] {
+  --stripe: rgba(255, 255, 255, .022);
+  --line: rgba(255, 255, 255, .05);
+  --glow: rgba(146, 232, 195, .055);
+}
+
 body {
-  background: var(--bg);
+  background-color: var(--bg);
+  background-image:
+    radial-gradient(58rem 26rem at 50% -6rem, var(--glow), transparent 70%),
+    radial-gradient(circle at 50% 46%, transparent 33.9rem, var(--line) 34rem 34.1rem, transparent 34.2rem),
+    repeating-linear-gradient(5deg, var(--stripe) 0 88px, transparent 88px 176px);
+  background-attachment: fixed;
+  background-repeat: no-repeat, no-repeat, repeat;
   color: var(--text);
   -webkit-font-smoothing: antialiased;
+}
+
+/*
+ * Motion. Two animations, both tied to something real: a board arriving,
+ * and a match being in play. Nothing here loops for decoration.
+ */
+@keyframes tl-rise {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* The live dot's heartbeat — only ever applied to a fixture whose status is
+   actually IN_PLAY, so the one looping animation on the site is a statement
+   about the data, not a flourish. */
+@keyframes tl-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: .4; transform: scale(.72); }
+}
+
+.tl-rise { animation: tl-rise .42s cubic-bezier(.22, .61, .36, 1) both; }
+.tl-live-dot { animation: tl-pulse 1.8s ease-in-out infinite; }
+
+/* Hover and focus should feel like a surface responding, not a repaint.
+   Colour only — no transform, nothing that could shift a row's text. */
+:where(a, button) {
+  transition: color .15s ease, background-color .15s ease, border-color .15s ease, opacity .15s ease;
 }
 
 /* Visible focus for every interactive element, both themes. No --accent
@@ -199,5 +293,17 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
+  /* Belt and braces for the two named animations above. The blanket rule
+     already collapses them to nothing, but it relies on the animation
+     running to its end state to leave an element visible — an entrance
+     animation that somehow didn't run would leave the board at opacity 0,
+     which is a blank page rather than a still one. These force the end
+     state outright. */
+  .tl-rise { animation: none !important; opacity: 1 !important; transform: none !important; }
+  .tl-live-dot { animation: none !important; opacity: 1 !important; transform: none !important; }
 }

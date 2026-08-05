@@ -177,9 +177,10 @@ export default async function Home({
       */}
       <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_minmax(0,0.9fr)] lg:items-start">
         <BoardPanel
+          order={0}
           label={fixtureHeading}
           meta={fixtureRange ?? undefined}
-          action={<Link href="/calendar" className="hover:text-text">All fixtures →</Link>}
+          action={<Link href="/calendar" className="group/link inline-flex items-center gap-1 hover:text-text">All fixtures <span className="transition-transform group-hover/link:translate-x-0.5 motion-reduce:transition-none" aria-hidden="true">→</span></Link>}
         >
           {/* Eager crests: this spine is the board's largest element and
               sits above the fold, so lazy-loading leaves a column of blank
@@ -197,8 +198,9 @@ export default async function Home({
         <div className="space-y-3">
           {selectedLeague && (
             <BoardPanel
+              order={1}
               label="Table"
-              action={<Link href="/tables" className="hover:text-text">All tables →</Link>}
+              action={<Link href="/tables" className="group/link inline-flex items-center gap-1 hover:text-text">All tables <span className="transition-transform group-hover/link:translate-x-0.5 motion-reduce:transition-none" aria-hidden="true">→</span></Link>}
             >
               <TableTabs leagues={leagues} selected={selectedLeague} />
               {/* The competition's full name in text, next to the season
@@ -216,8 +218,9 @@ export default async function Home({
 
           {railTransfers.length > 0 && (
             <BoardPanel
+              order={2}
               label="Transfers"
-              action={<Link href="/transfers" className="hover:text-text">More →</Link>}
+              action={<Link href="/transfers" className="group/link inline-flex items-center gap-1 hover:text-text">More <span className="transition-transform group-hover/link:translate-x-0.5 motion-reduce:transition-none" aria-hidden="true">→</span></Link>}
             >
               <TransfersRail items={railTransfers} leagues={leagues} now={now} chromeless stacked />
             </BoardPanel>
@@ -226,8 +229,9 @@ export default async function Home({
 
         <div className="md:col-span-2 lg:col-span-1">
           <BoardPanel
+            order={3}
             label="Latest"
-            action={<Link href="/news" className="hover:text-text">More →</Link>}
+            action={<Link href="/news" className="group/link inline-flex items-center gap-1 hover:text-text">More <span className="transition-transform group-hover/link:translate-x-0.5 motion-reduce:transition-none" aria-hidden="true">→</span></Link>}
           >
             <NewsRail items={railNews} now={now} />
           </BoardPanel>
