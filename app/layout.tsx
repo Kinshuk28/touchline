@@ -52,6 +52,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <a href="/news" className="hover:text-text">News</a>
               <a href="/scores" className="hover:text-text">Scores</a>
               <a href="/tables" className="hover:text-text">Tables</a>
+              <a href="/clubs" className="hover:text-text">Clubs</a>
               <a href="/calendar" className="hover:text-text">Calendar</a>
               <a href="/transfers" className="hover:text-text">Transfers</a>
             </nav>

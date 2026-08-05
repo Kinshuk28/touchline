@@ -76,6 +76,22 @@ test('the live endpoint answers with a fixture array', async ({ request }) => {
   expect(Array.isArray(body.fixtures)).toBe(true);
 });
 
+test('the Clubs route is reachable from the header nav and groups clubs by competition', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('link', { name: 'Clubs', exact: true }).click();
+  await expect(page).toHaveURL(/\/clubs$/);
+  await expect(page.getByRole('heading', { name: 'Clubs', level: 1 })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Premier League' })).toBeVisible();
+  // The 14 clubs no longer in a current top-five competition get their own
+  // clearly-labelled group rather than being silently dropped or folded
+  // into their old league's group (Direction Two spec: "honest handling").
+  await expect(page.getByRole('heading', { name: /Not in a top-five league this season/i })).toBeVisible();
+  // Cards must not link anywhere — `/team/[slug]` doesn't exist yet, and a
+  // club crest/name pair rendered as an <a> here would be a guaranteed
+  // dead link, the exact bug this route's spec calls out by name.
+  await expect(page.getByRole('link', { name: /Real Madrid|Manchester City|Bayern/i })).toHaveCount(0);
+});
+
 test('the theme toggle persists across a reload', async ({ page }) => {
   await page.goto('/');
   // ThemeToggle renders '·' until its mount effect resolves the theme

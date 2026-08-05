@@ -116,6 +116,35 @@ export function clubBarGradient(
   return `linear-gradient(to bottom, ${home ?? 'var(--line)'}, ${away ?? 'var(--line)'})`;
 }
 
+/**
+ * A low-opacity background wash for a club card (Direction Two spec's
+ * "dynamic imagery and backgrounds": "club cards: the club's own colours as
+ * a background wash behind the crest"). Mixes each parsed colour into the
+ * given surface token at a fixed, restrained 16% strength via CSS
+ * `color-mix()`, rather than an alpha-blended colour over the ground —
+ * mixing *toward the surface* keeps the wash a flat, predictable tint of
+ * the card's own background in both themes, with no separate light/dark
+ * alpha tuning needed, and it can never itself go transparent over an
+ * unexpected element behind it.
+ *
+ * This deliberately carries no AA obligation of its own: it is meant only
+ * for the small crest region of a club card, never for the text underneath
+ * — the club name stays on the plain, already-AA `--surface`/`--surface-2`
+ * token, not on this wash. `null` when the club has no parseable colour, so
+ * the caller falls back to a flat surface tint rather than an invented one.
+ */
+export function clubWashBackground(
+  clubColors: string | null | undefined,
+  surfaceVar: string = 'var(--surface-2)',
+): string | null {
+  const parsed = parseClubColors(clubColors);
+  if (!parsed) return null;
+  const [first, second] = parsed;
+  const mix = (hex: string) => `color-mix(in srgb, ${hex} 16%, ${surfaceVar})`;
+  if (!second) return mix(first);
+  return `linear-gradient(135deg, ${mix(first)}, ${mix(second)})`;
+}
+
 function hexToRgb(hex: string): [number, number, number] {
   const h = hex.replace('#', '');
   const full = h.length === 3 ? h.split('').map((c) => c + c).join('') : h;

@@ -86,6 +86,39 @@ export interface StandingRow {
   team: TeamLite | null;
 }
 
+/**
+ * A club's full row for `/clubs` (`lib/site/queries/teams.ts#getTeams`) —
+ * every `teams` column the page needs, unlike `TeamLite` (the fixture/
+ * standings embed shape), which omits `founded` and `league_id` since no
+ * caller before this one needed them.
+ *
+ * `league_id`, `venue`, `founded` and `club_colors` are all nullable in the
+ * live schema (`supabase/migrations/0001_init.sql`), and for the 14 of 110
+ * clubs no longer in a current top-five competition, `venue`, `founded` and
+ * `club_colors` are always null together — `scripts/backfill.ts`'s phase 3
+ * ("historical clubs") writes exactly those three fields as `null` in the
+ * same object literal that gives a historical club its identity, while
+ * phase 2 ("current clubs") always writes real values for all three from
+ * football-data.org's per-competition teams listing. That's not a
+ * coincidence to route around — `getTeams`'s caller relies on it as the
+ * signal for which of the 110 rows are current vs. historical (see
+ * `app/clubs/page.tsx`), rather than adding a second query against
+ * `standings` just to re-derive the same fact.
+ */
+export interface ClubRow {
+  id: number;
+  fd_id: number;
+  slug: string;
+  name: string;
+  short_name: string | null;
+  tla: string | null;
+  crest_url: string | null;
+  venue: string | null;
+  founded: number | null;
+  club_colors: string | null;
+  league_id: number | null;
+}
+
 export interface NewsRow {
   id: number;
   source: string;

@@ -59,6 +59,32 @@ export function normaliseClubName(name: string): string {
 }
 
 /**
+ * A single, hand-verified exception for one confirmed provider-naming clash
+ * that no normalisation rule closes: FPL names this club "Nott'm Forest"
+ * (short code "NFO"); football-data.org — and this project's stored
+ * `teams.name` — call it "Nottingham Forest FC" (tla "NOT"). Neither the
+ * full name ("nott-m-forest" vs "nottingham-forest" after stripping the FC
+ * suffix) nor the short code overlaps, so `clubCandidateKeys` never
+ * produces a shared key for this one club, and it silently falls into
+ * `unmatched` on every run — orphaning its entire squad from `team_id` in
+ * `scripts/ingest/players.ts` (23 players and growing each run, confirmed
+ * live).
+ *
+ * This is intentionally one hardcoded entry, keyed on FPL's exact team
+ * name, not a general alias table and not fuzzy matching — a prior attempt
+ * at fuzzy name matching produced false positives on generic shared tokens
+ * (e.g. "city" matching several unrelated clubs at once), which is
+ * strictly worse than this function's honest "unmatched" for every other
+ * genuine mismatch. Add another entry here only once a *specific* provider
+ * mismatch is confirmed the same way this one was (see
+ * tests/ingest/playerIdentity.test.ts's "Nottingham Forest exception"
+ * block) — never as a speculative general-purpose lookup.
+ */
+const FPL_TEAM_NAME_EXCEPTIONS: Readonly<Record<string, string>> = {
+  "nott'm forest": 'nottingham forest fc',
+};
+
+/**
  * Matches FPL's 20 Premier League clubs against our stored club rows.
  *
  * football-data.org and FPL do not share a naming convention — football-data
@@ -71,26 +97,32 @@ export function normaliseClubName(name: string): string {
  * convention — so every club contributes candidate keys from its full name,
  * its short name, and its code, and a match on any one of them counts.
  *
- * This can still fail honestly: football-data's `tla` and FPL's
- * `short_name` are maintained independently and occasionally disagree (e.g.
- * Nottingham Forest: football-data's `NOT` vs FPL's `NFO`) — such a club is
- * reported in `unmatched`, not guessed at.
+ * `FPL_TEAM_NAME_EXCEPTIONS` is checked first, ahead of the candidate-key
+ * lookup, for the one club (Nottingham Forest) where football-data's `tla`
+ * and FPL's `short_name` disagree outright — see that constant's doc
+ * comment. Every other mismatch still fails honestly: reported in
+ * `unmatched`, never guessed at.
  */
 export function matchFplTeamsToClubs(fplTeams: readonly FplTeamRef[], clubs: readonly ClubRef[]): FplTeamMatchResult {
   const clubIdByKey = new Map<string, number>();
+  const clubIdByExactName = new Map<string, number>();
   for (const club of clubs) {
     for (const key of clubCandidateKeys(club)) {
       clubIdByKey.set(key, club.id);
     }
+    clubIdByExactName.set(club.name.trim().toLowerCase(), club.id);
   }
 
   const teamIdByFplTeamId = new Map<number, number>();
   const unmatched: FplTeamRef[] = [];
   for (const team of fplTeams) {
+    const exceptionClubName = FPL_TEAM_NAME_EXCEPTIONS[team.name.trim().toLowerCase()];
+    const exceptionClubId = exceptionClubName === undefined ? undefined : clubIdByExactName.get(exceptionClubName);
+
     const key = [normaliseClubName(team.name), normaliseClubName(team.shortName), slugify(team.shortName)].find(
       (k) => clubIdByKey.has(k),
     );
-    const clubId = key === undefined ? undefined : clubIdByKey.get(key);
+    const clubId = exceptionClubId ?? (key === undefined ? undefined : clubIdByKey.get(key));
     if (clubId === undefined) {
       unmatched.push(team);
     } else {
