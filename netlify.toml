@@ -9,6 +9,15 @@
   package = "@netlify/plugin-nextjs"
 
 [context.deploy-preview]
+  # Previews stay off to conserve free-tier build credits — but overriding
+  # `command` alone still ran a deploy, which then failed for having no
+  # publish directory and posted three red checks ("Pages changed", "Header
+  # rules", "Redirect rules") on every pull request. An `ignore` command that
+  # exits 0 tells Netlify to cancel the build before it starts, so a PR shows
+  # a skipped build instead of a failed one. `command` is kept as the
+  # statement of intent for anyone who re-enables previews by deleting the
+  # `ignore` line.
+  ignore = "exit 0"
   command = "echo 'previews disabled to conserve free-tier credits'"
 
 [[headers]]
