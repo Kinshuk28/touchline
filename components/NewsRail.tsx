@@ -42,7 +42,7 @@ export function NewsRail({ items, now }: { items: NewsRow[]; now: Date }) {
               href={item.url}
               target="_blank"
               rel="noopener noreferrer"
-              className="group flex items-start gap-2 px-3 py-2 hover:bg-surface-2"
+              className="group flex items-start gap-2 px-3 py-2 transition-colors hover:bg-surface-2"
             >
               <span className="min-w-0 flex-1">
                 {/* Two lines max, then ellipsis: a rail of eight items has
@@ -61,7 +61,12 @@ export function NewsRail({ items, now }: { items: NewsRow[]; now: Date }) {
                     alt=""
                     fill
                     sizes="56px"
-                    className="object-cover"
+                    // Same treatment components/NewsCard.tsx gives its
+                    // image, at rail scale: a hover is the one moment the
+                    // reader has told us they are interested in this story.
+                    // `motion-reduce:` cancels it outright rather than
+                    // relying on the global duration clamp.
+                    className="object-cover transition-transform duration-300 group-hover:scale-[1.06] motion-reduce:transition-none motion-reduce:group-hover:scale-100"
                   />
                 </span>
               )}

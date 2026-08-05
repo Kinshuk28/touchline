@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { countdownParts } from '@/lib/site/countdown';
+import { countdownParts, formatPreciseCountdown, precisePartsOf } from '@/lib/site/countdown';
 import { Countdown } from '@/components/Countdown';
 
 describe('countdownParts', () => {
@@ -46,5 +46,28 @@ describe('Countdown (expired-target rendering — Finding 4)', () => {
   it('renders the day/hour text for a future target', () => {
     const el = Countdown({ targetIso: '2026-08-16T18:30:00Z', now });
     expect(el.props.children).toBe('12d 6h');
+  });
+});
+
+describe('precisePartsOf / formatPreciseCountdown', () => {
+  const now = new Date('2026-08-04T12:00:00Z');
+
+  it('breaks a multi-day target down to seconds', () => {
+    expect(precisePartsOf('2026-08-16T18:30:45Z', now)).toEqual({
+      days: 12, hours: 6, minutes: 30, seconds: 45,
+    });
+  });
+
+  it('keeps the same null contract as countdownParts', () => {
+    expect(precisePartsOf('2026-08-04T12:00:00Z', now)).toBeNull();
+    expect(precisePartsOf('2026-08-01T00:00:00Z', now)).toBeNull();
+  });
+
+  it('zero-pads the clock so ticking digits never shift sideways', () => {
+    expect(formatPreciseCountdown({ days: 12, hours: 6, minutes: 4, seconds: 7 })).toBe('12d 06:04:07');
+  });
+
+  it('drops the day segment inside the last day', () => {
+    expect(formatPreciseCountdown({ days: 0, hours: 6, minutes: 4, seconds: 7 })).toBe('06:04:07');
   });
 });
