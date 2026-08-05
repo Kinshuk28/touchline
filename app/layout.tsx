@@ -51,6 +51,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <nav className="order-3 flex w-full flex-wrap gap-x-4 gap-y-1 text-11 font-semibold uppercase tracking-wider text-muted sm:order-2 sm:w-auto">
               <a href="/news" className="hover:text-text">News</a>
               <a href="/scores" className="hover:text-text">Scores</a>
+              <a href="/tables" className="hover:text-text">Tables</a>
               <a href="/calendar" className="hover:text-text">Calendar</a>
               <a href="/transfers" className="hover:text-text">Transfers</a>
             </nav>

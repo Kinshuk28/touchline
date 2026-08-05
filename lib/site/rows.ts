@@ -52,6 +52,40 @@ export interface FixtureWithTeams {
   away: TeamLite | null;
 }
 
+/**
+ * One club's row in a competition-season table (`standings`, 192 rows: 96
+ * for the completed 2025-26 season, 96 for 2026-27 — see
+ * `lib/site/queries/standings.ts#getStandings`). `team` uses the same
+ * `TeamLite` shape — and the same embed style — as `FixtureWithTeams`'s
+ * `home`/`away`, so `<Crest>` and `lib/site/clubColors.ts` work identically
+ * wherever a team appears.
+ */
+export interface StandingRow {
+  league_id: number;
+  team_id: number;
+  season: number;
+  position: number;
+  played: number;
+  won: number;
+  drawn: number;
+  lost: number;
+  goals_for: number;
+  goals_against: number;
+  goal_difference: number;
+  points: number;
+  /**
+   * Last-five results, oldest-to-most-recent, comma-separated ("W,D,L,W,W")
+   * — null or `''` for a season with no matches played yet. Populated for
+   * all 96 rows of the completed season, empty for all 96 rows of the
+   * season that has not started; never rendered without checking
+   * `lib/site/standingsDisplay.ts#parseForm` first, per the spec's "check
+   * whether form is actually populated before designing around it."
+   */
+  form: string | null;
+  updated_at: string;
+  team: TeamLite | null;
+}
+
 export interface NewsRow {
   id: number;
   source: string;
