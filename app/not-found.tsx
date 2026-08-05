@@ -8,7 +8,7 @@ import Link from 'next/link';
 export default function NotFound() {
   return (
     <div className="flex min-h-[50vh] flex-col items-center justify-center gap-3 text-center">
-      <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-accent">404</p>
+      <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-text">404</p>
       <h1 className="text-2xl font-extrabold tracking-tight">Page not found</h1>
       <p className="max-w-prose text-sm text-muted">
         That page doesn&apos;t exist — it may not have shipped yet, or the link was wrong.

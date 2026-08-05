@@ -39,8 +39,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               restores the original single-row [brand, nav, toggle] layout,
               so nothing changes at the widths this always worked at. */}
           <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-3">
+            {/* Plain chalk wordmark — Direction Two deletes the two-tone
+                lime-accent brand mark; TOUCHLINE reads as one word in the
+                page's own text colour, no house accent left to lean on. */}
             <a href="/" className="order-1 font-display text-lg font-extrabold tracking-[-0.02em]">
-              TOUCH<span className="text-accent">LINE</span>
+              TOUCHLINE
             </a>
             <span className="order-2 sm:order-3">
               <ThemeToggle />

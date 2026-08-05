@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { getCompetitionMeta } from '@/lib/site/competition';
 import {
   FOLLOWING_COOKIE_NAME,
   FOLLOWING_COOKIE_MAX_AGE,
@@ -29,6 +30,10 @@ export function FollowToggle({
 }: { code: string; name: string; initiallyFollowing: boolean }) {
   const [following, setFollowing] = useState(initiallyFollowing);
   const upperCode = code.trim().toUpperCase();
+  // `code` is always a league fd_code here (the only caller, app/scores/page.tsx,
+  // passes `league.fd_code`) — so "following" gets that league's own
+  // competition colour as an outline, not the deleted house accent.
+  const comp = getCompetitionMeta(code);
 
   function handleClick() {
     const current = parseFollowingCookie(readCookieValue());
@@ -43,7 +48,9 @@ export function FollowToggle({
       onClick={handleClick}
       aria-pressed={following}
       className={`rounded-full border px-3 py-1 text-11 font-semibold uppercase tracking-wider transition-colors ${
-        following ? 'border-accent bg-accent text-accent-ink' : 'border-border text-muted hover:text-text'
+        following
+          ? `bg-surface-2 ${comp.borderClass} ${comp.textClass}`
+          : 'border-border text-muted hover:text-text'
       }`}
     >
       {following ? 'Following' : 'Follow'} <span className="sr-only">{name}</span>

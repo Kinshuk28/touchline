@@ -1,52 +1,63 @@
 @import "tailwindcss";
 
+/*
+ * Direction Two (docs/superpowers/specs/2026-08-04-touchline-direction-two.md):
+ * turf-and-chalk, not near-black-plus-accent. The single lime accent is
+ * gone — deleted, not hidden — and club colour (lib/site/clubColors.ts) is
+ * the site's only chroma system outside these five competition colours and
+ * the one-purpose --live red. Token *names* (--bg, --surface, --surface-2,
+ * --border, --text, --muted) are kept from the previous palette so the
+ * rename stays contained to this file; only their values change, to the
+ * turf/chalk hexes the spec gives. Dark theme is turf: a deep, desaturated
+ * pitch green-black, floodlit-at-night rather than a generic void. Light
+ * theme is paper: a warm off-white "matchday programme" ground, not an
+ * inverted dark theme — ink, not grey-on-white.
+ */
 :root {
-  --bg:      #0B0E11;
-  --surface: #14181D;
-  --surface-2: #1B2027;   /* elevated card, hover state */
-  --border:  #232A31;
-  --text:    #E8EDF2;
-  --muted:   #8A94A0;
-  --accent:  #C8FF00;
-  --accent-ink: #0B0E11;   /* text placed ON the accent */
-  --live:    #FF3B47;
-  --live-ink: #0B0E11;   /* text placed ON --live, e.g. the injury category pill —
-                             a real AA defect fix: solid white-on-#FF3B47 measures
-                             3.52:1, below the 4.5:1 floor for small bold text. */
-  --scrim:   rgba(11, 14, 17, .86);   /* image overlay so text stays AA */
+  --bg:      #0C1512;   /* turf — ground */
+  --surface: #121C18;   /* turf-2 — raised surface (cards) */
+  --surface-2: #18241F;   /* turf-3 — hover / elevated */
+  --border:  #23322B;   /* line — hairline rules */
+  --text:    #EEF2ED;   /* chalk — primary text */
+  --muted:   #93A099;   /* chalk-dim — secondary text */
+  --live:    #FF4438;   /* live only — never decorative */
+  --live-ink: #0C1512;   /* text placed ON --live: solid white-on-#FF4438
+                             measures 3.42:1 (below the 4.5:1 floor for
+                             small bold text), turf-on-#FF4438 measures
+                             5.42:1. */
+  --scrim:   rgba(12, 21, 18, .86);   /* image overlay so text stays AA — turf, not neutral black */
 
-  /* Competition colours — chosen to read on #0B0E11, and deliberately
-     distinct from --accent (lime) and --live (red), which carry other
-     meanings. Mapped from leagues.fd_code by lib/site/competition.ts; a
+  /* Competition colours — retuned to read on turf (#0C1512) and turf-2
+     (#121C18), and deliberately distinct from --live (red) and from each
+     other. Mapped from leagues.fd_code by lib/site/competition.ts; a
      league with no mapping falls back to --muted there, never an invented
-     colour. */
-  --comp-pl:  #C4A7E7;   /* Premier League */
-  --comp-pd:  #FF6B6B;   /* La Liga */
-  --comp-sa:  #4DA3FF;   /* Serie A */
-  --comp-bl1: #FF9F45;   /* Bundesliga */
-  --comp-fl1: #7DE2D1;   /* Ligue 1 */
+     colour. Measured >=6.3:1 against both --bg and --surface (see this
+     piece's report for the full ratio table). */
+  --comp-pl:  #C4A7E7;   /* Premier League — violet */
+  --comp-pd:  #FF5C8A;   /* La Liga — rose, kept clear of --live's orange-red */
+  --comp-sa:  #4DA3FF;   /* Serie A — azure */
+  --comp-bl1: #FFB454;   /* Bundesliga — amber */
+  --comp-fl1: #66E3C4;   /* Ligue 1 — mint */
 }
 
 @media (prefers-color-scheme: light) {
   :root:not([data-theme="dark"]) {
-    --bg:      #FBFAF8;
+    --bg:      #F7F5F0;   /* paper — warm off-white ground */
     --surface: #FFFFFF;
-    --surface-2: #EDE8DE;
-    --border:  #E4E0D8;
-    --text:    #14181D;
-    --muted:   #5F6772;
-    --accent:  #3F6B00;
-    --accent-ink: #FFFFFF;
-    --live:    #C0392B;
+    --surface-2: #EFEAE0;   /* warm elevated surface, not cool grey */
+    --border:  #DDD6C7;
+    --text:    #121A16;   /* ink */
+    --muted:   #5C665F;
+    --live:    #E00E00;
     --live-ink: #FFFFFF;
-    --scrim:   rgba(11, 14, 17, .86);
+    --scrim:   rgba(12, 21, 18, .86);
 
-    /* Same hue/saturation as the dark-theme values above, lightness lowered
-       until each holds >=4.5:1 against #FFFFFF (measured ~4.98–5.00:1 — see
-       .superpowers/sdd/redesign-foundation-report.md for the exact ratios
-       and the script that derived them). */
+    /* Same hue/saturation family as the dark-theme values above, lightness
+       lowered until each holds >=4.5:1 against both #F7F5F0 (ground) and
+       #FFFFFF (surface) — measured ~4.57-5.53:1, see this piece's report
+       for the exact ratios and the script that derived them. */
     --comp-pl:  #8B52D0;
-    --comp-pd:  #E10000;
+    --comp-pd:  #C81E5C;
     --comp-sa:  #006CDF;
     --comp-bl1: #B15600;
     --comp-fl1: #1C7D6D;
@@ -54,41 +65,37 @@
 }
 
 :root[data-theme="light"] {
-  --bg:      #FBFAF8;
+  --bg:      #F7F5F0;
   --surface: #FFFFFF;
-  --surface-2: #EDE8DE;
-  --border:  #E4E0D8;
-  --text:    #14181D;
-  --muted:   #5F6772;
-  --accent:  #3F6B00;
-  --accent-ink: #FFFFFF;
-  --live:    #C0392B;
+  --surface-2: #EFEAE0;
+  --border:  #DDD6C7;
+  --text:    #121A16;
+  --muted:   #5C665F;
+  --live:    #E00E00;
   --live-ink: #FFFFFF;
-  --scrim:   rgba(11, 14, 17, .86);
+  --scrim:   rgba(12, 21, 18, .86);
   --comp-pl:  #8B52D0;
-  --comp-pd:  #E10000;
+  --comp-pd:  #C81E5C;
   --comp-sa:  #006CDF;
   --comp-bl1: #B15600;
   --comp-fl1: #1C7D6D;
 }
 
 :root[data-theme="dark"] {
-  --bg:      #0B0E11;
-  --surface: #14181D;
-  --surface-2: #1B2027;
-  --border:  #232A31;
-  --text:    #E8EDF2;
-  --muted:   #8A94A0;
-  --accent:  #C8FF00;
-  --accent-ink: #0B0E11;
-  --live:    #FF3B47;
-  --live-ink: #0B0E11;
-  --scrim:   rgba(11, 14, 17, .86);
+  --bg:      #0C1512;
+  --surface: #121C18;
+  --surface-2: #18241F;
+  --border:  #23322B;
+  --text:    #EEF2ED;
+  --muted:   #93A099;
+  --live:    #FF4438;
+  --live-ink: #0C1512;
+  --scrim:   rgba(12, 21, 18, .86);
   --comp-pl:  #C4A7E7;
-  --comp-pd:  #FF6B6B;
+  --comp-pd:  #FF5C8A;
   --comp-sa:  #4DA3FF;
-  --comp-bl1: #FF9F45;
-  --comp-fl1: #7DE2D1;
+  --comp-bl1: #FFB454;
+  --comp-fl1: #66E3C4;
 }
 
 @theme inline {
@@ -98,8 +105,6 @@
   --color-border: var(--border);
   --color-text: var(--text);
   --color-muted: var(--muted);
-  --color-accent: var(--accent);
-  --color-accent-ink: var(--accent-ink);
   --color-live: var(--live);
   --color-live-ink: var(--live-ink);
   --color-scrim: var(--scrim);
@@ -146,9 +151,11 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* Visible focus for every interactive element, both themes. */
+/* Visible focus for every interactive element, both themes. No --accent
+   left to reach for — chalk (--text) against turf/paper both clear >16:1,
+   the highest-contrast, always-available choice. */
 :where(a, button, input, select, [tabindex]):focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--text);
   outline-offset: 2px;
   border-radius: 4px;
 }

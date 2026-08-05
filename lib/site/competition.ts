@@ -20,16 +20,26 @@ export interface CompetitionMeta {
   textClass: string;
   /** Tailwind `border-*` utility for the competition colour (or `border-muted` when unmapped). */
   borderClass: string;
+  /**
+   * Tailwind `hover:text-*` utility for the competition colour. A separate
+   * field, not `` `hover:${textClass}` `` built at a call site — Tailwind's
+   * scanner only generates CSS for class candidates it finds as literal
+   * substrings in project source, and a runtime-concatenated variant string
+   * is invisible to it (silently produces no rule, not an error). Every
+   * variant class this codebase needs must appear literally somewhere,
+   * which is what this field is for.
+   */
+  hoverTextClass: string;
 }
 
 type Known = Omit<CompetitionMeta, 'code'>;
 
 const KNOWN: Record<string, Known> = {
-  PL:  { name: 'Premier League', bgClass: 'bg-comp-pl',  textClass: 'text-comp-pl',  borderClass: 'border-comp-pl' },
-  PD:  { name: 'La Liga',        bgClass: 'bg-comp-pd',  textClass: 'text-comp-pd',  borderClass: 'border-comp-pd' },
-  SA:  { name: 'Serie A',        bgClass: 'bg-comp-sa',  textClass: 'text-comp-sa',  borderClass: 'border-comp-sa' },
-  BL1: { name: 'Bundesliga',     bgClass: 'bg-comp-bl1', textClass: 'text-comp-bl1', borderClass: 'border-comp-bl1' },
-  FL1: { name: 'Ligue 1',        bgClass: 'bg-comp-fl1', textClass: 'text-comp-fl1', borderClass: 'border-comp-fl1' },
+  PL:  { name: 'Premier League', bgClass: 'bg-comp-pl',  textClass: 'text-comp-pl',  borderClass: 'border-comp-pl',  hoverTextClass: 'hover:text-comp-pl' },
+  PD:  { name: 'La Liga',        bgClass: 'bg-comp-pd',  textClass: 'text-comp-pd',  borderClass: 'border-comp-pd',  hoverTextClass: 'hover:text-comp-pd' },
+  SA:  { name: 'Serie A',        bgClass: 'bg-comp-sa',  textClass: 'text-comp-sa',  borderClass: 'border-comp-sa',  hoverTextClass: 'hover:text-comp-sa' },
+  BL1: { name: 'Bundesliga',     bgClass: 'bg-comp-bl1', textClass: 'text-comp-bl1', borderClass: 'border-comp-bl1', hoverTextClass: 'hover:text-comp-bl1' },
+  FL1: { name: 'Ligue 1',        bgClass: 'bg-comp-fl1', textClass: 'text-comp-fl1', borderClass: 'border-comp-fl1', hoverTextClass: 'hover:text-comp-fl1' },
 };
 
 const FALLBACK: Known = {
@@ -37,6 +47,7 @@ const FALLBACK: Known = {
   bgClass: 'bg-muted',
   textClass: 'text-muted',
   borderClass: 'border-muted',
+  hoverTextClass: 'hover:text-text',
 };
 
 /**

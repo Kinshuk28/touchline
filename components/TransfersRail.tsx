@@ -33,7 +33,7 @@ export function TransfersRail({
               href={item.url}
               target="_blank"
               rel="noopener noreferrer"
-              className="min-w-0 flex-1 truncate text-15 font-medium hover:text-accent"
+              className={`min-w-0 flex-1 truncate text-15 font-medium ${comp.hoverTextClass}`}
             >
               {item.title}
             </a>

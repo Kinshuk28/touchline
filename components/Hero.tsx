@@ -27,7 +27,12 @@ function CategoryPill({ category }: { category: Category }) {
   return (
     <span
       className={`inline-block rounded px-1.5 py-0.5 text-11 font-bold uppercase tracking-wider ${
-        category === 'injury' ? 'bg-live text-live-ink' : 'bg-accent text-accent-ink'
+        // No house accent left for the non-injury case: `bg-text text-bg`
+        // is a plain chalk-emphasis fill — chalk-on-turf in dark theme,
+        // ink-on-paper in light theme — inverted from the page's own
+        // colours rather than a picked hue, so it stays correct across
+        // both themes for free.
+        category === 'injury' ? 'bg-live text-live-ink' : 'bg-text text-bg'
       }`}
     >
       {CATEGORY_LABEL[category]}
