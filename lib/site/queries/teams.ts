@@ -1,5 +1,6 @@
 import { readClient } from '@/lib/site/supabase';
 import type { ClubRow } from '@/lib/site/rows';
+import type { ClubNameSource } from '@/lib/site/newsRelevance';
 
 /**
  * Every column `/clubs` needs (`lib/site/rows.ts#ClubRow` — see that type's
@@ -26,4 +27,23 @@ export async function getTeams(): Promise<ClubRow[]> {
     .order('name', { ascending: true });
   if (error) throw new Error(`getTeams: ${error.message}`);
   return (data ?? []) as unknown as ClubRow[];
+}
+
+/**
+ * Just the three name columns, for `lib/site/newsRelevance.ts`'s club
+ * matcher — every club, current and historical, since a headline about a
+ * relegated club is still a top-five-leagues story.
+ *
+ * Separate from `getTeams` rather than reusing it: relevance matching needs
+ * three short strings per row, and `getTeams` selects eleven columns
+ * including crest URLs and venues. This runs on the landing page alongside
+ * five other queries, and there is no reason to pull ~10x the bytes for
+ * data the matcher never reads.
+ */
+export async function getClubNames(): Promise<ClubNameSource[]> {
+  const { data, error } = await readClient()
+    .from('teams')
+    .select('name,short_name,tla');
+  if (error) throw new Error(`getClubNames: ${error.message}`);
+  return (data ?? []) as ClubNameSource[];
 }

@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import { Archivo, IBM_Plex_Sans, IBM_Plex_Mono } from 'next/font/google';
+import { Mark } from '@/components/Mark';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import './globals.css';
 
@@ -38,11 +39,15 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               exactly as before. From `sm` up, `sm:order-2 sm:w-auto`
               restores the original single-row [brand, nav, toggle] layout,
               so nothing changes at the widths this always worked at. */}
-          <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-3">
-            {/* Plain chalk wordmark — Direction Two deletes the two-tone
-                lime-accent brand mark; TOUCHLINE reads as one word in the
-                page's own text colour, no house accent left to lean on. */}
-            <a href="/" className="order-1 font-display text-lg font-extrabold tracking-[-0.02em]">
+          <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-3">
+            {/* Chalk wordmark plus the corner-arc mark (components/Mark.tsx)
+                — Direction Two deleted the two-tone lime-accent brand mark,
+                and the dashboard rebuild's defect 4 asks for one small
+                restrained mark from football's own geometry in its place.
+                Both in the page's own text colour; no house accent, no icon
+                library. */}
+            <a href="/" className="order-1 flex items-center gap-2 font-display text-lg font-extrabold tracking-[-0.02em]">
+              <Mark />
               TOUCHLINE
             </a>
             <span className="order-2 sm:order-3">
@@ -58,9 +63,17 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             </nav>
           </div>
         </header>
-        <main className="mx-auto max-w-6xl px-4 py-6">{children}</main>
+        {/* max-w-7xl (1280px), widened from 6xl (1152px) for the landing
+            dashboard: three asymmetric columns of real content need the
+            extra 128px before the narrowest — the news rail — stops fitting
+            a headline beside its thumbnail. Applied to the shell rather
+            than the landing page alone so every route keeps the same
+            gutters and the header/footer rules line up with the content
+            edge. The other six routes were never width-constrained; they
+            just get more of the same. */}
+        <main className="mx-auto max-w-7xl px-4 py-6">{children}</main>
         <footer className="mt-12 border-t border-border">
-          <div className="mx-auto max-w-6xl px-4 py-6 text-11 text-muted">
+          <div className="mx-auto max-w-7xl px-4 py-6 text-11 text-muted">
             Data from football-data.org and the Fantasy Premier League API. Headlines link to their publishers.
           </div>
         </footer>

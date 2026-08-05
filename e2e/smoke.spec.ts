@@ -7,18 +7,48 @@ import { test, expect } from '@playwright/test';
 // written to hold in that state *and* to keep holding once real fixtures
 // and live matches start appearing — see the per-test notes.
 
-test('landing page renders real data', async ({ page }) => {
+// The landing page is a dashboard now, not an article
+// (docs/superpowers/specs/2026-08-04-landing-dashboard-handoff.md): a
+// ticker over three asymmetric columns — fixtures, table + transfers, news
+// — with no hero. These assertions are written against that board's own
+// structure rather than being loosened to whatever both layouts happened to
+// share.
+test('the landing board renders its three columns of real data', async ({ page }) => {
   await page.goto('/');
-  // Header brand link: "TOUCH" + "LINE" in a child <span>, combined
-  // accessible name is "TOUCHLINE". Static chrome — unaffected by season.
+  // Header brand link: the corner-arc mark (components/Mark.tsx) is
+  // aria-hidden, so the accessible name is still just "TOUCHLINE".
   await expect(page.getByRole('link', { name: /TOUCHLINE/i })).toBeVisible();
-  // Static section, present regardless of live/preseason state.
-  await expect(page.getByRole('heading', { name: /Fantasy — coming soon/i })).toBeVisible();
-  // "Selected fixtures" is the section heading over the editorial
-  // marquee-club spine (lib/site/marqueeClubs.ts). It renders even when the
-  // spine itself falls back to "Nothing scheduled.", so this holds both now
-  // and once the season is under way.
-  await expect(page.getByText('Selected fixtures')).toBeVisible();
+
+  // Panel headings (components/BoardPanel.tsx renders each as an <h2>).
+  // The fixture panel's heading is derived from when its earliest fixture
+  // actually is (lib/site/boardLabels.ts) — "Next up" in preseason, "This
+  // weekend" or "Today" in season, "Fixtures" if nothing is scheduled — so
+  // this matches the set rather than pinning one, and still proves the
+  // panel rendered.
+  await expect(page.getByRole('heading', { name: /^(Today|This weekend|Next up|Fixtures)$/ })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Table', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Latest', exact: true })).toBeVisible();
+
+  // Real rows, not just chrome: the fixture spine tags each row with its
+  // fixture id, and the table panel names its competition in text (never
+  // colour alone).
+  await expect(page.locator('[data-fixture-id]').first()).toBeVisible();
+  await expect(page.getByText('Premier League').first()).toBeVisible();
+
+  // The Fantasy line survives the rebuild as a single strip — it is a
+  // product statement, not a section (the board's argument is density).
+  await expect(page.getByText(/In development/i)).toBeVisible();
+});
+
+// The board's table panel is competition-switchable via `?table=`, the same
+// query-string mechanism `/scores` uses for `?leagues=` — so the choice
+// survives a reload with no client state. This asserts the server honoured
+// the param: the La Liga tab comes back marked current, and the panel names
+// La Liga in text.
+test('the landing table panel switches competition from the query string', async ({ page }) => {
+  await page.goto('/?table=PD');
+  await expect(page.getByRole('link', { name: /PD — La Liga/ })).toHaveAttribute('aria-current', 'true');
+  await expect(page.getByText(/^La Liga/).first()).toBeVisible();
 });
 
 test('the News and Transfers routes are reachable from the header nav and render', async ({ page }) => {
