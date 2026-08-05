@@ -39,15 +39,25 @@ export function scoreCellText(fixture: FixtureWithTeams, now: Date): string {
 }
 
 /**
- * The right-hand state label ("Live", "FT", "Postponed", "Off") — `null`
+ * The right-hand state label — "Live", "HT", "FT", "Postp.", "Off" — `null`
  * when a fixture is simply upcoming and has no state worth calling out.
+ * Direction Two's football-vernacular labels (spec: "'FT', 'HT', 'Postp.'
+ * as status labels"): PAUSED is half-time, a real, distinct state the data
+ * already carries (`FixtureStatus` has separate `IN_PLAY`/`PAUSED` values),
+ * so it gets its own label rather than folding into "Live" as before —
+ * `live: false` for it, deliberately: nothing is happening on the pitch
+ * right now, so the pulsing-dot "Live" treatment (`ScoreRow`) would be
+ * misleading.
  */
 export function stateLabel(fixture: FixtureWithTeams): { text: string; live: boolean } | null {
+  if (fixture.status === 'PAUSED') {
+    return { text: 'HT', live: false };
+  }
   if (IN_PLAY_STATUSES.includes(fixture.status)) {
     return { text: 'Live', live: true };
   }
   if (DEAD_STATUSES.has(fixture.status)) {
-    return { text: fixture.status === 'POSTPONED' ? 'Postponed' : 'Off', live: false };
+    return { text: fixture.status === 'POSTPONED' ? 'Postp.' : 'Off', live: false };
   }
   if (RECENT_FINISHED_STATUSES.has(fixture.status)) {
     return { text: 'FT', live: false };

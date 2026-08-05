@@ -1,7 +1,8 @@
 import { Crest } from '@/components/Crest';
+import { clubBarGradient } from '@/lib/site/clubColors';
 import { getCompetitionMeta } from '@/lib/site/competition';
 import { formatKickoffTime } from '@/lib/site/format';
-import { dayRailParts, spineCenterText, spineRowKind } from '@/lib/site/spine';
+import { dayRailParts, spineCenterText, spineRowKind, spineStateLabel } from '@/lib/site/spine';
 import type { FixtureWithTeams, LeagueRow } from '@/lib/site/rows';
 
 export interface SpineDay {
@@ -68,6 +69,13 @@ export function MatchdaySpine({
                   const kind = spineRowKind(fixture);
                   const center = spineCenterText(fixture, kind);
                   const time = formatKickoffTime(fixture.kickoff_utc, now, { dateContext: true });
+                  const state = spineStateLabel(fixture);
+                  // Real per-match data, one gradient per fixture — the two clubs' actual
+                  // colours, never invented (lib/site/clubColors.ts). `null` when neither
+                  // club's `club_colors` parses; the competition bar to its left still
+                  // carries the row, so a null club colour never reads as broken.
+                  const clubGradient = clubBarGradient(fixture.home?.club_colors, fixture.away?.club_colors);
+                  const venue = fixture.home?.venue ?? null;
 
                   return (
                     <li
@@ -75,7 +83,26 @@ export function MatchdaySpine({
                       data-fixture-id={fixture.id}
                       className="flex h-11 items-center gap-2 border-b border-border pr-3 text-sm last:border-b-0"
                     >
-                      <span className={`h-full w-[3px] shrink-0 ${comp.bgClass}`} aria-hidden="true" />
+                      {/* Two bars, deliberately kept visually distinct so neither reads as
+                          noise or gets mistaken for the other (they carry different meanings):
+                          the competition bar is the leftmost 3px, solid and at full opacity —
+                          unchanged from before this piece, still the "which league" signal.
+                          The club-colour bar sits immediately to its right, twice as wide (6px)
+                          and at 60% opacity — a real two-stop gradient between the two clubs'
+                          own colours, different on every single row, which is the whole point
+                          of Direction Two's "club colour is the only chroma" move. Position
+                          (leftmost vs. adjacent), width (3px vs 6px) and opacity (100% vs 60%)
+                          all differ, so even side by side the two never compete for "loudest
+                          colour in the row." The club slot's width is always reserved, even
+                          when `clubGradient` is null, so a club with no parseable colour
+                          doesn't shift every other row's text out of alignment. */}
+                      <span className="flex h-full shrink-0" aria-hidden="true">
+                        <span className={`h-full w-[3px] ${comp.bgClass}`} />
+                        <span
+                          className={`h-full w-1.5 ${clubGradient ? 'opacity-60' : ''}`}
+                          style={clubGradient ? { background: clubGradient } : undefined}
+                        />
+                      </span>
                       {/* Wide enough for the longest kickoff string this ever renders ("Sat
                           19:30", via `dateContext`) with a little breathing room either side —
                           was `w-11` (44px), sized only for same-day "17:30" and truncating the
@@ -121,16 +148,34 @@ export function MatchdaySpine({
                           a mandatory weekday-prefixed time column and two team names either
                           side of the score, and the vast majority of rows — every upcoming
                           fixture, which in preseason is nearly all of them — have no state text
-                          to show here at all. */}
-                      {(kind === 'live' || kind === 'postponed') && (
+                          to show here at all. Driven by `spineStateLabel`, not `kind`, now that
+                          it needs to say more than "live"/"postponed" (HT vs Live, Postp. vs
+                          Off) — see that function's doc comment. */}
+                      {state && (
                         <span className="w-16 shrink-0 whitespace-nowrap text-right text-11 font-semibold uppercase tracking-wide">
-                          {kind === 'live' && (
+                          {state.live ? (
                             <span className="inline-flex items-center gap-1 text-live">
                               <span className="size-1.5 rounded-full bg-live" aria-hidden="true" />
-                              Live
+                              {state.text}
                             </span>
+                          ) : (
+                            <span className="text-muted">{state.text}</span>
                           )}
-                          {kind === 'postponed' && <span className="text-muted">Postponed</span>}
+                        </span>
+                      )}
+
+                      {/* Venue and matchday — Direction Two's football vernacular, "supporting,
+                          not shouting": muted, mono-free small text, hidden below `lg` rather
+                          than wrapped (spec: venue "must never crowd the team names" and "on
+                          narrow screens it should drop out entirely rather than wrap"). Home
+                          team's venue — the match is played there. Both are real per-fixture
+                          data (96/110 clubs have a venue; matchday is null pre-fixture-list for
+                          some competitions) and omitted, never guessed, when absent. */}
+                      {(fixture.matchday !== null || venue) && (
+                        <span className="hidden shrink-0 items-center gap-1 whitespace-nowrap pl-1 text-11 text-muted lg:flex">
+                          {fixture.matchday !== null && <span>Matchday {fixture.matchday}</span>}
+                          {fixture.matchday !== null && venue && <span aria-hidden="true">·</span>}
+                          {venue && <span className="max-w-[10rem] truncate">{venue}</span>}
                         </span>
                       )}
 

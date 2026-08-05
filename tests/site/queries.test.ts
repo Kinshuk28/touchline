@@ -82,6 +82,14 @@ describe('fixture select', () => {
     expect(sel).toContain('slug');
   });
 
+  // Direction Two piece 2: the fixture-row club-colour bar and venue line
+  // both need these on the joined team, not just identity/crest fields.
+  it('requests club_colors and venue on each joined team', () => {
+    const sel = buildFixtureSelect();
+    expect(sel).toContain('club_colors');
+    expect(sel).toContain('venue');
+  });
+
   it('requests updated_at so pages can show data age honestly', () => {
     expect(buildFixtureSelect()).toContain('updated_at');
   });

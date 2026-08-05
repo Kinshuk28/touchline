@@ -3,7 +3,7 @@ import { isMarqueeClubId, selectMarqueeFixtures, MARQUEE_CLUB_FD_IDS } from '@/l
 import type { FixtureWithTeams, TeamLite } from '@/lib/site/rows';
 
 function team(fdId: number, name: string): TeamLite {
-  return { id: fdId, fd_id: fdId, slug: name.toLowerCase(), name, short_name: name, tla: name.slice(0, 3).toUpperCase(), crest_url: null };
+  return { id: fdId, fd_id: fdId, slug: name.toLowerCase(), name, short_name: name, tla: name.slice(0, 3).toUpperCase(), crest_url: null, club_colors: null, venue: null };
 }
 
 function fixture(overrides: Partial<FixtureWithTeams> & { id: number; kickoff_utc: string }): FixtureWithTeams {

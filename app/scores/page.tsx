@@ -9,7 +9,8 @@ import { Crest } from '@/components/Crest';
 import { formatKickoffTime } from '@/lib/site/format';
 import { countdownParts } from '@/lib/site/countdown';
 import { getCompetitionMeta } from '@/lib/site/competition';
-import { spineRowKind, spineCenterText } from '@/lib/site/spine';
+import { clubBarGradient } from '@/lib/site/clubColors';
+import { spineRowKind, spineCenterText, spineStateLabel } from '@/lib/site/spine';
 import type { FixtureWithTeams, LeagueRow } from '@/lib/site/rows';
 
 // Inert today: reading `searchParams` below forces this whole route to
@@ -27,8 +28,17 @@ export const revalidate = 60;
  * 44px row the matchday spine uses, reimplemented here (not
  * `<MatchdaySpine>` itself) because that component groups by *day*, not by
  * competition; the two pages group the same row shape along different axes.
- * `spineRowKind`/`spineCenterText` are the exact pure functions the spine
- * uses, imported directly, so the two never disagree about what a row shows.
+ * `spineRowKind`/`spineCenterText`/`spineStateLabel` are the exact pure
+ * functions the spine uses, imported directly, so the two never disagree
+ * about what a row shows.
+ *
+ * Unlike the spine, each row here carries only a club-colour bar, not a
+ * second competition-colour one — this list is already grouped by
+ * competition, and the header above (the coloured `border-b-2` plus the
+ * `comp.bgClass` dot) is that group's competition-colour indicator. Adding
+ * a second, per-row competition bar identical to every other row in the
+ * same group would be pure repetition, not a second signal; the club bar,
+ * which *does* differ row to row, is the one thing worth adding here.
  */
 function CompetitionGroup({
   league, fixtures, now, following, eager,
@@ -52,12 +62,27 @@ function CompetitionGroup({
           const kind = spineRowKind(f);
           const center = spineCenterText(f, kind);
           const time = formatKickoffTime(f.kickoff_utc, now);
+          const state = spineStateLabel(f);
+          // Real per-match data, different on every row — see the club-colour-bar note
+          // above and lib/site/clubColors.ts. Null when neither club's colours parse;
+          // the bar is simply absent then (width still reserved, see below), which is
+          // fine here since the group header's competition colour already carries the row.
+          const clubGradient = clubBarGradient(f.home?.club_colors, f.away?.club_colors);
+          const venue = f.home?.venue ?? null;
           return (
             <li
               key={f.id}
               data-fixture-id={f.id}
-              className="flex h-11 items-center gap-1 border-b border-border px-2 text-sm last:border-b-0 sm:gap-2 sm:px-3"
+              className="flex h-11 items-center gap-1 border-b border-border pr-2 text-sm last:border-b-0 sm:gap-2 sm:pr-3"
             >
+              {/* Width always reserved (even when `clubGradient` is null) so a club with no
+                  parseable colour doesn't shift this row's text out of alignment with its
+                  neighbours. 60% opacity, same treatment as the spine's club bar. */}
+              <span
+                className={`h-full w-1.5 shrink-0 ${clubGradient ? 'opacity-60' : ''}`}
+                style={clubGradient ? { background: clubGradient } : undefined}
+                aria-hidden="true"
+              />
               {/* `formatKickoffTime` with no `dateContext` (this page has no day heading
                   to lean on) can render as long as "16 Aug 19:00" for anything more than a
                   week out — the common case in preseason — at `sm:` and up, where there's
@@ -92,15 +117,27 @@ function CompetitionGroup({
                   single letter. Upcoming fixtures — the vast majority in
                   preseason — have no state text to show at all, so this
                   column only exists when there's something to put in it. */}
-              {(kind === 'live' || kind === 'postponed') && (
+              {state && (
                 <span className="w-14 shrink-0 text-right text-11 font-semibold uppercase tracking-wide sm:w-16">
-                  {kind === 'live' && (
+                  {state.live ? (
                     <span className="inline-flex items-center gap-1 text-live">
                       <span className="size-1.5 rounded-full bg-live" aria-hidden="true" />
-                      Live
+                      {state.text}
                     </span>
+                  ) : (
+                    <span className="text-muted">{state.text}</span>
                   )}
-                  {kind === 'postponed' && <span className="text-muted">Postponed</span>}
+                </span>
+              )}
+              {/* Venue and matchday — same "supporting, not shouting" treatment as the
+                  spine (components/MatchdaySpine.tsx): muted, one line, hidden below `lg`
+                  rather than wrapped, home team's venue since that's where the match is
+                  played. Real per-fixture data, omitted (not guessed) when absent. */}
+              {(f.matchday !== null || venue) && (
+                <span className="hidden shrink-0 items-center gap-1 whitespace-nowrap pl-1 text-11 text-muted lg:flex">
+                  {f.matchday !== null && <span>Matchday {f.matchday}</span>}
+                  {f.matchday !== null && venue && <span aria-hidden="true">·</span>}
+                  {venue && <span className="max-w-[10rem] truncate">{venue}</span>}
                 </span>
               )}
             </li>

@@ -25,6 +25,17 @@ export interface TeamLite {
   short_name: string | null;
   tla: string | null;
   crest_url: string | null;
+  /**
+   * Free-text kit colours ("Claret / Sky Blue") — parse via
+   * `lib/site/clubColors.ts#parseClubColors` before rendering, never used
+   * raw. `null` for 14 of the 110 live clubs; never invented. Added to
+   * `TEAM_FIELDS` (lib/site/queries/fixtures.ts) alongside `venue` so
+   * Direction Two's fixture-row club-colour bar has real per-team data to
+   * draw from.
+   */
+  club_colors: string | null;
+  /** `null` for 14 of the 110 live clubs — omitted, never guessed at. */
+  venue: string | null;
 }
 
 export interface FixtureWithTeams {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { dayRailParts, spineCenterText, spineRowKind } from '@/lib/site/spine';
+import { dayRailParts, spineCenterText, spineRowKind, spineStateLabel } from '@/lib/site/spine';
 import type { FixtureStatus } from '@/lib/providers/types';
 
 function fixture(overrides: { status: FixtureStatus; home_goals?: number | null; away_goals?: number | null }) {
@@ -44,6 +44,32 @@ describe('spineCenterText', () => {
   it('shows an em dash for upcoming and postponed kinds', () => {
     expect(spineCenterText({ home_goals: null, away_goals: null }, 'upcoming')).toBe('—');
     expect(spineCenterText({ home_goals: null, away_goals: null }, 'postponed')).toBe('—');
+  });
+});
+
+describe('spineStateLabel', () => {
+  it('is Live for IN_PLAY, with live: true', () => {
+    expect(spineStateLabel({ status: 'IN_PLAY' })).toEqual({ text: 'Live', live: true });
+  });
+
+  it('is HT for PAUSED, with live: false — nothing is happening at half-time', () => {
+    expect(spineStateLabel({ status: 'PAUSED' })).toEqual({ text: 'HT', live: false });
+  });
+
+  it('is FT for FINISHED and AWARDED', () => {
+    expect(spineStateLabel({ status: 'FINISHED' })).toEqual({ text: 'FT', live: false });
+    expect(spineStateLabel({ status: 'AWARDED' })).toEqual({ text: 'FT', live: false });
+  });
+
+  it('is Postp. for POSTPONED specifically, distinct from Cancelled/Suspended', () => {
+    expect(spineStateLabel({ status: 'POSTPONED' })).toEqual({ text: 'Postp.', live: false });
+    expect(spineStateLabel({ status: 'CANCELLED' })).toEqual({ text: 'Off', live: false });
+    expect(spineStateLabel({ status: 'SUSPENDED' })).toEqual({ text: 'Off', live: false });
+  });
+
+  it('is null for an upcoming fixture, so no state column is reserved for it', () => {
+    expect(spineStateLabel({ status: 'SCHEDULED' })).toBeNull();
+    expect(spineStateLabel({ status: 'TIMED' })).toBeNull();
   });
 });
 

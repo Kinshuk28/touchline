@@ -38,8 +38,11 @@ export const KICKOFF_GRACE_MINUTES = 30;
 
 // fd_id added for the landing page's marquee-club fixture selection
 // (lib/site/marqueeClubs.ts), which is keyed by football-data.org's team
-// id rather than our internal one.
-const TEAM_FIELDS = 'id,fd_id,slug,name,short_name,tla,crest_url';
+// id rather than our internal one. club_colors and venue added for
+// Direction Two piece 2 (docs/superpowers/specs/2026-08-04-touchline-direction-two.md):
+// the fixture-row club-colour bar (lib/site/clubColors.ts) and the venue
+// line both need real per-team data, not just identity/crest fields.
+const TEAM_FIELDS = 'id,fd_id,slug,name,short_name,tla,crest_url,club_colors,venue';
 
 /** One select, both teams joined — a crest must never cost a second query. */
 export function buildFixtureSelect(): string {

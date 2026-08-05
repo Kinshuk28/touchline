@@ -59,12 +59,12 @@ describe('stateLabel', () => {
     expect(stateLabel(fixture({ status: 'IN_PLAY' }))).toEqual({ text: 'Live', live: true });
   });
 
-  it('reports live for PAUSED', () => {
-    expect(stateLabel(fixture({ status: 'PAUSED' }))).toEqual({ text: 'Live', live: true });
+  it('reports HT for PAUSED, not live — nothing is happening on the pitch at half-time', () => {
+    expect(stateLabel(fixture({ status: 'PAUSED' }))).toEqual({ text: 'HT', live: false });
   });
 
-  it('shows a Postponed label, not live', () => {
-    expect(stateLabel(fixture({ status: 'POSTPONED' }))).toEqual({ text: 'Postponed', live: false });
+  it('shows a Postp. label, not live', () => {
+    expect(stateLabel(fixture({ status: 'POSTPONED' }))).toEqual({ text: 'Postp.', live: false });
   });
 
   it('shows Off for cancelled and suspended matches', () => {

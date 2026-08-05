@@ -47,6 +47,46 @@ export function spineCenterText(fixture: Pick<FixtureWithTeams, 'home_goals' | '
   return '—';
 }
 
+export interface SpineStateLabel {
+  text: string;
+  live: boolean;
+}
+
+/**
+ * The status label shown on a spine/competition-group row — Direction
+ * Two's football vernacular (spec: "'FT', 'HT', 'Postp.' as status
+ * labels"). Keyed off the fixture's raw `status` rather than
+ * `spineRowKind`'s coarser four-way split: `kind` alone can't tell HT from
+ * IN_PLAY (both are `'live'`) or Postponed from Cancelled (both
+ * `'postponed'`), and this needs to. `null` for SCHEDULED/TIMED — an
+ * upcoming fixture has nothing to report here, matching the "reclaimed,
+ * not reserved" state column both `MatchdaySpine` and `/scores`'
+ * `CompetitionGroup` already apply: this column only takes up row space
+ * when there's something to put in it.
+ *
+ * `live: false` for PAUSED (half-time) — same reasoning as
+ * `scoreDisplay.ts#stateLabel`: nothing is happening on the pitch right
+ * now, so the pulsing-dot "Live" treatment would be misleading.
+ */
+export function spineStateLabel(fixture: Pick<FixtureWithTeams, 'status'>): SpineStateLabel | null {
+  switch (fixture.status) {
+    case 'IN_PLAY':
+      return { text: 'Live', live: true };
+    case 'PAUSED':
+      return { text: 'HT', live: false };
+    case 'FINISHED':
+    case 'AWARDED':
+      return { text: 'FT', live: false };
+    case 'POSTPONED':
+      return { text: 'Postp.', live: false };
+    case 'CANCELLED':
+    case 'SUSPENDED':
+      return { text: 'Off', live: false };
+    default:
+      return null;
+  }
+}
+
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 

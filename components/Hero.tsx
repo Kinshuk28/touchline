@@ -71,6 +71,35 @@ function CategoryPill({ category }: { category: Category }) {
  * on the page, and a load delay must show the surface colour underneath,
  * never a bare unstyled black box.
  */
+/**
+ * Direction Two's one ambient pitch-marking motif (spec: "a single, very
+ * low-contrast pitch-marking motif behind the hero ... one place each, not
+ * everywhere") — a centre-circle arc and halfway line, cropped by the
+ * hero's own frame via the parent's `overflow-hidden`, the way a real pitch
+ * looks in a photo taken off-centre. `-right-*`/`-top-*` push most of the
+ * circle outside the box so only a sliver shows in the top-right corner,
+ * deliberately clear of the bottom-anchored headline in both the
+ * with-image and no-image layouts below.
+ *
+ * A fixed white stroke at 8% opacity, not a `--text`/`--muted` token: this
+ * sits over an arbitrary editorial photo in the common case (see the
+ * scrim/headline comment below for the same reasoning applied to text) —
+ * a theme-reactive colour would swing between invisible and an odd tint
+ * depending on the image, where a near-invisible white line reads the same
+ * regardless of theme or photo. Rendered once, referenced in both branches
+ * below, so there is exactly one motif in the markup, not two near-copies.
+ */
+const pitchMotif = (
+  <svg
+    aria-hidden="true"
+    viewBox="0 0 200 200"
+    className="pointer-events-none absolute -right-20 -top-20 h-56 w-56 text-white opacity-[0.08] sm:-right-10 sm:-top-10 sm:h-72 sm:w-72"
+  >
+    <circle cx="100" cy="100" r="68" fill="none" stroke="currentColor" strokeWidth="1.5" />
+    <line x1="0" y1="100" x2="200" y2="100" stroke="currentColor" strokeWidth="1.5" />
+  </svg>
+);
+
 export function Hero({ item, now }: { item: NewsRow; now: Date }) {
   const category = categoryOf(item);
   const age = relativeTime(item.published_at, now);
@@ -94,6 +123,7 @@ export function Hero({ item, now }: { item: NewsRow; now: Date }) {
               sizes="100vw"
               className="object-cover transition-transform duration-300 group-hover:scale-[1.03] motion-reduce:transition-none motion-reduce:group-hover:scale-100"
             />
+            {pitchMotif}
             <div
               className="absolute inset-x-0 bottom-0 h-2/3 bg-gradient-to-t from-black/60 to-transparent"
               aria-hidden="true"
@@ -117,6 +147,7 @@ export function Hero({ item, now }: { item: NewsRow; now: Date }) {
           // Type-only fallback — the spec is explicit that a lead item with
           // no image gets this, never an empty frame or placeholder graphic.
           <div className="flex h-full w-full flex-col justify-between p-4 sm:p-8">
+            {pitchMotif}
             <div>{category && <CategoryPill category={category} />}</div>
             <div>
               <h1 className="font-display text-24 font-extrabold leading-tight tracking-[-0.02em] sm:text-44">
