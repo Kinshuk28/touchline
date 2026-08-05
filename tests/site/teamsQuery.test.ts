@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { getTeams } from '@/lib/site/queries/teams';
+import { getClubNames, getTeams } from '@/lib/site/queries/teams';
 
 // Same hand-rolled fake PostgREST client as tests/site/standingsQuery.test.ts
 // and tests/site/queries.test.ts — kept local rather than shared, matching
@@ -92,5 +92,32 @@ describe('getTeams', () => {
   it('throws with the function name and message when the query errors', async () => {
     fakeDb.setError({ message: 'boom' });
     await expect(getTeams()).rejects.toThrow(/getTeams: boom/);
+  });
+});
+
+describe('getClubNames', () => {
+  beforeEach(() => {
+    fakeDb.setRows([]);
+    fakeDb.setError(null);
+  });
+
+  it('selects only the three name columns the relevance matcher reads', async () => {
+    fakeDb.setRows([clubRow({ id: 1, name: 'Arsenal FC' })]);
+    await getClubNames();
+    const sel = fakeDb.getLastSelect();
+    expect(sel).toBe('name,short_name,tla');
+    // The point of this query existing at all: it must not drag the heavy
+    // columns along for a matcher that never reads them.
+    expect(sel).not.toContain('crest_url');
+    expect(sel).not.toContain('venue');
+  });
+
+  it('returns an empty array when there are no clubs, not an error', async () => {
+    expect(await getClubNames()).toEqual([]);
+  });
+
+  it('throws with the function name and message when the query errors', async () => {
+    fakeDb.setError({ message: 'boom' });
+    await expect(getClubNames()).rejects.toThrow(/getClubNames: boom/);
   });
 });

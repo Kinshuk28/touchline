@@ -1,5 +1,7 @@
 import { getTransferNews } from '@/lib/site/queries/news';
 import { getLeagues } from '@/lib/site/queries/leagues';
+import { getClubNames } from '@/lib/site/queries/teams';
+import { buildClubIndex, orderByRelevance } from '@/lib/site/newsRelevance';
 import { TransfersRail } from '@/components/TransfersRail';
 
 export const revalidate = 300;
@@ -11,10 +13,15 @@ const TRANSFERS_FEED_LIMIT = 100;
 
 export default async function TransfersPage() {
   const now = new Date();
-  const [transfers, leagues] = await Promise.all([
+  const [feed, leagues, clubNames] = await Promise.all([
     getTransferNews(TRANSFERS_FEED_LIMIT),
     getLeagues(),
+    getClubNames(),
   ]);
+  // Same relevance ordering as the landing rails and /news — a transfer
+  // story about a club this site doesn't cover sinks below one that names a
+  // stored club, and nothing is dropped (lib/site/newsRelevance.ts).
+  const transfers = orderByRelevance(feed, buildClubIndex(clubNames));
 
   return (
     <div className="space-y-4">
