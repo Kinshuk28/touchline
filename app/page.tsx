@@ -13,6 +13,7 @@ import { getCompetitionMeta } from '@/lib/site/competition';
 import { isUnplayedSeason, seasonLabel } from '@/lib/site/standingsDisplay';
 import { groupFixturesByDay } from '@/lib/site/spine';
 import { BoardPanel } from '@/components/BoardPanel';
+import { FantasyTeaser } from '@/components/FantasyTeaser';
 import { MatchdaySpine } from '@/components/MatchdaySpine';
 import { MiniTable } from '@/components/MiniTable';
 import { NewsRail } from '@/components/NewsRail';
@@ -238,15 +239,13 @@ export default async function Home({
         </div>
       </div>
 
-      {/* Kept from the old page, reduced to the one line it was always
-          worth: the board's whole argument is density, and a dashed
-          placeholder box the height of four fixture rows argues the
-          opposite. */}
-      <p className="rounded-xl border border-dashed border-border px-3 py-2 text-11 text-muted">
-        <span className="font-semibold uppercase tracking-wider text-text">Fantasy</span> — pick a squad from
-        across the top five leagues, score points on real results, run a league against your friends. In
-        development.
-      </p>
+      {/* The one openly promotional block on the page, and so the only
+          place illustrative motion can honestly sit — everything above it is
+          stored data (components/FantasyTeaser.tsx). It replaces the
+          one-line strip this used to be: a flagship feature deserves more
+          than a footnote, and below the board is space the density argument
+          doesn't need. */}
+      <FantasyTeaser />
     </div>
   );
 }

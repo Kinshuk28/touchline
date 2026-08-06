@@ -274,8 +274,32 @@ body {
   50%      { opacity: .4; transform: scale(.72); }
 }
 
+/* The Fantasy teaser's two (components/FantasyTeaser.tsx): eleven position
+   dots arriving one after another, and a floodlight crossing the panel. The
+   sweep is the one slow loop on the site that isn't tied to live data — it
+   is confined to the single openly promotional block, at 6% white over an
+   opaque surface, and it carries no meaning to miss if it never runs. */
+@keyframes tl-pop {
+  from { opacity: 0; transform: scale(.4); }
+  60%  { opacity: 1; transform: scale(1.15); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+@keyframes tl-sweep {
+  from { transform: translateX(-60%); }
+  to   { transform: translateX(160%); }
+}
+
 .tl-rise { animation: tl-rise .42s cubic-bezier(.22, .61, .36, 1) both; }
 .tl-live-dot { animation: tl-pulse 1.8s ease-in-out infinite; }
+/* `transform-box: fill-box` + a centred origin so an SVG circle scales
+   about itself rather than about the viewBox corner. */
+.tl-pop { animation: tl-pop .5s cubic-bezier(.22, .61, .36, 1) both; transform-box: fill-box; transform-origin: center; }
+.tl-sweep {
+  background: linear-gradient(100deg, transparent 0%, rgba(255, 255, 255, .06) 45%, transparent 90%);
+  width: 45%;
+  animation: tl-sweep 9s ease-in-out infinite;
+}
 
 /* Hover and focus should feel like a surface responding, not a repaint.
    Colour only — no transform, nothing that could shift a row's text. */
@@ -306,4 +330,8 @@ body {
      state outright. */
   .tl-rise { animation: none !important; opacity: 1 !important; transform: none !important; }
   .tl-live-dot { animation: none !important; opacity: 1 !important; transform: none !important; }
+  .tl-pop { animation: none !important; opacity: 1 !important; transform: none !important; }
+  /* The sweep has nothing to resolve to — it is pure decoration, so it is
+     removed outright rather than parked mid-panel. */
+  .tl-sweep { animation: none !important; display: none !important; }
 }
