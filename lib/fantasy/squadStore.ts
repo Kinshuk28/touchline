@@ -1,6 +1,8 @@
 import { userClient } from '@/lib/auth/session';
 import type { TransferRecord } from '@/lib/fantasy/transfers';
-import type { Chip } from '@/lib/fantasy/chips';
+import { isOneWeekOnly, type Chip } from '@/lib/fantasy/chips';
+import { scoreSeason, type PickGeneration, type SeasonScore } from '@/lib/fantasy/standings';
+import { getPointsForPlayers, getPositionsForPlayers } from '@/lib/fantasy/leagueStore';
 
 /**
  * Reading and writing one person's squad.
@@ -201,6 +203,82 @@ export async function getSquadId(
     .maybeSingle();
   if (error) throw new Error(`getSquadId: ${error.message}`);
   return (data as { id: string } | null)?.id ?? null;
+}
+
+/**
+ * One manager's own season score — the same arithmetic `getLeagueScoringData`
+ * runs for a whole league (lib/fantasy/leagueStore.ts), scoped to a single
+ * squad so the squad page can chart a season without joining a league first.
+ * Three queries: this squad's id, its per-gameweek transfer cost and chip,
+ * and its picks across every generation — then the published points for
+ * whichever players it ever contained.
+ */
+export async function getSeasonScore(
+  accessToken: string,
+  userId: string,
+  season: number,
+): Promise<SeasonScore | null> {
+  const db = userClient(accessToken);
+
+  const { data: squadRow, error: squadError } = await db
+    .from('fantasy_squad')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('season', season)
+    .maybeSingle();
+  if (squadError) throw new Error(`getSeasonScore (squad): ${squadError.message}`);
+  const squadId = (squadRow as { id: string } | null)?.id ?? null;
+  if (squadId === null) return null;
+
+  const { data: gwRows, error: gwError } = await db
+    .from('fantasy_squad_gameweek')
+    .select('gameweek,transfer_cost,chip')
+    .eq('squad_id', squadId);
+  if (gwError) throw new Error(`getSeasonScore (gameweeks): ${gwError.message}`);
+
+  const chipsByGw = new Map<number, Chip | null>();
+  const costsByGw = new Map<number, number>();
+  for (const row of (gwRows ?? []) as Array<{ gameweek: number; transfer_cost: number; chip: Chip | null }>) {
+    chipsByGw.set(row.gameweek, row.chip);
+    costsByGw.set(row.gameweek, row.transfer_cost);
+  }
+
+  const { data: pickRows, error: pickError } = await db
+    .from('fantasy_pick')
+    .select('active_from_gameweek,slot,player_id,is_captain,is_vice_captain')
+    .eq('squad_id', squadId)
+    .order('slot', { ascending: true });
+  if (pickError) throw new Error(`getSeasonScore (picks): ${pickError.message}`);
+
+  const byWeek = new Map<number, PickGeneration>();
+  const playerIds = new Set<number>();
+  for (const row of (pickRows ?? []) as Array<{
+    active_from_gameweek: number; slot: number; player_id: number; is_captain: boolean; is_vice_captain: boolean;
+  }>) {
+    playerIds.add(row.player_id);
+    const generation = byWeek.get(row.active_from_gameweek) ?? {
+      activeFromGameweek: row.active_from_gameweek,
+      picks: [],
+      freeHit: isOneWeekOnly(chipsByGw.get(row.active_from_gameweek) ?? null),
+    };
+    generation.picks.push({
+      playerId: row.player_id,
+      slot: row.slot,
+      captain: row.is_captain,
+      viceCaptain: row.is_vice_captain,
+    });
+    byWeek.set(row.active_from_gameweek, generation);
+  }
+  const generations = [...byWeek.values()];
+  if (playerIds.size === 0) return { total: 0, gameweeks: [], pending: 0, transferCost: 0 };
+
+  const ids = [...playerIds];
+  const [gameweeks, positions] = await Promise.all([
+    getPointsForPlayers(accessToken, season, ids),
+    getPositionsForPlayers(accessToken, season, ids),
+  ]);
+
+  return scoreSeason(generations, gameweeks, { positions, transferCosts: costsByGw, chips: chipsByGw });
 }
 
 /**

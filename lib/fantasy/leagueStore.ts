@@ -245,7 +245,7 @@ export async function getLeagueScoringData(
  * its requests as one identity, which is easier to reason about than a page
  * that switches clients halfway through.
  */
-async function getPointsForPlayers(
+export async function getPointsForPlayers(
   accessToken: string,
   season: number,
   playerIds: readonly number[],
@@ -279,7 +279,7 @@ async function getPointsForPlayers(
 }
 
 /** Positions, so auto-substitutions in past gameweeks respect the formation. */
-async function getPositionsForPlayers(
+export async function getPositionsForPlayers(
   accessToken: string,
   season: number,
   playerIds: readonly number[],

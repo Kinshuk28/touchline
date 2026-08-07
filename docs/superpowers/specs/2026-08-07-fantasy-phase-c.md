@@ -267,6 +267,19 @@ until it is done `/fantasy` says "not ready yet" rather than failing.
    This moves sign-in entirely server-side. Sign-in works without it — see the note above
    on the fragment fallback — but with it the session never appears in a URL.
 
+5. **Optional: turn on Google sign-in.** The site links straight to Supabase's own
+   `/auth/v1/authorize?provider=google` endpoint (`lib/auth/actions.ts#googleSignInHref`),
+   which does nothing until the provider is configured — until then the button redirects
+   to a Supabase error page rather than failing silently.
+   - In [Google Cloud Console](https://console.cloud.google.com/apis/credentials), create
+     an OAuth 2.0 Client ID (type: Web application). Authorized redirect URI:
+     `<SUPABASE_URL>/auth/v1/callback` (the project's API URL, from step 1's `.env`, not
+     this site's domain).
+   - In the Supabase dashboard, Authentication → Providers → Google: paste the Client ID
+     and Client Secret from the step above, and enable the provider.
+   - No code change and no redeploy needed either way — the link is already live, it just
+     errors until the provider is turned on.
+
 ---
 
 ## Built (leagues)

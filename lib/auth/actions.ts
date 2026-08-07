@@ -4,6 +4,7 @@ import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { z } from 'zod';
 import { authClient, clearSessionCookies } from '@/lib/auth/session';
+import { loadSiteEnv } from '@/lib/config/env';
 
 /**
  * Sending and ending sessions.
@@ -53,6 +54,31 @@ export async function sendMagicLink(_prev: SignInState, formData: FormData): Pro
     message: `Check ${email} for a sign-in link. It works once and expires in an hour.`,
     email,
   };
+}
+
+/**
+ * The link that starts a Google sign-in.
+ *
+ * Not a fetch and not a Supabase client call — `/auth/v1/authorize` is a
+ * plain GET endpoint that runs the whole OAuth handshake with Google itself
+ * and only redirects back here at the end, so this is nothing more than a
+ * URL to send the browser to. That is what keeps Google sign-in out of the
+ * "new dependency" problem magic links already solved: no browser-side
+ * Supabase client, no OAuth library, just a link.
+ *
+ * On success it lands back on `/auth/confirm` with the session in the URL
+ * fragment (`#access_token=...`) — the same shape Supabase's stock
+ * magic-link template produces, which app/auth/confirm/route.ts already
+ * forwards to components/SessionBridge.tsx. One fallback path serves both
+ * doors in; nothing new had to be built to receive this.
+ */
+export async function googleSignInHref(): Promise<string> {
+  const env = loadSiteEnv();
+  const redirectTo = `${await siteOrigin()}/auth/confirm`;
+  const url = new URL('/auth/v1/authorize', env.SUPABASE_URL);
+  url.searchParams.set('provider', 'google');
+  url.searchParams.set('redirect_to', redirectTo);
+  return url.toString();
 }
 
 export async function signOut(): Promise<void> {
