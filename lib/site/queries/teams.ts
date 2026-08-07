@@ -47,3 +47,23 @@ export async function getClubNames(): Promise<ClubNameSource[]> {
   if (error) throw new Error(`getClubNames: ${error.message}`);
   return (data ?? []) as ClubNameSource[];
 }
+
+/**
+ * One club by its URL slug, or `null` when nothing matches — a `/team/xyz`
+ * that isn't a club is a 404, not an error page, so this returns rather
+ * than throws for the not-found case (an actual query failure still throws,
+ * like every other query here).
+ *
+ * `maybeSingle()` rather than `single()`: `teams.slug` is `unique not null`
+ * in the schema, so "no rows" is the only non-row outcome this can have,
+ * and it is an expected one.
+ */
+export async function getTeamBySlug(slug: string): Promise<ClubRow | null> {
+  const { data, error } = await readClient()
+    .from('teams')
+    .select(CLUB_FIELDS)
+    .eq('slug', slug)
+    .maybeSingle();
+  if (error) throw new Error(`getTeamBySlug: ${error.message}`);
+  return (data as unknown as ClubRow | null) ?? null;
+}

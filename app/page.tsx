@@ -1,12 +1,11 @@
 import Link from 'next/link';
 import { getTrendingNews, getTransferNews } from '@/lib/site/queries/news';
-import { getLiveAndRecent, getUpcoming } from '@/lib/site/queries/fixtures';
+import { countUpcoming, getLiveAndRecent, getUpcoming } from '@/lib/site/queries/fixtures';
 import { getNextKickoffPerLeague, getLeagues } from '@/lib/site/queries/leagues';
 import { getStandings } from '@/lib/site/queries/standings';
 import { getClubNames } from '@/lib/site/queries/teams';
 import { getFollowingLeagues } from '@/lib/site/following';
 import { resolveLeagueIds } from '@/lib/site/leagueFilter';
-import { selectMarqueeFixtures } from '@/lib/site/marqueeClubs';
 import { buildClubIndex, orderByRelevance } from '@/lib/site/newsRelevance';
 import { fixtureDateRange, fixturePanelHeading } from '@/lib/site/boardLabels';
 import { getCompetitionMeta } from '@/lib/site/competition';
@@ -46,14 +45,20 @@ const NEWS_FETCH = 24;
 const NEWS_RAIL_COUNT = 8;
 const TRANSFER_FETCH = 18;
 const TRANSFER_RAIL_COUNT = 6;
-// Enough upcoming fixtures for `selectMarqueeFixtures` to find its board's
-// worth across five competitions without falling back to soonest-remaining.
-// 14 rows, not the spec sketch's 12: at 14 the fixture column ends level
-// with the table-plus-transfers column beside it, and a board whose tallest
-// column is 180px longer than its neighbour reads as an unfinished grid.
-// Still one screen's worth — measured at 1440x900, the whole board clears
-// the fold.
-const FIXTURES_FETCH = 60;
+// The next 14 fixtures, in kickoff order, across every competition.
+//
+// This panel used to run `selectMarqueeFixtures` — an editorial pick of 22
+// well-known clubs — over a 60-fixture window. That actively hid football:
+// an opening weekend whose matches happen to be Alavés v Getafe, Espanyol v
+// Levante and Celta v Osasuna showed none of them, and skipped days ahead to
+// the next fixture involving a big club. A board that says "Next up" and
+// then isn't is worse than no board, so the filter is gone and the module
+// with it (lib/site/marqueeClubs.ts, deleted): what is next is what shows.
+//
+// 14 rows because at 14 the fixture column ends level with the
+// table-plus-transfers column beside it, and the whole board still clears
+// the fold at 1440x900. The panel says how many of the total that is and
+// links to the rest, rather than implying it is everything.
 const BOARD_FIXTURE_COUNT = 14;
 const TABLE_ROW_COUNT = 6;
 
@@ -114,11 +119,12 @@ export default async function Home({
   const { table } = await searchParams;
   const following = await getFollowingLeagues();
 
-  const [news, transfers, live, upcoming, seasons, leagues, clubNames] = await Promise.all([
+  const [news, transfers, live, upcoming, upcomingTotal, seasons, leagues, clubNames] = await Promise.all([
     getTrendingNews(NEWS_FETCH),
     getTransferNews(TRANSFER_FETCH),
     getLiveAndRecent(now),
-    getUpcoming(now, FIXTURES_FETCH),
+    getUpcoming(now, BOARD_FIXTURE_COUNT),
+    countUpcoming(now),
     getNextKickoffPerLeague(now),
     getLeagues(),
     getClubNames(),
@@ -139,8 +145,7 @@ export default async function Home({
   const tickerLive = followedIds ? live.filter((f) => followedIds.has(f.league_id)) : live;
   const tickerPending = followedIds ? pending.filter((p) => followedIds.has(p.league.id)) : pending;
 
-  const boardFixtures = selectMarqueeFixtures(upcoming, BOARD_FIXTURE_COUNT);
-  const spineDays = groupFixturesByDay(boardFixtures);
+  const spineDays = groupFixturesByDay(upcoming);
   const fixtureHeading = fixturePanelHeading(spineDays[0]?.date ?? null, now);
   const fixtureRange = fixtureDateRange(spineDays);
 
@@ -180,7 +185,14 @@ export default async function Home({
         <BoardPanel
           order={0}
           label={fixtureHeading}
-          meta={fixtureRange ?? undefined}
+          meta={
+            // Range plus how much of the whole this is. A summary panel that
+            // doesn't say it is a summary is how the previous version got
+            // away with hiding two thirds of a matchday.
+            fixtureRange
+              ? `${fixtureRange}${upcomingTotal > upcoming.length ? ` · ${upcoming.length} of ${upcomingTotal}` : ''}`
+              : undefined
+          }
           action={<Link href="/calendar" className="group/link inline-flex items-center gap-1 hover:text-text">All fixtures <span className="transition-transform group-hover/link:translate-x-0.5 motion-reduce:transition-none" aria-hidden="true">→</span></Link>}
         >
           {/* Eager crests: this spine is the board's largest element and

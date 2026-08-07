@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { Crest } from '@/components/Crest';
 import { clubBarGradient } from '@/lib/site/clubColors';
 import { getCompetitionMeta } from '@/lib/site/competition';
@@ -159,9 +160,20 @@ export function MatchdaySpine({
                         <span className={`shrink-0 ${compact ? 'hidden sm:block' : ''}`}>
                           <Crest team={fixture.home} size={compact ? 18 : 20} eager={eagerCrests} />
                         </span>
-                        <span className={`truncate font-medium ${compact ? 'text-14' : 'text-15'}`}>
-                          {fixture.home?.short_name ?? fixture.home?.name ?? 'TBC'}
-                        </span>
+                        {/* Links to the club page when the fixture has a
+                            club attached; "TBC" (a fixture whose teams the
+                            provider has not confirmed) stays plain text,
+                            because there is no club to link to. */}
+                        {fixture.home ? (
+                          <Link
+                            href={`/team/${fixture.home.slug}`}
+                            className={`truncate font-medium hover:underline ${compact ? 'text-14' : 'text-15'}`}
+                          >
+                            {fixture.home.short_name ?? fixture.home.name}
+                          </Link>
+                        ) : (
+                          <span className={`truncate font-medium ${compact ? 'text-14' : 'text-15'}`}>TBC</span>
+                        )}
                       </span>
 
                       <span className={`shrink-0 text-center font-mono font-semibold tabular-nums ${compact ? 'w-6 text-14' : 'w-8 text-15'}`}>
@@ -172,9 +184,20 @@ export function MatchdaySpine({
                         <span className={`shrink-0 ${compact ? 'hidden sm:block' : ''}`}>
                           <Crest team={fixture.away} size={compact ? 18 : 20} eager={eagerCrests} />
                         </span>
-                        <span className={`truncate font-medium ${compact ? 'text-14' : 'text-15'}`}>
-                          {fixture.away?.short_name ?? fixture.away?.name ?? 'TBC'}
-                        </span>
+                        {/* Links to the club page when the fixture has a
+                            club attached; "TBC" (a fixture whose teams the
+                            provider has not confirmed) stays plain text,
+                            because there is no club to link to. */}
+                        {fixture.away ? (
+                          <Link
+                            href={`/team/${fixture.away.slug}`}
+                            className={`truncate font-medium hover:underline ${compact ? 'text-14' : 'text-15'}`}
+                          >
+                            {fixture.away.short_name ?? fixture.away.name}
+                          </Link>
+                        ) : (
+                          <span className={`truncate font-medium ${compact ? 'text-14' : 'text-15'}`}>TBC</span>
+                        )}
                       </span>
 
                       {/* The competition code, pushed to the right-hand end by `ml-auto`,

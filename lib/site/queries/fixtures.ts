@@ -179,6 +179,27 @@ export async function getUpcoming(now: Date, limit = 12, leagueIds?: number[]): 
 }
 
 /**
+ * How many fixtures are still to come, in total. The landing board shows a
+ * fixed number of the soonest ones, and this is what lets it say so out
+ * loud ("14 of 87 scheduled") instead of leaving a reader to wonder whether
+ * the rest of the weekend exists. `head: true` means PostgREST returns the
+ * count in a header and no rows at all, so this costs a count, not a page
+ * of joined fixture data.
+ *
+ * Same status and time window as `getUpcoming`, deliberately: a count that
+ * doesn't match the list it describes is worse than no count.
+ */
+export async function countUpcoming(now: Date): Promise<number> {
+  const { count, error } = await readClient()
+    .from('fixtures')
+    .select('id', { count: 'exact', head: true })
+    .gt('kickoff_utc', now.toISOString())
+    .in('status', ['SCHEDULED', 'TIMED']);
+  if (error) throw new Error(`countUpcoming: ${error.message}`);
+  return count ?? 0;
+}
+
+/**
  * `leagueIds`, when given, scopes the range to those leagues — `undefined`
  * means every league. An explicit empty array means every requested league
  * code was unrecognised: that must match nothing, not silently widen back
@@ -202,5 +223,28 @@ export async function getFixturesInRange(
   if (leagueIds && leagueIds.length > 0) q = q.in('league_id', leagueIds);
   const { data, error } = await q;
   if (error) throw new Error(`getFixturesInRange: ${error.message}`);
+  return (data ?? []) as unknown as FixtureWithTeams[];
+}
+
+/**
+ * Every fixture involving one club, in kickoff order — both home and away,
+ * which PostgREST expresses as an `.or()` across the two foreign keys.
+ * Unlike `getUpcoming` this spans past and future in one call: a club page
+ * wants "what just happened" and "what is next" from the same list, and
+ * splitting them in the page (by kickoff against `now`) keeps the two
+ * halves guaranteed consistent with each other.
+ *
+ * Every status is included, postponements and all: on a club's own page a
+ * called-off match is information, not noise — `spineStateLabel` renders it
+ * as "Postp." rather than hiding it.
+ */
+export async function getFixturesForTeam(teamId: number, limit = 60): Promise<FixtureWithTeams[]> {
+  const { data, error } = await readClient()
+    .from('fixtures')
+    .select(buildFixtureSelect())
+    .or(`home_team_id.eq.${teamId},away_team_id.eq.${teamId}`)
+    .order('kickoff_utc', { ascending: true })
+    .limit(limit);
+  if (error) throw new Error(`getFixturesForTeam: ${error.message}`);
   return (data ?? []) as unknown as FixtureWithTeams[];
 }

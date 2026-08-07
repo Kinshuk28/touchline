@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { Crest } from '@/components/Crest';
 import { parseClubColors, clubWashBackground } from '@/lib/site/clubColors';
 import type { ClubRow } from '@/lib/site/rows';
@@ -8,10 +9,10 @@ import type { ClubRow } from '@/lib/site/rows';
  * accent), name, venue, founded year and its parsed kit colours as a
  * visible swatch.
  *
- * A plain `<div>`, never a `<Link>` or `<a>`: `/team/[slug]` doesn't exist
- * yet, and shipping a dead link on a club element was a real bug caught
- * earlier on fixture rows (see components/ScoreRow.tsx's identical note on
- * the same rule). No hover state that implies navigation either.
+ * Now a `<Link>` to `/team/[slug]`. It was a plain `<div>` for as long as
+ * that route did not exist — shipping a dead link on a club element was a
+ * real bug caught earlier on fixture rows — and the moment the route
+ * landed, the card became the most obvious way into it.
  *
  * `venue`/`founded`/`club_colors` are each rendered independently and
  * omitted (never a placeholder or an em dash) when null — see `ClubRow`'s
@@ -26,7 +27,10 @@ export function ClubCard({ club, eager = false }: { club: ClubRow; eager?: boole
   const wash = clubWashBackground(club.club_colors);
 
   return (
-    <div className="overflow-hidden rounded-xl border border-border bg-surface">
+    <Link
+      href={`/team/${club.slug}`}
+      className="group block overflow-hidden rounded-xl border border-border bg-surface transition-colors hover:border-muted"
+    >
       <div
         className="flex h-24 items-center justify-center bg-surface-2 sm:h-28"
         style={wash ? { background: wash } : undefined}
@@ -63,6 +67,6 @@ export function ClubCard({ club, eager = false }: { club: ClubRow; eager?: boole
           </div>
         )}
       </div>
-    </div>
+    </Link>
   );
 }
