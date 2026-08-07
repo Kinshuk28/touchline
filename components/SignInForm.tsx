@@ -3,19 +3,16 @@
 import { useActionState } from 'react';
 import { useFormStatus } from 'react-dom';
 import { sendMagicLink, type SignInState } from '@/lib/auth/actions';
+import { Button } from '@/components/ui/Button';
 
 const INITIAL: SignInState = { status: 'idle', message: '', email: '' };
 
 function Submit() {
   const { pending } = useFormStatus();
   return (
-    <button
-      type="submit"
-      disabled={pending}
-      className="rounded-lg border border-border bg-surface-2 px-4 py-2 text-13 font-semibold hover:bg-surface disabled:opacity-60"
-    >
+    <Button type="submit" disabled={pending} className="w-full">
       {pending ? 'Sending…' : 'Email me a link'}
-    </button>
+    </Button>
   );
 }
 
@@ -45,7 +42,7 @@ export function SignInForm() {
           defaultValue={state.email}
           aria-describedby={state.message ? 'sign-in-message' : undefined}
           aria-invalid={state.status === 'error'}
-          className="w-full rounded-lg border border-border bg-bg px-3 py-2 text-15 outline-none focus-visible:border-text"
+          className="w-full border-b-2 border-comp-pl bg-bg px-3 py-2 font-mono text-15 text-comp-pd outline-none placeholder:text-comp-pl/50 focus-visible:border-comp-pd focus-visible:shadow-[0_0_15px_var(--comp-pd)]"
           placeholder="you@example.com"
         />
       </div>

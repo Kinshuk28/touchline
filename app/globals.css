@@ -1,139 +1,52 @@
 @import "tailwindcss";
 
 /*
- * Direction Two (docs/superpowers/specs/2026-08-04-touchline-direction-two.md):
- * turf-and-chalk, not near-black-plus-accent. The single lime accent is
- * gone — deleted, not hidden — and club colour (lib/site/clubColors.ts) is
- * the site's only chroma system outside these five competition colours and
- * the one-purpose --live red. Token *names* (--bg, --surface, --surface-2,
- * --border, --text, --muted) are kept from the previous palette so the
- * rename stays contained to this file; only their values change, to the
- * turf/chalk hexes the spec gives. Dark theme is turf: a deep pitch green,
- * floodlit-at-night rather than a generic void. Light theme is paper: a
- * warm off-white "matchday programme" ground, not an inverted dark theme —
- * ink, not grey-on-white.
+ * VAPORWAVE / OUTRUN.
  *
- * TURF, RESATURATED (dashboard-rebuild spec, defect 3: "the turf green
- * reads as grey-black — either push saturation until it genuinely reads as
- * turf, or abandon it and pick a defensible ground. State which and why.")
+ * A full replacement of the "turf and chalk" system (Direction Two) with
+ * the design system given: hot magenta, electric cyan and sunset orange
+ * glowing out of a near-black void, Orbitron display type over a Share Tech
+ * Mono body, a perspective grid floor, a blurred sun, and a scanline
+ * overlay across the whole viewport. Dark mode only, by the system's own
+ * declaration — the light theme and its toggle (components/ThemeToggle.tsx)
+ * are gone rather than left inert, because a toggle that silently does
+ * nothing is worse than no toggle.
  *
- * Kept and pushed, not abandoned. The concept wasn't the failure, the
- * numbers were. The old ground #0C1512 is HSL(160, 27%, 6.5%) — a spread of
- * 9/255 between its highest and lowest RGB channel. Nine levels of
- * separation at that lightness is below what the eye resolves as a hue, so
- * it arrives as black with an unplaceable cast: the reported symptom
- * exactly. Abandoning green would also throw away the rest of Direction
- * Two — the five competition colours and every parsed club colour were
- * tuned to sit on a green-black ground, and a neutral or blue ground would
- * need all of them re-derived.
+ * Token *names* are kept from the previous palette (--bg, --surface,
+ * --surface-2, --border, --text, --muted, --live, --comp-*) so every
+ * component that already reads them repaints for free; only the values
+ * change. `lib/site/competition.ts`, `lib/fantasy/fantasyColors.ts` and
+ * every badge built on them inherit this palette without a line of their
+ * own changing.
  *
- * So: chroma first, lightness second. #092219 is HSL(158, 58%, 8.4%) — a
- * spread of 25/255, nearly 3x the old one, for under two points of extra
- * lightness. Surfaces follow the same curve, each still a clear step above
- * the one below.
- *
- * Re-measured after the change (dark theme, every AA-relevant pair):
- *
- *   ground      chalk   muted   PL     PD     SA     BL1    FL1    live
- *   --bg        14.79   6.16    7.99   5.70   6.38   9.49   10.64  4.89
- *   --surface   13.53   5.64    7.31   5.21   5.83   8.68   9.74   4.47
- *   --surface-2 11.93   4.97    6.45   4.60   5.14   7.65   8.58   (n/a)
- *
- * Every text pair clears 4.5:1. `--live` as text only ever sits on --bg or
- * --surface — the live-state label in components/MatchdaySpine.tsx,
- * components/ScoreRow.tsx and /scores, all on --surface-filled rows — and
- * never on --surface-2, which is why that cell reads n/a rather than a
- * 3.94 failure. Turf on --live (`--live-ink`, the pill fill) measures
- * 4.89:1. Hairlines gained separation too: --border on --bg goes 1.38 ->
- * 1.60, which a dense board needs more than the old sparse page did.
- *
- * Light theme is untouched — paper never had this problem.
+ * Every colour below is contrast-checked against both `--bg` and
+ * `--surface` at the sizes it is actually used at (script run inline while
+ * choosing these values — see the commit). `--live` keeps the previous
+ * rule of never sitting on `--surface-2`, where it falls just under 4.5:1.
  */
 :root {
-  --bg:      #092219;   /* turf — ground */
-  --surface: #0F2A1F;   /* turf-2 — raised surface (cards) */
-  --surface-2: #163428;   /* turf-3 — hover / elevated */
-  --border:  #254637;   /* line — hairline rules */
-  --text:    #EEF2ED;   /* chalk — primary text */
-  --muted:   #93A099;   /* chalk-dim — secondary text */
-  --live:    #FF4438;   /* live only — never decorative */
-  --live-ink: #092219;   /* text placed ON --live: solid white-on-#FF4438
-                             measures 3.42:1 (below the 4.5:1 floor for
-                             small bold text), turf-on-#FF4438 measures
-                             4.89:1 at the resaturated turf above (5.42:1
-                             at the old, darker one). */
-  --scrim:   rgba(9, 34, 25, .86);   /* image overlay so text stays AA — turf, not neutral black */
+  --bg:        #090014;   /* the void */
+  --surface:   #1A103C;   /* glass panel */
+  --surface-2: #241454;   /* elevated / hover */
+  --border:    #3D2563;   /* default hairline — quiet on purpose; interactive borders go full neon at the call site */
+  --text:      #E0E0E0;   /* chrome */
+  --muted:     #A79FC7;   /* dim lavender chrome, 8.25:1 on --bg, 6.47:1 on --surface-2 */
+  --live:      #FF2D55;   /* neon red — the one non-spec colour, for the one thing that must still read as "alert" at a glance */
+  --live-ink:  #090014;   /* text ON --live: the void colour clears 5.64:1 there, white only clears 3.65:1 */
+  --scrim:     rgba(9, 0, 20, .86);
 
-  /* Competition colours — retuned to read on turf (#092219) and turf-2
-     (#0F2A1F), and deliberately distinct from --live (red) and from each
-     other. Mapped from leagues.fd_code by lib/site/competition.ts; a
-     league with no mapping falls back to --muted there, never an invented
-     colour. Values unchanged by the resaturation above — re-measured
-     against the new ground at >=5.2:1 on --bg and --surface (full table in
-     the file comment), still comfortably clear of 4.5:1. */
-  --comp-pl:  #C4A7E7;   /* Premier League — violet */
-  --comp-pd:  #FF5C8A;   /* La Liga — rose, kept clear of --live's orange-red */
-  --comp-sa:  #4DA3FF;   /* Serie A — azure */
-  --comp-bl1: #FFB454;   /* Bundesliga — amber */
-  --comp-fl1: #66E3C4;   /* Ligue 1 — mint */
-}
-
-@media (prefers-color-scheme: light) {
-  :root:not([data-theme="dark"]) {
-    --bg:      #F7F5F0;   /* paper — warm off-white ground */
-    --surface: #FFFFFF;
-    --surface-2: #EFEAE0;   /* warm elevated surface, not cool grey */
-    --border:  #DDD6C7;
-    --text:    #121A16;   /* ink */
-    --muted:   #5C665F;
-    --live:    #E00E00;
-    --live-ink: #FFFFFF;
-    --scrim:   rgba(9, 34, 25, .86);
-
-    /* Same hue/saturation family as the dark-theme values above, lightness
-       lowered until each holds >=4.5:1 against both #F7F5F0 (ground) and
-       #FFFFFF (surface) — measured ~4.57-5.53:1, see this piece's report
-       for the exact ratios and the script that derived them. */
-    --comp-pl:  #8B52D0;
-    --comp-pd:  #C81E5C;
-    --comp-sa:  #006CDF;
-    --comp-bl1: #B15600;
-    --comp-fl1: #1C7D6D;
-  }
-}
-
-:root[data-theme="light"] {
-  --bg:      #F7F5F0;
-  --surface: #FFFFFF;
-  --surface-2: #EFEAE0;
-  --border:  #DDD6C7;
-  --text:    #121A16;
-  --muted:   #5C665F;
-  --live:    #E00E00;
-  --live-ink: #FFFFFF;
-  --scrim:   rgba(9, 34, 25, .86);
-  --comp-pl:  #8B52D0;
-  --comp-pd:  #C81E5C;
-  --comp-sa:  #006CDF;
-  --comp-bl1: #B15600;
-  --comp-fl1: #1C7D6D;
-}
-
-:root[data-theme="dark"] {
-  --bg:      #092219;
-  --surface: #0F2A1F;
-  --surface-2: #163428;
-  --border:  #254637;
-  --text:    #EEF2ED;
-  --muted:   #93A099;
-  --live:    #FF4438;
-  --live-ink: #092219;
-  --scrim:   rgba(9, 34, 25, .86);
-  --comp-pl:  #C4A7E7;
-  --comp-pd:  #FF5C8A;
-  --comp-sa:  #4DA3FF;
-  --comp-bl1: #FFB454;
-  --comp-fl1: #66E3C4;
+  /* Five distinct neon hues for the five competitions
+     (lib/site/competition.ts) and, downstream of that, every fantasy
+     position/chip badge (lib/fantasy/fantasyColors.ts). The system names
+     three hero colours (magenta, cyan, orange); gold and violet extend the
+     family for the two competitions it doesn't have a colour for, at the
+     same saturation and the same contrast floor (>=4.5:1 on --bg and
+     --surface, checked individually — see the commit for the numbers). */
+  --comp-pl:  #FF00FF;   /* Premier League — hot magenta, the system's hero colour, for the flagship league */
+  --comp-pd:  #00FFFF;   /* La Liga — electric cyan */
+  --comp-sa:  #FF9900;   /* Serie A — sunset orange */
+  --comp-bl1: #FFE600;   /* Bundesliga — neon gold */
+  --comp-fl1: #C77DFF;   /* Ligue 1 — electric violet */
 }
 
 @theme inline {
@@ -153,26 +66,16 @@
   --color-comp-bl1: var(--comp-bl1);
   --color-comp-fl1: var(--comp-fl1);
 
-  /* Three roles (app/layout.tsx loads all three via next/font/google and
-     exposes them on <html> as --font-archivo / --font-ibm-plex-sans /
-     --font-ibm-plex-mono): Archivo for display, IBM Plex Sans for body,
-     IBM Plex Mono for data. Mapping them here is what makes Tailwind's
-     font-display / font-sans / font-mono utilities actually resolve to
-     them. The previous build loaded Inter this same way but never added
-     this mapping, so `font-sans` (used on <body>) fell through to
-     Tailwind's default system stack and the Inter woff2 was downloaded on
-     every page load and never applied — verified in the built CSS, see the
-     redesign-foundation report.
-  */
-  --font-display: var(--font-archivo);
-  --font-sans: var(--font-ibm-plex-sans);
-  --font-mono: var(--font-ibm-plex-mono);
+  /* Orbitron for display (headings, prices, scores — anything that should
+     feel struck rather than typed), Share Tech Mono for everything else,
+     body copy included — the system calls for a monospace body, not just a
+     monospace data column, and that is the single boldest, least generic
+     choice in the whole brief. Both loaded via next/font/google in
+     app/layout.tsx; no CSS @import, no new dependency. */
+  --font-display: var(--font-orbitron);
+  --font-sans: var(--font-share-tech-mono);
+  --font-mono: var(--font-share-tech-mono);
 
-  /* Type scale: 11 / 13 / 15 / 18 / 24 / 32 / 44 (rem, 16px root) — one
-     scale for every headline, label, price/score and data cell in the
-     redesign, replacing Tailwind's default text-sm/text-xl steps which
-     don't line up with it. Headlines sit at 32–44 and are meant to be the
-     only things at that size. */
   --text-11: 0.6875rem;
   --text-13: 0.8125rem;
   --text-15: 0.9375rem;
@@ -180,105 +83,100 @@
   --text-24: 1.5rem;
   --text-32: 2rem;
   --text-44: 2.75rem;
+
+  /* Sharp and geometric is the system's default: every radius Tailwind
+     would otherwise round a card, panel or button to collapses to a hard
+     corner. `rounded-full` is untouched by this (Tailwind's `full` step is
+     a static 9999px, not one of these tokens), which is exactly the split
+     the system asks for — square cards and buttons, round dots, pills and
+     avatars. Overriding the scale here repaints every existing
+     `rounded-xl`/`rounded-lg`/`rounded-md` call site site-wide with no
+     change to a single component file. */
+  --radius-xs: 0px;
+  --radius-sm: 0px;
+  --radius-md: 0px;
+  --radius-lg: 0px;
+  --radius-xl: 0px;
+  --radius-2xl: 0px;
+  --radius-3xl: 0px;
 }
 
-html { color-scheme: dark light; }
+html { color-scheme: dark; }
 
 /*
- * THE GROUND HAS DEPTH NOW.
+ * THE VOID HAS DEPTH.
  *
- * It was a single flat fill, which is what made the page read as static
- * even after the ground itself started reading as green. Three layers, all
- * of them derived from a real pitch and all of them deliberately at the
- * edge of perception — they must never compete with a fixture row:
+ * Three fixed layers, all decorative, all `pointer-events: none`, none of
+ * them ever competing with a fixture row for attention:
  *
- * 1. Mown stripes. `--stripe` is a translucent white/ink wash, not a second
- *    hex, so it layers over whatever `--bg` is and stays correct in both
- *    themes for free. 88px bands at 5 degrees off vertical: straight
- *    vertical bands line up with the board's column gaps and read as a
- *    layout bug, a slight cant reads as turf.
- * 2. A floodlight wash at the top of the page — the light falling on the
- *    ground from above the stand, and the reason the board's top edge now
- *    sits on something rather than in a void.
- * 3. The centre circle: one hairline ring, 34rem across and centred on the
- *    viewport, so it always runs off all four edges — you are standing
- *    inside it, which is what stops it reading as a stray arc drawn on the
- *    page. Direction Two asked for exactly one ambient pitch-marking motif
- *    and it used to sit behind the hero; the hero is gone, so it moves here.
- *
- * `background-attachment: fixed` is what makes it a ground rather than a
- * pattern printed on the page: the board scrolls, the pitch stays put.
- *
- * Contrast: `--stripe` is 2.2% white in dark theme, which moves the ground
- * from #092219 to an effective #0E2620 under a band — chalk on that
- * measures 14.31:1 against 14.79:1 on the base, and the lowest-contrast
- * text pair on the page (`--muted`) goes 6.16:1 -> 5.96:1. Everything still
- * clears AA with room to spare, and all real body text sits on `--surface`
- * panels anyway, which are opaque and unaffected.
+ * 1. The sun — a real blurred element (`app/layout.tsx`), not a gradient
+ *    trick, because a genuine `blur(100px)` reads softer than any radial
+ *    gradient standing in for one.
+ * 2. The grid — `body::before`, a line pattern thrown into perspective and
+ *    masked to fade into the void before it reaches the fold. `z-index:
+ *    -1` rather than relying on paint order, so it stays behind real
+ *    content regardless of what stacking contexts the page above it
+ *    creates.
+ * 3. The scanlines — `body::after`, a 4px repeating band over the entire
+ *    viewport, `z-index: 9999` so it sits above everything including the
+ *    sun. At 25% black every other line it never drops body text below
+ *    its already very high contrast floor (see the token comment above).
  */
-:root {
-  --stripe: rgba(255, 255, 255, .022);
-  --line: rgba(255, 255, 255, .05);
-  --glow: rgba(146, 232, 195, .055);
-}
-
-@media (prefers-color-scheme: light) {
-  :root:not([data-theme="dark"]) {
-    /* Paper takes the same geometry at half the strength and in ink rather
-       than light — a programme printed on textured stock, not a floodlit
-       pitch. */
-    --stripe: rgba(18, 26, 22, .016);
-    --line: rgba(18, 26, 22, .045);
-    --glow: rgba(120, 96, 48, .05);
-  }
-}
-
-:root[data-theme="light"] {
-  --stripe: rgba(18, 26, 22, .016);
-  --line: rgba(18, 26, 22, .045);
-  --glow: rgba(120, 96, 48, .05);
-}
-
-:root[data-theme="dark"] {
-  --stripe: rgba(255, 255, 255, .022);
-  --line: rgba(255, 255, 255, .05);
-  --glow: rgba(146, 232, 195, .055);
-}
-
 body {
   background-color: var(--bg);
-  background-image:
-    radial-gradient(58rem 26rem at 50% -6rem, var(--glow), transparent 70%),
-    radial-gradient(circle at 50% 46%, transparent 33.9rem, var(--line) 34rem 34.1rem, transparent 34.2rem),
-    repeating-linear-gradient(5deg, var(--stripe) 0 88px, transparent 88px 176px);
-  background-attachment: fixed;
-  background-repeat: no-repeat, no-repeat, repeat;
   color: var(--text);
   -webkit-font-smoothing: antialiased;
+  position: relative;
+}
+
+body::before {
+  content: '';
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 70vh;
+  z-index: -1;
+  pointer-events: none;
+  background-image:
+    linear-gradient(transparent 94%, color-mix(in srgb, var(--comp-pl) 70%, transparent) 94%),
+    linear-gradient(90deg, transparent 94%, color-mix(in srgb, var(--comp-pl) 70%, transparent) 94%);
+  background-size: 56px 56px;
+  transform: perspective(480px) rotateX(62deg) scale(1.6);
+  transform-origin: bottom center;
+  opacity: .3;
+  -webkit-mask-image: linear-gradient(to bottom, transparent, black 55%);
+  mask-image: linear-gradient(to bottom, transparent, black 55%);
+}
+
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  pointer-events: none;
+  background-image: linear-gradient(rgba(9, 0, 20, 0) 50%, rgba(0, 0, 0, .25) 50%);
+  background-size: 100% 4px;
 }
 
 /*
- * Motion. Two animations, both tied to something real: a board arriving,
- * and a match being in play. Nothing here loops for decoration.
+ * Motion. Kept from the previous system where the mechanic still fits — a
+ * board arriving, a match being in play — because both are honest signals,
+ * not decoration, and the brief's own motion section asks for exactly that
+ * restraint ("nothing here loops for decoration" survives the reskin even
+ * though the palette didn't). Every colour they reference is a token, so
+ * the new palette applies without touching the keyframes.
  */
 @keyframes tl-rise {
   from { opacity: 0; transform: translateY(14px); }
   to   { opacity: 1; transform: none; }
 }
 
-/* The live dot's heartbeat — only ever applied to a fixture whose status is
-   actually IN_PLAY, so the one looping animation on the site is a statement
-   about the data, not a flourish. */
 @keyframes tl-pulse {
   0%, 100% { opacity: 1; transform: scale(1); }
   50%      { opacity: .4; transform: scale(.72); }
 }
 
-/* The Fantasy teaser's two (components/FantasyTeaser.tsx): eleven position
-   dots arriving one after another, and a floodlight crossing the panel. The
-   sweep is the one slow loop on the site that isn't tied to live data — it
-   is confined to the single openly promotional block, at 6% white over an
-   opaque surface, and it carries no meaning to miss if it never runs. */
 @keyframes tl-pop {
   from { opacity: 0; transform: scale(.4); }
   60%  { opacity: 1; transform: scale(1.15); }
@@ -290,11 +188,6 @@ body {
   to   { transform: translateX(160%); }
 }
 
-/* The move. `tl-pass` draws the line on, `tl-ball` runs the ball along the
-   identical path (components/FantasyTeaser.tsx defines it once and hands it
-   to both), and both hold at the end before fading so the completed move is
-   legible for a beat rather than snapping straight back to the start. One
-   nine-second loop, confined to the promo panel. */
 @keyframes tl-pass {
   0%        { stroke-dashoffset: 1; opacity: .85; }
   60%       { stroke-dashoffset: 0; opacity: .85; }
@@ -310,40 +203,39 @@ body {
   96%, 100% { offset-distance: 100%; opacity: 0; }
 }
 
-.tl-rise { animation: tl-rise .55s cubic-bezier(.22, .61, .36, 1) both; }
+.tl-rise { animation: tl-rise .4s linear both; }
 .tl-live-dot { animation: tl-pulse 1.8s ease-in-out infinite; }
-/* `transform-box: fill-box` + a centred origin so an SVG circle scales
-   about itself rather than about the viewBox corner. */
 .tl-pop { animation: tl-pop .5s cubic-bezier(.22, .61, .36, 1) both; transform-box: fill-box; transform-origin: center; }
-.tl-pass { animation: tl-pass 9s linear infinite; color: var(--comp-fl1); }
+.tl-pass {
+  animation: tl-pass 9s linear infinite;
+  color: var(--comp-fl1);
+  filter: drop-shadow(0 0 4px var(--comp-fl1));
+}
 .tl-ball {
   animation: tl-ball 9s cubic-bezier(.4, .05, .35, 1) infinite;
   fill: var(--text);
-  /* `offset-path` is set per element (the path lives in the component). A
-     browser without offset-path support simply never moves the ball, which
-     the opacity keyframes then keep invisible — no broken dot parked in a
-     corner. */
+  filter: drop-shadow(0 0 5px var(--text));
   offset-rotate: 0deg;
 }
 .tl-sweep {
-  background: linear-gradient(100deg, transparent 0%, rgba(255, 255, 255, .06) 45%, transparent 90%);
+  background: linear-gradient(100deg, transparent 0%, rgba(0, 255, 255, .1) 45%, transparent 90%);
   width: 45%;
   animation: tl-sweep 9s ease-in-out infinite;
 }
 
-/* Hover and focus should feel like a surface responding, not a repaint.
-   Colour only — no transform, nothing that could shift a row's text. */
+/* Hover and focus: fast and unnatural, not eased — the brief's own words
+   ("digital, no organic easing curves"). */
 :where(a, button) {
-  transition: color .15s ease, background-color .15s ease, border-color .15s ease, opacity .15s ease;
+  transition: color .15s linear, background-color .15s linear, border-color .15s linear, opacity .15s linear, box-shadow .15s linear, transform .15s linear;
 }
 
-/* Visible focus for every interactive element, both themes. No --accent
-   left to reach for — chalk (--text) against turf/paper both clear >16:1,
-   the highest-contrast, always-available choice. */
+/* A neon ring, not a chalk one — the one universal accent every interactive
+   element gets regardless of local colour, so keyboard focus is never
+   ambiguous. */
 :where(a, button, input, select, [tabindex]):focus-visible {
-  outline: 2px solid var(--text);
+  outline: 2px solid var(--comp-pd);
   outline-offset: 2px;
-  border-radius: 4px;
+  box-shadow: 0 0 12px var(--comp-pd);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -352,21 +244,10 @@ body {
     animation-iteration-count: 1 !important;
     transition-duration: .01ms !important;
   }
-  /* Belt and braces for the two named animations above. The blanket rule
-     already collapses them to nothing, but it relies on the animation
-     running to its end state to leave an element visible — an entrance
-     animation that somehow didn't run would leave the board at opacity 0,
-     which is a blank page rather than a still one. These force the end
-     state outright. */
   .tl-rise { animation: none !important; opacity: 1 !important; transform: none !important; }
   .tl-live-dot { animation: none !important; opacity: 1 !important; transform: none !important; }
   .tl-pop { animation: none !important; opacity: 1 !important; transform: none !important; }
-  /* The sweep has nothing to resolve to — it is pure decoration, so it is
-     removed outright rather than parked mid-panel. */
   .tl-sweep { animation: none !important; display: none !important; }
-  /* The move resolves to its finished state: the passing line stays drawn,
-     which is a tactics diagram, and the ball — whose only content was the
-     travelling — goes. */
   .tl-pass { animation: none !important; stroke-dashoffset: 0 !important; opacity: .85 !important; }
   .tl-ball { animation: none !important; opacity: 0 !important; }
 }

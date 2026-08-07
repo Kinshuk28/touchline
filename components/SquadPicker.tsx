@@ -34,6 +34,7 @@ import { PositionBadge } from '@/components/fantasy/badges';
 import { ChipIcon } from '@/components/fantasy/icons';
 import { BudgetBar } from '@/components/fantasy/charts';
 import { CHIP_COLORS } from '@/lib/fantasy/fantasyColors';
+import { Button } from '@/components/ui/Button';
 
 /*
  * The picker.
@@ -737,12 +738,8 @@ function IconButton({
 function SaveButton({ disabled }: { disabled: boolean }) {
   const { pending } = useFormStatus();
   return (
-    <button
-      type="submit"
-      disabled={disabled || pending}
-      className="rounded-lg border border-border bg-surface-2 px-4 py-1.5 text-13 font-semibold hover:bg-surface disabled:cursor-not-allowed disabled:opacity-50"
-    >
+    <Button type="submit" disabled={disabled || pending} variant="secondary" size="sm">
       {pending ? 'Saving…' : 'Save squad'}
-    </button>
+    </Button>
   );
 }

@@ -1,5 +1,5 @@
-import Link from 'next/link';
 import { Mark } from '@/components/Mark';
+import { Button } from '@/components/ui/Button';
 
 /**
  * The move the ball plays, as one path: left-back to a midfielder, out to
@@ -59,19 +59,18 @@ export function FantasyTeaser({
   ];
 
   return (
-    <section className="relative overflow-hidden rounded-xl border border-border bg-surface">
-      {/* The floodlight sweep. Purely decorative, sits under the content,
-          and never touches text contrast — it is a 6%-white band moving
-          across an opaque surface. */}
+    <section className="relative overflow-hidden border-2 border-comp-pl bg-black/80 shadow-[0_0_30px_rgba(255,0,255,0.15)]">
+      {/* The floodlight sweep, now a cyan scanning beam. Purely decorative,
+          sits under the content, and never touches text contrast. */}
       <span className="tl-sweep pointer-events-none absolute inset-0 z-0" aria-hidden="true" />
 
       <div className="relative z-10 flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-6">
         <div className="max-w-prose">
-          <p className="flex items-center gap-2 text-11 font-bold uppercase tracking-[0.14em] text-muted">
+          <p className="flex items-center gap-2 text-11 font-bold uppercase tracking-[0.2em] text-comp-pd">
             <Mark size={14} />
             Fantasy
           </p>
-          <h2 className="mt-2 font-display text-24 font-extrabold leading-tight tracking-[-0.02em] sm:text-32">
+          <h2 className="mt-2 bg-gradient-to-r from-comp-sa via-comp-pl to-comp-pd bg-clip-text font-display text-24 font-black uppercase leading-tight tracking-[-0.01em] text-transparent drop-shadow-[0_0_30px_rgba(255,0,255,0.4)] sm:text-32">
             Build a Premier League squad.
           </h2>
           {/* Narrowed from "all five leagues" when the game was actually
@@ -84,12 +83,7 @@ export function FantasyTeaser({
             your side on real Premier League gameweeks as the results land.
           </p>
           <p className="mt-3">
-            <Link
-              href="/fantasy"
-              className="inline-block rounded-full border border-border px-3 py-1 font-mono text-11 uppercase tracking-wider hover:bg-surface-2"
-            >
-              Pick your squad →
-            </Link>
+            <Button href="/fantasy" size="sm">Pick your squad →</Button>
           </p>
         </div>
 
@@ -114,13 +108,13 @@ export function FantasyTeaser({
           ) : (
             <svg
               viewBox="0 0 320 180"
-              className="aspect-video w-full rounded-lg border border-border bg-surface-2"
+              className="aspect-video w-full border-2 border-comp-pd/50 bg-black"
               role="img"
               aria-label="Illustration: a 4-3-3 formation, with a passing move running from left-back to a shot on goal"
             >
-              {/* Pitch markings — the same chalk-on-turf vocabulary as the
-                  page background, at panel scale. */}
-              <g stroke="currentColor" fill="none" className="text-border">
+              {/* Pitch markings — neon wireframe on black, the same
+                  vocabulary as the grid floor behind the whole page. */}
+              <g stroke="currentColor" fill="none" className="text-comp-pl/50">
                 <rect x="8" y="8" width="304" height="164" rx="2" strokeWidth="1.5" />
                 <line x1="160" y1="8" x2="160" y2="172" strokeWidth="1.5" />
                 <circle cx="160" cy="90" r="30" strokeWidth="1.5" />
@@ -135,8 +129,8 @@ export function FantasyTeaser({
                   cx={cx}
                   cy={cy}
                   r="6"
-                  className="tl-pop fill-text"
-                  style={{ animationDelay: `${300 + i * 90}ms` }}
+                  className="tl-pop fill-comp-pd"
+                  style={{ animationDelay: `${300 + i * 90}ms`, filter: 'drop-shadow(0 0 4px var(--comp-pd))' }}
                 />
               ))}
 
