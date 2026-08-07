@@ -17,6 +17,7 @@ import {
   getTransferHistory,
   getChipsPlayed,
   getChipForGameweek,
+  getSeasonScore,
 } from '@/lib/fantasy/squadStore';
 import { transferAllowance } from '@/lib/fantasy/transfers';
 import { availableChips, type Chip } from '@/lib/fantasy/chips';
@@ -25,6 +26,7 @@ import { STARTING_SLOTS } from '@/lib/fantasy/squadRules';
 import { SquadPicker, type PickerInitial } from '@/components/SquadPicker';
 import { FantasyShell } from '@/components/FantasyShell';
 import { BoardPanel } from '@/components/BoardPanel';
+import { GameweekPointsChart } from '@/components/fantasy/charts';
 
 export const metadata: Metadata = {
   title: 'Fantasy — pick your squad — Touchline',
@@ -145,8 +147,17 @@ export default async function FantasyPage() {
     ? await getSquadForGameweek(session.accessToken, session.userId, season, gameweek - 2)
     : locked;
 
+  // A chart of a season nobody has played yet is an empty box, so it is
+  // fetched only once there is a squad to have a history at all.
+  const seasonScore = squadId === null ? null : await getSeasonScore(session.accessToken, session.userId, season);
+
   return (
     <FantasyShell email={session.email} current="squad">
+      {seasonScore && seasonScore.gameweeks.length > 0 && (
+        <BoardPanel label="Your season" meta={`${seasonScore.total} pts`}>
+          <GameweekPointsChart gameweeks={seasonScore.gameweeks} />
+        </BoardPanel>
+      )}
       <SquadPicker
         pool={priced}
         initial={initial}

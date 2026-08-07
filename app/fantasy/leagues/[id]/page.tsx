@@ -6,9 +6,10 @@ import { getFantasyCalendar, getFantasySeason, isMissingTable } from '@/lib/site
 import { getLeague, getLeagueScoringData } from '@/lib/fantasy/leagueStore';
 import { leaveLeagueAction } from '@/lib/fantasy/leagueActions';
 import { rankLeague, scoreSeason, type LeagueEntry } from '@/lib/fantasy/standings';
-import { CHIP_LABELS } from '@/lib/fantasy/chips';
 import { FantasyShell } from '@/components/FantasyShell';
 import { BoardPanel } from '@/components/BoardPanel';
+import { ChipBadge } from '@/components/fantasy/badges';
+import { TrophyIcon } from '@/components/fantasy/icons';
 
 export const dynamic = 'force-dynamic';
 
@@ -137,7 +138,15 @@ export default async function LeaguePage({ params }: { params: Promise<{ id: str
                     const isMe = row.userId === session.userId;
                     return (
                       <tr key={row.userId} className="border-b border-border last:border-b-0">
-                        <td className="px-2 py-1.5 font-mono tabular-nums text-muted">{row.rank}</td>
+                        <td className="px-2 py-1.5 font-mono tabular-nums text-muted">
+                          {/* The trophy sits beside the number, never instead
+                              of it — the rank itself is what actually says
+                              who is first. */}
+                          <span className="inline-flex items-center gap-1">
+                            {row.rank === 1 && <TrophyIcon size={12} />}
+                            {row.rank}
+                          </span>
+                        </td>
                         <td className="max-w-0 px-2 py-1.5">
                           {/* The name truncates; "(you)" does not. Letting
                               the marker be the first thing cut would hide
@@ -152,11 +161,7 @@ export default async function LeaguePage({ params }: { params: Promise<{ id: str
                                 that would otherwise look inexplicable — a
                                 tripled captain or a boosted bench is most of
                                 the difference between two managers' weeks. */}
-                            {latestChip.get(row.userId) && (
-                              <span className="shrink-0 rounded border border-border px-1 text-11 text-muted">
-                                {CHIP_LABELS[latestChip.get(row.userId)!]}
-                              </span>
-                            )}
+                            {latestChip.get(row.userId) && <ChipBadge chip={latestChip.get(row.userId)!} />}
                           </span>
                         </td>
                         <td className="px-2 py-1.5 text-right font-mono tabular-nums">

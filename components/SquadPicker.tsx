@@ -30,6 +30,10 @@ import {
 } from '@/lib/fantasy/transfers';
 import { CHIP_LABELS, describeChip, type Chip } from '@/lib/fantasy/chips';
 import type { PoolPlayer } from '@/lib/site/queries/fantasy';
+import { PositionBadge } from '@/components/fantasy/badges';
+import { ChipIcon } from '@/components/fantasy/icons';
+import { BudgetBar } from '@/components/fantasy/charts';
+import { CHIP_COLORS } from '@/lib/fantasy/fantasyColors';
 
 /*
  * The picker.
@@ -481,9 +485,7 @@ export function SquadPicker({
               const reason = blockedReason(player, squad, byId);
               return (
                 <li key={player.playerId} className="flex items-center gap-2 border-b border-border px-3 py-1.5 last:border-b-0">
-                  <span className="w-8 shrink-0 font-mono text-11 uppercase tracking-wider text-muted">
-                    {player.position}
-                  </span>
+                  <PositionBadge position={player.position} />
                   <span className="min-w-0 flex-1 truncate text-13 font-medium">{player.name}</span>
                   <span className="shrink-0 font-mono text-11 text-muted">{player.teamTla ?? '—'}</span>
                   {player.seasonPoints !== null && (
@@ -549,16 +551,18 @@ function ChipPicker({
         ) : (
           options.map((option) => {
             const active = chip === option;
+            const color = CHIP_COLORS[option];
             return (
               <button
                 key={option}
                 type="button"
                 aria-pressed={active}
                 onClick={() => onChip(active ? null : option)}
-                className={`rounded-md border px-2 py-1 text-11 font-semibold uppercase tracking-wider ${
-                  active ? 'border-text bg-surface-2 text-text' : 'border-border text-muted hover:text-text'
+                className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-11 font-semibold uppercase tracking-wider ${
+                  active ? `${color.borderClass} ${color.bgClass} ${color.textClass}` : 'border-border text-muted hover:text-text'
                 }`}
               >
+                <ChipIcon chip={option} size={12} />
                 {CHIP_LABELS[option]}
                 {/* The chosen chip says so in words as well as by weight —
                     "Wildcard ✓" survives being read without colour. */}
@@ -618,6 +622,7 @@ function SummaryBar({
           <dd className="text-18 font-bold tabular-nums">
             {remaining < 0 ? `${formatPrice(-remaining)} over` : formatPrice(remaining)}
           </dd>
+          <BudgetBar spent={spent} total={BUDGET_TENTHS} />
         </div>
         {formation && (
           <div>
@@ -675,7 +680,7 @@ function PickedRow({
       {order !== undefined && (
         <span className="w-4 shrink-0 font-mono text-11 tabular-nums text-muted">{order}</span>
       )}
-      <span className="w-8 shrink-0 font-mono text-11 uppercase tracking-wider text-muted">{player.position}</span>
+      <PositionBadge position={player.position} />
       <span className="min-w-0 flex-1 truncate text-13 font-medium">
         {player.name}
         {/* The armband is spelled out, not just implied by a highlighted
