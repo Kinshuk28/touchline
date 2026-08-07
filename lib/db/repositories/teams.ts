@@ -62,3 +62,25 @@ export async function getTeamsByLeagueId(leagueId: number): Promise<ClubIdentity
         .range(from, to),
   );
 }
+
+/**
+ * Every club's identity and current competition — what news tagging needs
+ * to match a headline and attribute it (lib/ingest/newsTagging.ts).
+ *
+ * All 110 rows, including the 14 with a null `league_id` retained for
+ * historical tables: a headline about a relegated club is still about that
+ * club, and tagging it is what makes its club page work.
+ */
+export async function getAllClubIdentities(): Promise<Array<{
+  id: number;
+  name: string;
+  short_name: string | null;
+  tla: string | null;
+  league_id: number | null;
+}>> {
+  const { data, error } = await serviceClient()
+    .from('teams')
+    .select('id,name,short_name,tla,league_id');
+  if (error) throw new Error(`getAllClubIdentities: ${error.message}`);
+  return (data ?? []) as Array<{ id: number; name: string; short_name: string | null; tla: string | null; league_id: number | null }>;
+}

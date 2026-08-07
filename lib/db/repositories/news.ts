@@ -32,6 +32,15 @@ type NewsRow = {
   published_at: string | null;
   categories: string[];
   content_hash: string;
+  /**
+   * Which clubs the headline names and which competition they play in —
+   * computed by lib/ingest/newsTagging.ts before this is called. Both
+   * columns have existed since 0001_init.sql and were never written; until
+   * they were, "news about this club" could only be recomputed at render
+   * time from a fixed-size page of headlines.
+   */
+  team_ids: number[];
+  league_id: number | null;
 };
 
 /**
@@ -53,7 +62,15 @@ function isNotNullViolation(error: { code?: string; message: string }): boolean 
   return error.code === '23502' || /null value in column "published_at"/i.test(error.message);
 }
 
-export async function upsertNewsItems(items: NewsItem[]): Promise<number> {
+/**
+ * A fetched item plus the tags `lib/ingest/newsTagging.ts` derived for it.
+ * Optional so an untagged caller still type-checks and simply stores the
+ * schema defaults — an empty array and a null competition, which is
+ * exactly what the column held before tagging existed.
+ */
+export type TaggedNewsItem = NewsItem & { teamIds?: number[]; leagueId?: number | null };
+
+export async function upsertNewsItems(items: TaggedNewsItem[]): Promise<number> {
   if (items.length === 0) return 0;
   const deduped = dedupeByKey(items, (i) => i.contentHash);
   const rows: NewsRow[] = deduped.map((i) => ({
@@ -65,6 +82,8 @@ export async function upsertNewsItems(items: NewsItem[]): Promise<number> {
     published_at: i.publishedAt,
     categories: i.categories,
     content_hash: i.contentHash,
+    team_ids: i.teamIds ?? [],
+    league_id: i.leagueId ?? null,
   }));
 
   const attempt = (r: NewsRow[]) =>

@@ -22,8 +22,16 @@ import { isPromoTitle } from '@/lib/site/promoTitles';
  * unanchored regex anywhere below.
  */
 
-/** The three name columns this matcher reads. Any row shape carrying them works — `TeamLite`, `ClubRow`. */
+/**
+ * The three name columns this matcher reads. Any row shape carrying them
+ * works — `TeamLite`, `ClubRow`.
+ *
+ * `id` is optional and only needed by callers that want to know *which*
+ * club a headline named rather than merely that it named one — the news
+ * ingest tagger (lib/ingest/newsTagging.ts) does; the landing rails do not.
+ */
 export interface ClubNameSource {
+  id?: number;
   name: string;
   short_name: string | null;
   tla: string | null;
@@ -74,6 +82,8 @@ const CONNECTOR_TOKENS = new Set(['de', 'del', 'di', 'da', 'du', 'des']);
 interface Alias {
   tokens: string[];
   display: string[];
+  /** The club this alias belongs to, when the caller supplied an id. */
+  clubId?: number;
 }
 
 export interface ClubIndex {
@@ -81,8 +91,18 @@ export interface ClubIndex {
   phrases: Alias[];
   /** Single-token aliases — matched case-sensitively (see `isRelevantHeadline`). */
   singles: Alias[];
-  /** Three-letter codes, matched as a case-sensitive whole token. */
-  tlas: Set<string>;
+  /**
+   * Three-letter codes, matched as a case-sensitive whole token, mapped to
+   * the clubs that carry them. A `Map` rather than a `Set` so
+   * `matchingClubIds` can answer *which* club a code belongs to; membership
+   * tests (`isRelevantHeadline`) read it exactly as they read a Set.
+   *
+   * The value is a list because two clubs can share a TLA — "FCB" is both
+   * Barcelona and Bayern in the stored data. A headline containing it names
+   * one of them and this cannot tell which, so it tags neither: see
+   * `matchingClubIds`.
+   */
+  tlas: Map<string, number[]>;
 }
 
 /** Lower-cased, diacritic-stripped, punctuation-split word tokens. `"Bayer 04 Leverkusen"` → `['bayer', '04', 'leverkusen']`. */
@@ -110,7 +130,7 @@ function caseTokens(text: string): string[] {
  * (`NOISE_TOKENS`); a one-letter remainder is discarded outright rather
  * than matched, since a single letter is never a usable club reference.
  */
-function toAlias(raw: string | null | undefined): Alias | null {
+function toAlias(raw: string | null | undefined, clubId?: number): Alias | null {
   if (!raw) return null;
   const lower = normalizeTokens(raw);
   const cased = caseTokens(raw);
@@ -126,7 +146,7 @@ function toAlias(raw: string | null | undefined): Alias | null {
   }
   if (tokens.length === 0) return null;
   if (tokens.length === 1 && tokens[0]!.length < 3) return null;
-  return { tokens, display };
+  return { tokens, display, clubId };
 }
 
 function aliasKey(alias: Alias): string {
@@ -141,11 +161,11 @@ function aliasKey(alias: Alias): string {
 export function buildClubIndex(clubs: readonly ClubNameSource[]): ClubIndex {
   const phrases = new Map<string, Alias>();
   const singles = new Map<string, Alias>();
-  const tlas = new Set<string>();
+  const tlas = new Map<string, number[]>();
 
   for (const club of clubs) {
     for (const raw of [club.name, club.short_name]) {
-      const alias = toAlias(raw);
+      const alias = toAlias(raw, club.id);
       if (!alias) continue;
       const target = alias.tokens.length > 1 ? phrases : singles;
       // First writer wins: `name` before `short_name`, so a club whose two
@@ -155,7 +175,11 @@ export function buildClubIndex(clubs: readonly ClubNameSource[]): ClubIndex {
     // A TLA is only a TLA if it looks like one — three upper-case letters.
     // Anything else stored in that column is ignored rather than matched
     // loosely.
-    if (club.tla && /^[A-Z]{3}$/.test(club.tla)) tlas.add(club.tla);
+    if (club.tla && /^[A-Z]{3}$/.test(club.tla)) {
+      const owners = tlas.get(club.tla) ?? [];
+      if (club.id !== undefined) owners.push(club.id);
+      tlas.set(club.tla, owners);
+    }
   }
 
   return { phrases: [...phrases.values()], singles: [...singles.values()], tlas };
@@ -255,4 +279,47 @@ export function orderByRelevance<T extends Pick<NewsRow, 'title'>>(
   for (const item of items) buckets[rank(item, index)]!.push(item);
   const ordered = buckets.flat();
   return limit === undefined ? ordered : ordered.slice(0, limit);
+}
+
+/**
+ * *Which* clubs a headline names — the ids of every club whose alias
+ * matched, deduped, in no particular order.
+ *
+ * `isRelevantHeadline` answers "is this about our leagues at all", which is
+ * all the landing rails need. This answers "which clubs is it about", which
+ * is what tagging a stored row requires (lib/ingest/newsTagging.ts).
+ *
+ * An ambiguous TLA tags nothing. Two clubs in the stored data share "FCB"
+ * (Barcelona and Bayern), so a headline containing it names one of them and
+ * this cannot tell which — tagging both would make a Bayern story appear on
+ * Barcelona's page, and tagging one at random is worse. Full and short
+ * names are unambiguous by construction (first writer wins in
+ * `buildClubIndex`), so they always tag.
+ *
+ * Clubs supplied without an `id` contribute to `isRelevantHeadline` but
+ * never to this — there is nothing to return for them.
+ */
+export function matchingClubIds(title: string, index: ClubIndex): number[] {
+  const lower = normalizeTokens(title);
+  if (lower.length === 0) return [];
+  const compact = lower.filter((t) => !CONNECTOR_TOKENS.has(t));
+  const ids = new Set<number>();
+
+  for (const alias of index.phrases) {
+    if (alias.clubId === undefined) continue;
+    if (containsRun(lower, alias.tokens) || containsRun(compact, alias.tokens)) ids.add(alias.clubId);
+  }
+
+  const cased = caseTokens(title);
+  for (const alias of index.singles) {
+    if (alias.clubId === undefined) continue;
+    if (containsRun(cased, alias.display)) ids.add(alias.clubId);
+  }
+  for (const token of cased) {
+    const owners = index.tlas.get(token);
+    // Exactly one owner, or the code says nothing usable.
+    if (owners && owners.length === 1) ids.add(owners[0]!);
+  }
+
+  return [...ids];
 }
