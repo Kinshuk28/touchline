@@ -57,6 +57,27 @@ const RUNS_VIEW = 'ingest_run_public';
  * recently is in here; one that hasn't is absent, and absence is exactly
  * what the page needs to report.
  */
+/**
+ * "The view isn't there, or isn't readable" — i.e. migration 0005 has not
+ * been applied — as opposed to a real query failure.
+ *
+ * Two error *layers* produce this, which is the part that caught me out.
+ * Postgres answers an unknown relation with 42P01 and a forbidden one with
+ * 42501, but PostgREST resolves relations against its own schema cache
+ * first and answers PGRST205 ("Could not find the table 'public.x' in the
+ * schema cache") before Postgres is ever asked. The local mock modelled the
+ * Postgres layer, so the Postgres codes were handled and the PostgREST one
+ * went straight to `throw` — and took the build down (CI, 2026-08-07).
+ *
+ * Matched on codes first and message text only as a backstop, since the
+ * message wording is the least stable part of either contract.
+ */
+function isMissingOrForbidden(error: { code?: string; message: string }): boolean {
+  const code = error.code ?? '';
+  if (['42P01', '42501', 'PGRST205', 'PGRST106', 'PGRST301'].includes(code)) return true;
+  return /schema cache|does not exist|permission denied/i.test(error.message);
+}
+
 export async function getLatestRunPerJob(limit = 200): Promise<IngestRun[] | null> {
   const { data, error } = await readClient()
     .from(RUNS_VIEW)
@@ -64,15 +85,8 @@ export async function getLatestRunPerJob(limit = 200): Promise<IngestRun[] | nul
     .order('started_at', { ascending: false })
     .limit(limit);
 
-  // 42501 permission denied, 42P01 undefined table — both mean "0005 has
-  // not been applied", which is a state this page renders rather than a
-  // failure it crashes on. Anything else is a real error and still throws.
-  if (error) {
-    if (error.code === '42501' || error.code === '42P01' || /permission denied|does not exist/i.test(error.message)) {
-      return null;
-    }
-    throw new Error(`getLatestRunPerJob: ${error.message}`);
-  }
+  if (error && isMissingOrForbidden(error)) return null;
+  if (error) throw new Error(`getLatestRunPerJob: ${error.message}`);
 
   const latest = new Map<string, IngestRun>();
   for (const run of (data ?? []) as IngestRun[]) {
