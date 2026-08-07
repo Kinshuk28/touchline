@@ -58,6 +58,60 @@ const LIST_LIMIT = 50;
  */
 type SortKey = 'price-desc' | 'price-asc' | 'points' | 'name';
 
+/**
+ * The squad, as one value.
+ *
+ * Deliberately not four `useState` calls. `blockedReason` has to be asked
+ * before every add, and asking it against the last *rendered* state means a
+ * burst of clicks landing inside one frame all pass a check made against the
+ * squad as it was before any of them — enough to walk past the budget and the
+ * club limit and end up with a squad the picker itself calls illegal. Held as
+ * one object, every handler is a single functional update that sees the
+ * latest state, whatever the click rate.
+ */
+interface SquadState {
+  starters: number[];
+  bench: number[];
+  captainId: number | null;
+  viceCaptainId: number | null;
+}
+
+type Roster = ReadonlyMap<number, PoolPlayer>;
+
+function playersIn(ids: readonly number[], byId: Roster): PoolPlayer[] {
+  return ids.flatMap((id) => {
+    const player = byId.get(id);
+    return player ? [player] : [];
+  });
+}
+
+function squadPlayers(state: SquadState, byId: Roster): PoolPlayer[] {
+  return playersIn([...state.starters, ...state.bench], byId);
+}
+
+/** Why this player cannot be added to *this* squad, or null when they can. */
+function blockedReason(player: PoolPlayer, state: SquadState, byId: Roster): string | null {
+  const selected = squadPlayers(state, byId);
+  if (state.starters.includes(player.playerId) || state.bench.includes(player.playerId)) {
+    return 'Already picked';
+  }
+  if (selected.length >= SQUAD_SIZE) return 'Squad full';
+
+  const counts = countByPosition(selected);
+  if (counts[player.position] >= SQUAD_SHAPE[player.position]) {
+    return `You already have ${SQUAD_SHAPE[player.position]} ${POSITION_LABELS[player.position].toLowerCase()}`;
+  }
+
+  const remaining = BUDGET_TENTHS - totalCost(selected);
+  if (player.priceTenths > remaining) return `${formatPrice(player.priceTenths - remaining)} short`;
+
+  if (player.teamId !== null) {
+    const fromClub = selected.filter((p) => p.teamId === player.teamId).length;
+    if (fromClub >= MAX_PER_CLUB) return `Already ${MAX_PER_CLUB} from ${player.teamName ?? 'that club'}`;
+  }
+  return null;
+}
+
 export function SquadPicker({
   pool,
   initial,
@@ -69,10 +123,13 @@ export function SquadPicker({
   gameweekLabel: string | null;
 }) {
   const [name, setName] = useState(initial?.name ?? 'My squad');
-  const [starters, setStarters] = useState<number[]>(initial?.starters ?? []);
-  const [bench, setBench] = useState<number[]>(initial?.bench ?? []);
-  const [captainId, setCaptainId] = useState<number | null>(initial?.captainId ?? null);
-  const [viceCaptainId, setViceCaptainId] = useState<number | null>(initial?.viceCaptainId ?? null);
+  const [squad, setSquad] = useState<SquadState>({
+    starters: initial?.starters ?? [],
+    bench: initial?.bench ?? [],
+    captainId: initial?.captainId ?? null,
+    viceCaptainId: initial?.viceCaptainId ?? null,
+  });
+  const { starters, bench, captainId, viceCaptainId } = squad;
 
   const [tab, setTab] = useState<FantasyPosition | 'ALL'>('ALL');
   const [query, setQuery] = useState('');
@@ -80,25 +137,12 @@ export function SquadPicker({
 
   const [saveState, saveAction] = useActionState(saveSquadAction, INITIAL_SAVE);
 
-  const byId = useMemo(() => new Map(pool.map((p) => [p.playerId, p])), [pool]);
-  const selectedIds = useMemo(() => [...starters, ...bench], [starters, bench]);
-  const selected = useMemo(
-    () => selectedIds.flatMap((id) => { const p = byId.get(id); return p ? [p] : []; }),
-    [selectedIds, byId],
-  );
+  const byId = useMemo<Roster>(() => new Map(pool.map((p) => [p.playerId, p])), [pool]);
+  const selected = useMemo(() => squadPlayers(squad, byId), [squad, byId]);
+  const startingPlayers = useMemo(() => playersIn(starters, byId), [starters, byId]);
 
   const spent = totalCost(selected);
   const remaining = BUDGET_TENTHS - spent;
-  const squadCounts = countByPosition(selected);
-  const startingPlayers = starters.flatMap((id) => { const p = byId.get(id); return p ? [p] : []; });
-  const clubTally = useMemo(() => {
-    const counts = new Map<number, number>();
-    for (const p of selected) {
-      if (p.teamId === null) continue;
-      counts.set(p.teamId, (counts.get(p.teamId) ?? 0) + 1);
-    }
-    return counts;
-  }, [selected]);
 
   const problems = useMemo(() => {
     const nameOf = (id: number) => pool.find((p) => p.teamId === id)?.teamName ?? `club ${id}`;
@@ -116,78 +160,84 @@ export function SquadPicker({
 
   const isLegal = problems.length === 0 && name.trim().length > 0;
 
-  /** Why this player cannot be added, or null when they can. */
-  function blockedReason(player: PoolPlayer): string | null {
-    if (selectedIds.includes(player.playerId)) return 'Already picked';
-    if (selected.length >= SQUAD_SIZE) return 'Squad full';
-    if (squadCounts[player.position] >= SQUAD_SHAPE[player.position]) {
-      return `You already have ${SQUAD_SHAPE[player.position]} ${POSITION_LABELS[player.position].toLowerCase()}`;
-    }
-    if (player.priceTenths > remaining) {
-      return `${formatPrice(player.priceTenths - remaining)} short`;
-    }
-    if (player.teamId !== null && (clubTally.get(player.teamId) ?? 0) >= MAX_PER_CLUB) {
-      return `Already ${MAX_PER_CLUB} from ${player.teamName ?? 'that club'}`;
-    }
-    return null;
-  }
-
   function add(player: PoolPlayer) {
-    if (blockedReason(player) !== null) return;
-    // Into the eleven when the eleven can still *finish* legal with them in
-    // it, onto the bench otherwise. Checking only this position's maximum
-    // is not enough: eleven keepers, defenders and midfielders all sit
-    // inside their own limits and leave no room for the forward every legal
-    // formation requires. Either way the manager can move anyone afterwards;
-    // this is just the arrangement that needs the fewest corrections.
-    const withPlayer = countByPosition(startingPlayers);
-    withPlayer[player.position] += 1;
-    const canStart = starters.length < STARTING_SLOTS && canStillCompleteFormation(withPlayer);
-    if (canStart) setStarters((s) => [...s, player.playerId]);
-    else if (bench.length < SQUAD_SIZE - STARTING_SLOTS) setBench((b) => [...b, player.playerId]);
-    else setStarters((s) => [...s, player.playerId]);
+    setSquad((current) => {
+      // Re-checked here, not just at the call site: this is the copy of the
+      // check that cannot be stale.
+      if (blockedReason(player, current, byId) !== null) return current;
+
+      // Into the eleven when the eleven can still *finish* legal with them
+      // in it, onto the bench otherwise. Checking only this position's
+      // maximum is not enough: eleven keepers, defenders and midfielders all
+      // sit inside their own limits and leave no room for the forward every
+      // legal formation requires. Either way the manager can move anyone
+      // afterwards; this is just the arrangement needing fewest corrections.
+      const withPlayer = countByPosition(playersIn(current.starters, byId));
+      withPlayer[player.position] += 1;
+      const canStart = current.starters.length < STARTING_SLOTS && canStillCompleteFormation(withPlayer);
+
+      if (canStart || current.bench.length >= SQUAD_SIZE - STARTING_SLOTS) {
+        return { ...current, starters: [...current.starters, player.playerId] };
+      }
+      return { ...current, bench: [...current.bench, player.playerId] };
+    });
   }
 
   function remove(id: number) {
-    setStarters((s) => s.filter((x) => x !== id));
-    setBench((b) => b.filter((x) => x !== id));
-    if (captainId === id) setCaptainId(null);
-    if (viceCaptainId === id) setViceCaptainId(null);
+    setSquad((current) => ({
+      starters: current.starters.filter((x) => x !== id),
+      bench: current.bench.filter((x) => x !== id),
+      captainId: current.captainId === id ? null : current.captainId,
+      viceCaptainId: current.viceCaptainId === id ? null : current.viceCaptainId,
+    }));
   }
 
   function toggleStarting(id: number) {
-    if (starters.includes(id)) {
-      setStarters((s) => s.filter((x) => x !== id));
-      setBench((b) => [...b, id]);
+    setSquad((current) => {
+      if (!current.starters.includes(id)) {
+        return {
+          ...current,
+          bench: current.bench.filter((x) => x !== id),
+          starters: [...current.starters, id],
+        };
+      }
       // An armband on the bench doubles nothing, so it is dropped rather
       // than left somewhere it cannot pay.
-      if (captainId === id) setCaptainId(null);
-      if (viceCaptainId === id) setViceCaptainId(null);
-    } else {
-      setBench((b) => b.filter((x) => x !== id));
-      setStarters((s) => [...s, id]);
-    }
+      return {
+        starters: current.starters.filter((x) => x !== id),
+        bench: [...current.bench, id],
+        captainId: current.captainId === id ? null : current.captainId,
+        viceCaptainId: current.viceCaptainId === id ? null : current.viceCaptainId,
+      };
+    });
   }
 
   function moveBench(id: number, delta: -1 | 1) {
-    setBench((b) => {
-      const i = b.indexOf(id);
+    setSquad((current) => {
+      const i = current.bench.indexOf(id);
       const j = i + delta;
-      if (i < 0 || j < 0 || j >= b.length) return b;
-      const next = [...b];
+      if (i < 0 || j < 0 || j >= current.bench.length) return current;
+      const next = [...current.bench];
       [next[i], next[j]] = [next[j]!, next[i]!];
-      return next;
+      return { ...current, bench: next };
     });
   }
 
   function setArmband(id: number, role: 'C' | 'V') {
-    if (role === 'C') {
-      setCaptainId((current) => (current === id ? null : id));
-      if (viceCaptainId === id) setViceCaptainId(null);
-    } else {
-      setViceCaptainId((current) => (current === id ? null : id));
-      if (captainId === id) setCaptainId(null);
-    }
+    setSquad((current) => {
+      if (role === 'C') {
+        return {
+          ...current,
+          captainId: current.captainId === id ? null : id,
+          viceCaptainId: current.viceCaptainId === id ? null : current.viceCaptainId,
+        };
+      }
+      return {
+        ...current,
+        viceCaptainId: current.viceCaptainId === id ? null : id,
+        captainId: current.captainId === id ? null : current.captainId,
+      };
+    });
   }
 
   const visible = useMemo(() => {
@@ -370,7 +420,7 @@ export function SquadPicker({
               stacked and the page's own scroll is the right one. */}
           <ul className="lg:max-h-[70dvh] lg:overflow-y-auto">
             {visible.rows.map((player) => {
-              const reason = blockedReason(player);
+              const reason = blockedReason(player, squad, byId);
               return (
                 <li key={player.playerId} className="flex items-center gap-2 border-b border-border px-3 py-1.5 last:border-b-0">
                   <span className="w-8 shrink-0 font-mono text-11 uppercase tracking-wider text-muted">

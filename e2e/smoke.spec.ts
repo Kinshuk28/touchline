@@ -262,3 +262,17 @@ test('the Fantasy route is reachable from the header nav', async ({ page }) => {
   await nav.getByRole('link', { name: 'Fantasy' }).click();
   await expect(page).toHaveURL(/\/fantasy(\/sign-in)?$/);
 });
+
+// Leagues sit behind the same sign-in wall as the squad. An anonymous smoke
+// run can assert exactly that, and it is worth asserting: a leagues page that
+// rendered anything at all to a signed-out visitor would be leaking one
+// person's league membership to everyone.
+test('the Leagues route sends a signed-out visitor to sign in', async ({ page }) => {
+  await page.goto('/fantasy/leagues');
+  await expect(page).toHaveURL(/\/fantasy\/sign-in$/);
+});
+
+test('an individual league is not readable signed out', async ({ page }) => {
+  await page.goto('/fantasy/leagues/00000000-0000-0000-0000-000000000000');
+  await expect(page).toHaveURL(/\/fantasy\/sign-in$/);
+});
