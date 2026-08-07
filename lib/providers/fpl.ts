@@ -1,4 +1,5 @@
 const BOOTSTRAP = 'https://fantasy.premierleague.com/api/bootstrap-static/';
+const EVENT_LIVE = (event: number) => `https://fantasy.premierleague.com/api/event/${event}/live/`;
 
 const POSITIONS: Record<number, string> = {
   1: 'Goalkeeper',
@@ -71,6 +72,99 @@ export class FplClient {
   async getPlayers(): Promise<FplPlayer[]> {
     return (await this.getBootstrap()).players;
   }
+
+  /**
+   * One gameweek's stat line for every player, from `event/{id}/live`.
+   *
+   * This is the endpoint Phase C's fantasy scoring rests on, and the reason
+   * the game is Premier League only: nothing equivalent exists for the other
+   * four competitions on any free tier, and season totals cannot be
+   * differenced into weekly points (an ingest gap becomes a zero-point week,
+   * an upstream correction a negative one — see the Phase C spec).
+   *
+   * `totalPoints` is FPL's own figure, stored as published rather than
+   * recomputed here. Their scoring rules change between seasons — defensive
+   * contribution points arrived in 2025-26 — and a reimplementation would be
+   * a second source of truth that silently drifts from the first. The
+   * component stats come along so a score can be *explained* ("2 goals, a
+   * clean sheet, 3 bonus"), never so it can be re-derived.
+   *
+   * One request per gameweek, unmetered, and only ever called for a
+   * gameweek that has started.
+   */
+  async getGameweekLive(event: number): Promise<FplLiveLine[]> {
+    if (!Number.isInteger(event) || event < 1) {
+      throw new Error(`FPL getGameweekLive: gameweek must be a positive integer, got ${event}`);
+    }
+    const res = await this.fetchImpl(EVENT_LIVE(event));
+    if (!res.ok) throw new Error(`FPL API ${res.status} for event/${event}/live`);
+    const data = (await res.json()) as { elements?: FplLiveElement[] };
+    return (data.elements ?? []).map((e) => mapLiveLine(e, event));
+  }
+}
+
+/**
+ * One player's gameweek. Every field is what FPL published; `null` means the
+ * payload didn't carry it, never a substituted zero — the same rule
+ * `mapPlayer` follows above and for the same reason.
+ */
+export interface FplLiveLine {
+  fplId: number;
+  gameweek: number;
+  minutes: number | null;
+  goals: number | null;
+  assists: number | null;
+  cleanSheets: number | null;
+  goalsConceded: number | null;
+  ownGoals: number | null;
+  penaltiesSaved: number | null;
+  penaltiesMissed: number | null;
+  yellowCards: number | null;
+  redCards: number | null;
+  saves: number | null;
+  bonus: number | null;
+  /** FPL's own total for the gameweek. Stored as published, never recomputed. */
+  totalPoints: number | null;
+}
+
+function mapLiveLine(e: FplLiveElement, event: number): FplLiveLine {
+  const s = e.stats ?? {};
+  return {
+    fplId: e.id,
+    gameweek: event,
+    minutes: s.minutes ?? null,
+    goals: s.goals_scored ?? null,
+    assists: s.assists ?? null,
+    cleanSheets: s.clean_sheets ?? null,
+    goalsConceded: s.goals_conceded ?? null,
+    ownGoals: s.own_goals ?? null,
+    penaltiesSaved: s.penalties_saved ?? null,
+    penaltiesMissed: s.penalties_missed ?? null,
+    yellowCards: s.yellow_cards ?? null,
+    redCards: s.red_cards ?? null,
+    saves: s.saves ?? null,
+    bonus: s.bonus ?? null,
+    totalPoints: s.total_points ?? null,
+  };
+}
+
+interface FplLiveElement {
+  id: number;
+  stats?: {
+    minutes?: number;
+    goals_scored?: number;
+    assists?: number;
+    clean_sheets?: number;
+    goals_conceded?: number;
+    own_goals?: number;
+    penalties_saved?: number;
+    penalties_missed?: number;
+    yellow_cards?: number;
+    red_cards?: number;
+    saves?: number;
+    bonus?: number;
+    total_points?: number;
+  };
 }
 
 function mapPlayer(e: FplElement): FplPlayer {

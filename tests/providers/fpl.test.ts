@@ -154,3 +154,76 @@ describe('FplClient.getBootstrap', () => {
     expect(players.length).toBeGreaterThan(400);
   });
 });
+
+describe('FplClient.getGameweekLive', () => {
+  const line = {
+    id: 11,
+    stats: {
+      minutes: 90, goals_scored: 2, assists: 1, clean_sheets: 1, goals_conceded: 0,
+      own_goals: 0, penalties_saved: 0, penalties_missed: 0, yellow_cards: 1,
+      red_cards: 0, saves: 0, bonus: 3, total_points: 16,
+    },
+  };
+
+  it('maps one gameweek stat line, keeping FPL total_points as published', async () => {
+    const [mapped] = await clientFor({ elements: [line] }).getGameweekLive(7);
+    expect(mapped).toEqual({
+      fplId: 11, gameweek: 7, minutes: 90, goals: 2, assists: 1, cleanSheets: 1,
+      goalsConceded: 0, ownGoals: 0, penaltiesSaved: 0, penaltiesMissed: 0,
+      yellowCards: 1, redCards: 0, saves: 0, bonus: 3, totalPoints: 16,
+    });
+  });
+
+  it('does not recompute total_points from the component stats', async () => {
+    // FPL's own rules change between seasons; a figure derived here would be
+    // a second source of truth. Given a total that no rule set would produce
+    // from these components, the stored figure is still FPL's.
+    const [mapped] = await clientFor({
+      elements: [{ id: 12, stats: { ...line.stats, total_points: 99 } }],
+    }).getGameweekLive(7);
+    expect(mapped!.totalPoints).toBe(99);
+  });
+
+  it('returns null, not 0, for stats the payload omits', async () => {
+    const [mapped] = await clientFor({ elements: [{ id: 13, stats: { minutes: 45 } }] }).getGameweekLive(1);
+    expect(mapped!.minutes).toBe(45);
+    expect(mapped!.totalPoints).toBeNull();
+    expect(mapped!.goals).toBeNull();
+    expect(mapped!.bonus).toBeNull();
+  });
+
+  it('keeps a published zero as 0', async () => {
+    const [mapped] = await clientFor({
+      elements: [{ id: 14, stats: { minutes: 0, total_points: 0 } }],
+    }).getGameweekLive(1);
+    expect(mapped!.minutes).toBe(0);
+    expect(mapped!.totalPoints).toBe(0);
+  });
+
+  it('stamps the requested gameweek onto every line', async () => {
+    const lines = await clientFor({ elements: [{ id: 1 }, { id: 2 }] }).getGameweekLive(38);
+    expect(lines.map((l) => l.gameweek)).toEqual([38, 38]);
+  });
+
+  it('returns an empty list when the payload carries no elements', async () => {
+    expect(await clientFor({}).getGameweekLive(1)).toEqual([]);
+  });
+
+  it('rejects a gameweek that is not a positive integer, before making a request', async () => {
+    let calls = 0;
+    const fetchImpl = (async () => {
+      calls += 1;
+      return new Response('{}', { status: 200 });
+    }) as unknown as typeof fetch;
+    const client = new FplClient({ fetchImpl });
+    for (const bad of [0, -1, 1.5, Number.NaN]) {
+      await expect(client.getGameweekLive(bad)).rejects.toThrow(/positive integer/);
+    }
+    expect(calls).toBe(0);
+  });
+
+  it('throws on a non-2xx response', async () => {
+    const fetchImpl = (async () => new Response('down', { status: 500 })) as unknown as typeof fetch;
+    await expect(new FplClient({ fetchImpl }).getGameweekLive(3)).rejects.toThrow(/500/);
+  });
+});
