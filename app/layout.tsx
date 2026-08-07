@@ -60,6 +60,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <a href="/clubs" className="hover:text-text">Clubs</a>
               <a href="/calendar" className="hover:text-text">Calendar</a>
               <a href="/transfers" className="hover:text-text">Transfers</a>
+              <a href="/search" className="hover:text-text">Search</a>
             </nav>
           </div>
         </header>

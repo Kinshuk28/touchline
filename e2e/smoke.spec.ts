@@ -173,6 +173,43 @@ test('an unknown player slug is a 404, not a crash', async ({ page }) => {
   expect(res?.status()).toBe(404);
 });
 
+// `/search` is a plain GET form: the results page is a URL, so it survives
+// a reload and can be shared — the same property `?leagues=` gives /scores.
+test('search finds a club by name and the result URL is shareable', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('navigation', { name: 'Primary' }).getByRole('link', { name: 'Search' }).click();
+  await expect(page).toHaveURL(/\/search$/);
+
+  await page.getByRole('searchbox').fill('manchester');
+  await page.getByRole('button', { name: 'Search' }).click();
+  await expect(page).toHaveURL(/\/search\?q=manchester/);
+  await expect(page.getByRole('heading', { name: 'Clubs', exact: true })).toBeVisible();
+
+  // Straight to the club page from a result.
+  await page.getByRole('link', { name: /Manchester City/i }).first().click();
+  await expect(page).toHaveURL(/\/team\/[a-z0-9-]+$/);
+});
+
+test('search says so when nothing matches, rather than rendering an empty page', async ({ page }) => {
+  await page.goto('/search?q=zzzznotaclub');
+  await expect(page.getByText(/Nothing matches/i)).toBeVisible();
+  // And a query too short to be useful is refused with a reason.
+  await page.goto('/search?q=a');
+  await expect(page.getByText(/at least 2 characters/i)).toBeVisible();
+});
+
+// `/status` is the page that answers "is the data still arriving?" — the
+// one question no other route can answer, since stale data still renders.
+test('the status page reports ingest health and data freshness', async ({ page }) => {
+  await page.goto('/status');
+  await expect(page.getByRole('heading', { name: 'Status', level: 1 })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Ingest jobs', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Data freshness', exact: true })).toBeVisible();
+  // Every job row names the table it feeds from; at minimum the fixtures
+  // freshness line is always present.
+  await expect(page.getByText('fixtures', { exact: true })).toBeVisible();
+});
+
 test('the theme toggle persists across a reload', async ({ page }) => {
   await page.goto('/');
   // ThemeToggle renders '·' until its mount effect resolves the theme
