@@ -9,12 +9,18 @@ import { userClient } from '@/lib/auth/session';
  * glance which client a query is using, and makes "the site never writes"
  * still true of `lib/site/`.
  *
- * NOTHING HERE IS THE SECURITY BOUNDARY. Every function takes a `userId`,
- * but no query trusts it: the access token is verified by Postgres and the
- * row-level security policies in supabase/migrations/0008 restrict every
- * statement to `auth.uid() = user_id`. The `userId` argument exists to fill
- * in the column on insert, and a wrong one is rejected by the `with check`
- * clause rather than quietly writing somebody else's row.
+ * THE SECURITY BOUNDARY IS POSTGRES, NOT THIS FILE. The access token is
+ * verified by the database and the policies in supabase/migrations/0008
+ * restrict every statement to `auth.uid() = user_id`. A wrong `userId`
+ * passed to `saveSquad` is rejected by the `with check` clause rather than
+ * quietly writing somebody else's row.
+ *
+ * The reads below *also* filter on `user_id` explicitly. That is redundant
+ * with the policy, deliberately: it costs one indexed predicate, and it
+ * means a future policy edit that widens `fantasy_squad` — 0009 widens it
+ * to league-mates, and there will be more — cannot silently turn "your
+ * squad" into "somebody's squad". A query that says which rows it wants is
+ * also a query whose intent survives being read a year later.
  */
 
 export interface StoredPick {
@@ -53,6 +59,7 @@ export interface SquadInput {
  */
 export async function getSquadForGameweek(
   accessToken: string,
+  userId: string,
   season: number,
   gameweek: number,
 ): Promise<StoredSquad | null> {
@@ -61,6 +68,7 @@ export async function getSquadForGameweek(
   const { data: squads, error: squadError } = await db
     .from('fantasy_squad')
     .select('id,name,season')
+    .eq('user_id', userId)
     .eq('season', season)
     .limit(1);
   if (squadError) throw new Error(`getSquadForGameweek (squad): ${squadError.message}`);

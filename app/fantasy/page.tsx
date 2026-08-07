@@ -2,7 +2,6 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import type { Metadata } from 'next';
 import { getSession } from '@/lib/auth/session';
-import { signOut } from '@/lib/auth/actions';
 import {
   getPlayerPool,
   getSeasonPoints,
@@ -16,6 +15,7 @@ import { getSquadForGameweek } from '@/lib/fantasy/squadStore';
 import { openGameweek, timeUntilDeadline } from '@/lib/fantasy/gameweekWindow';
 import { STARTING_SLOTS } from '@/lib/fantasy/squadRules';
 import { SquadPicker, type PickerInitial } from '@/components/SquadPicker';
+import { FantasyShell } from '@/components/FantasyShell';
 import { BoardPanel } from '@/components/BoardPanel';
 
 export const metadata: Metadata = {
@@ -35,12 +35,12 @@ export default async function FantasyPage() {
   if (season === 'unavailable') return <NotSetUpYet email={session.email} />;
   if (season === null) {
     return (
-      <Shell email={session.email}>
+      <FantasyShell email={session.email} current="squad">
         <p className="px-3 py-6 text-13 text-muted">
           No Premier League season is set up yet. The fantasy game opens once the season
           is loaded.
         </p>
-      </Shell>
+      </FantasyShell>
     );
   }
 
@@ -62,12 +62,12 @@ export default async function FantasyPage() {
 
   if (pool.length === 0) {
     return (
-      <Shell email={session.email}>
+      <FantasyShell email={session.email} current="squad">
         <p className="px-3 py-6 text-13 text-muted">
           No players are priced for {season} yet. The fantasy ingest job publishes the pool
           from FPL — until it has run once, there is nothing to pick from.
         </p>
-      </Shell>
+      </FantasyShell>
     );
   }
 
@@ -87,7 +87,7 @@ export default async function FantasyPage() {
   // The side already saved for the gameweek being picked. Falls back to the
   // most recent generation, which is what `getSquadForGameweek` returns when
   // no save exists for this week yet.
-  const existing = gameweek === null ? null : await getSquadForGameweek(session.accessToken, season, gameweek);
+  const existing = gameweek === null ? null : await getSquadForGameweek(session.accessToken, session.userId, season, gameweek);
   const initial: PickerInitial | null = existing && existing.picks.length > 0
     ? {
       name: existing.name,
@@ -99,31 +99,9 @@ export default async function FantasyPage() {
     : null;
 
   return (
-    <Shell email={session.email}>
+    <FantasyShell email={session.email} current="squad">
       <SquadPicker pool={priced} initial={initial} gameweekLabel={gameweekLabel} />
-    </Shell>
-  );
-}
-
-function Shell({ email, children }: { email: string | null; children: React.ReactNode }) {
-  return (
-    <div className="space-y-3">
-      <header className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-border bg-surface px-3 py-2">
-        <h1 className="font-display text-24 font-extrabold leading-tight tracking-[-0.02em]">
-          Fantasy
-        </h1>
-        <p className="text-11 text-muted">Premier League · fifteen players · scored on real gameweeks</p>
-        <div className="ml-auto flex items-center gap-3 text-11 text-muted">
-          {email && <span className="max-w-[14rem] truncate">{email}</span>}
-          <form action={signOut}>
-            <button type="submit" className="rounded-md border border-border px-2 py-0.5 font-semibold hover:text-text">
-              Sign out
-            </button>
-          </form>
-        </div>
-      </header>
-      {children}
-    </div>
+    </FantasyShell>
   );
 }
 
@@ -135,7 +113,7 @@ function Shell({ email, children }: { email: string | null; children: React.Reac
  */
 function NotSetUpYet({ email }: { email: string | null }) {
   return (
-    <Shell email={email}>
+    <FantasyShell email={email} current="squad">
       <BoardPanel label="Not ready yet" meta="Setup">
         <div className="space-y-2 px-3 py-4 text-13 text-muted">
           <p>
@@ -149,7 +127,7 @@ function NotSetUpYet({ email }: { email: string | null }) {
           </p>
         </div>
       </BoardPanel>
-    </Shell>
+    </FantasyShell>
   );
 }
 

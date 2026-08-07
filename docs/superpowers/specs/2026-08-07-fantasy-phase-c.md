@@ -1,8 +1,8 @@
 # Touchline — Fantasy (Phase C)
 
 **Date:** 2026-08-07
-**Status:** Option A chosen. Scoring, gameweek ingest, magic-link auth and the squad
-picker are built. Leagues and transfers are not.
+**Status:** Option A chosen. Scoring, gameweek ingest, magic-link auth, the squad picker
+and friends' leagues are built. Transfers and chips are not.
 **Scope:** a new writable surface. Everything shipped so far is read-only.
 
 ---
@@ -259,10 +259,61 @@ until it is done `/fantasy` says "not ready yet" rather than failing.
    This moves sign-in entirely server-side. Sign-in works without it — see the note above
    on the fragment fallback — but with it the session never appears in a URL.
 
+---
+
+## Built (leagues)
+
+| Piece | Where |
+|---|---|
+| Season scoring across generations | `lib/fantasy/standings.ts` |
+| Tables, memberships, join codes | `supabase/migrations/0009_fantasy_leagues.sql` |
+| Reads and writes | `lib/fantasy/leagueStore.ts`, `lib/fantasy/leagueActions.ts` |
+| Pages | `app/fantasy/leagues`, `app/fantasy/leagues/[id]` |
+
+### The problem leagues create
+
+0008 says a squad is visible only to `auth.uid() = user_id`. That is the right default and
+it makes a league table impossible — showing what a rival scored means reading their
+picks. So 0009 widens the door by exactly the width of a league:
+
+- **`fantasy_squad`** becomes readable to anyone sharing a league with its owner. A squad
+  row is a name and a season.
+- **`fantasy_pick`** becomes readable to league-mates **only once that generation's own
+  deadline has passed**. A fantasy game where you can read your opponents' teams before
+  kick-off is a game where everyone picks the same eleven. Keying the test to the
+  generation's gameweek rather than to "now" is what lets a table recompute history while
+  keeping a side picked for next week private.
+- Nothing else changes. Writes are still own-rows-only; `anon` still gets nothing.
+
+### Three security-definer functions, and why
+
+The obvious membership policy — "you can see members of leagues you are a member of" —
+reads `fantasy_league_member` from inside `fantasy_league_member`'s own policy, and
+Postgres reports infinite recursion at query time rather than at migration time. It is a
+well-worn Supabase footgun. `fantasy_leagues_for` and `fantasy_shares_league` run as their
+owner and so do not re-enter RLS, breaking the cycle at exactly one point. Each is
+`set search_path = public`, and each is revoked from `public` and granted only to
+`authenticated`.
+
+`fantasy_join_league(code)` is the third, for a different reason: resolving a code means
+reading a league you are not yet in, and any policy permitting that also permits
+enumerating every league on the site. `authenticated` holds **no INSERT** on
+`fantasy_league_member` at all — the only ways in are that function and the trigger that
+makes a league's creator its first member.
+
+A join code is therefore a bearer credential and is sized like one: eight characters from
+a 30-symbol alphabet with the ambiguous glyphs (0/O, 1/I/L, U) removed.
+
+### Scoring a season, not a gameweek
+
+`scoreSeason` scores gameweek 3 against the side that was picked for gameweek 3. Scoring
+every week against the current squad would make a manager's history rewrite itself on every
+change — and would reward changing a side after seeing the results. A gameweek with no
+generation in force is skipped, not scored zero: a manager who joined in October was not
+playing in August, and that is a different fact from playing badly.
+
 ### Still open
 
-- **Leagues against friends**, which the teaser no longer promises but the game still
-  wants.
 - **Transfers between gameweeks** — the schema supports it (generations), the UI does
   not; today a save replaces the whole side.
 - **Chips** (wildcard, triple captain). Deliberately absent: each is a rule, and rules
