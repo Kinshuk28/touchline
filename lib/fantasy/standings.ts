@@ -1,4 +1,5 @@
 import { scoreSquad, type PlayerGameweek, type SquadPick } from '@/lib/fantasy/scoring';
+import { benchCountsFor, captainMultiplierFor, type Chip } from '@/lib/fantasy/chips';
 import type { FantasyPosition } from '@/lib/fantasy/squadRules';
 
 /**
@@ -23,6 +24,12 @@ import type { FantasyPosition } from '@/lib/fantasy/squadRules';
 export interface PickGeneration {
   activeFromGameweek: number;
   picks: SquadPick[];
+  /**
+   * A side built under a Free Hit, which lasts exactly one gameweek — the
+   * week after it, the side from before resumes. Set by whoever reads the
+   * generations, from the chip played in that gameweek.
+   */
+  freeHit?: boolean;
 }
 
 /** One gameweek's published player scores. */
@@ -33,6 +40,8 @@ export interface ScoredGameweek {
 
 export interface GameweekResult {
   gameweek: number;
+  /** The chip played this gameweek, if any — worth showing beside the score. */
+  chip: Chip | null;
   /** What the eleven scored, before any deduction. */
   points: number;
   /** Points docked for transfers beyond the free allowance. Never negative. */
@@ -63,6 +72,11 @@ export interface SeasonScore {
  * zeroes. A zero says "played and scored nothing"; there is a real
  * difference and a season total that quietly includes the first half of a
  * season a manager never entered is wrong.
+ *
+ * A Free Hit generation is skipped for every gameweek but its own. That is
+ * the whole chip: a one-week side, borrowed, after which the squad you had
+ * comes back. Without this the borrowed side would simply become the squad,
+ * which is the Wildcard — a different chip that a manager chose not to play.
  */
 export function generationFor(
   generations: readonly PickGeneration[],
@@ -71,6 +85,7 @@ export function generationFor(
   let best: PickGeneration | null = null;
   for (const generation of generations) {
     if (generation.activeFromGameweek > gameweek) continue;
+    if (generation.freeHit === true && generation.activeFromGameweek !== gameweek) continue;
     if (best === null || generation.activeFromGameweek > best.activeFromGameweek) best = generation;
   }
   return best;
@@ -95,6 +110,8 @@ export function scoreSeason(
   opts: {
     positions?: ReadonlyMap<number, FantasyPosition>;
     transferCosts?: ReadonlyMap<number, number>;
+    /** Chips played, by gameweek. Each applies to its own gameweek and no other. */
+    chips?: ReadonlyMap<number, Chip | null>;
   } = {},
 ): SeasonScore {
   const results: GameweekResult[] = [];
@@ -106,7 +123,15 @@ export function scoreSeason(
     const generation = generationFor(generations, week.gameweek);
     if (generation === null) continue;
 
-    const score = scoreSquad(generation.picks, week.lines, opts);
+    // The chip belongs to the gameweek, not to the generation: a Bench Boost
+    // played in gameweek 5 does not keep boosting gameweeks 6 and 7 just
+    // because the same side is still in force.
+    const chip = opts.chips?.get(week.gameweek) ?? null;
+    const score = scoreSquad(generation.picks, week.lines, {
+      positions: opts.positions,
+      captainMultiplier: captainMultiplierFor(chip),
+      countBench: benchCountsFor(chip),
+    });
     // `Math.max(0, …)` so a stored cost can never become a bonus, whatever
     // arrives in the map.
     const cost = Math.max(0, opts.transferCosts?.get(week.gameweek) ?? 0);
@@ -115,7 +140,7 @@ export function scoreSeason(
     total += net;
     pending += score.pending;
     transferCost += cost;
-    results.push({ gameweek: week.gameweek, points: score.total, transferCost: cost, net, pending: score.pending });
+    results.push({ gameweek: week.gameweek, chip, points: score.total, transferCost: cost, net, pending: score.pending });
   }
 
   return { total, gameweeks: results, pending, transferCost };

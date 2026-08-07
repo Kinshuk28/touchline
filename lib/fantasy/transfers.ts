@@ -1,3 +1,5 @@
+import { grantsFreeTransfers, type Chip } from '@/lib/fantasy/chips';
+
 /**
  * Transfers: how a squad changes between gameweeks, and what changing it costs.
  *
@@ -22,6 +24,12 @@ export const TRANSFER_POINTS = 4;
 export interface TransferRecord {
   gameweek: number;
   transfersMade: number;
+  /**
+   * The chip played that gameweek, if any. A Wildcard or Free Hit makes the
+   * week's transfers free *and* leaves the bank untouched — see
+   * `transferAllowance`.
+   */
+  chip?: Chip | null;
 }
 
 export interface SquadDiff {
@@ -76,6 +84,12 @@ export interface TransferAllowance {
  * gaps between them are gameweeks the previous side simply carried, and they
  * accrue at one each, which is why this walks the whole range rather than
  * folding over the records.
+ *
+ * A gameweek played with a Wildcard or Free Hit spends nothing: those chips
+ * make transfers free, and FPL's rule — the one that makes a wildcard feel
+ * like a gift rather than a trade — is that banked transfers survive it. So
+ * a manager who wildcards on twelve transfers in gameweek 8 still has their
+ * saved ones in gameweek 9.
  */
 export function transferAllowance(
   history: readonly TransferRecord[],
@@ -88,17 +102,32 @@ export function transferAllowance(
   if (gameweek <= first) return { free: Number.POSITIVE_INFINITY, unlimited: true };
 
   const usedAt = new Map(history.map((r) => [r.gameweek, r.transfersMade]));
+  const chipAt = new Map(history.map((r) => [r.gameweek, r.chip ?? null]));
 
   // The gameweek after the first squad opens with exactly one.
   let free = 1;
   for (let week = first + 1; week < gameweek; week += 1) {
-    const used = usedAt.get(week) ?? 0;
+    const used = grantsFreeTransfers(chipAt.get(week) ?? null) ? 0 : usedAt.get(week) ?? 0;
     // A hit spends the bank down to nothing but never below it, then the next
     // week's transfer accrues on top.
     free = Math.min(MAX_BANKED_TRANSFERS, Math.max(0, free - used) + 1);
   }
 
   return { free, unlimited: false };
+}
+
+/**
+ * The allowance as a chip leaves it.
+ *
+ * A Wildcard or Free Hit makes this gameweek's transfers free, which is the
+ * same state as before a first squad is locked in — so it is expressed the
+ * same way rather than threaded through every caller as a separate flag.
+ * `transferCost` and `describeTransfers` then need to know nothing about
+ * chips at all.
+ */
+export function effectiveAllowance(allowance: TransferAllowance, chip: Chip | null): TransferAllowance {
+  if (!grantsFreeTransfers(chip)) return allowance;
+  return { free: Number.POSITIVE_INFINITY, unlimited: true };
 }
 
 /**
@@ -119,8 +148,17 @@ export function transferCost(made: number, allowance: TransferAllowance): number
  * — what this is about to cost — should not have to be inferred from two
  * others.
  */
-export function describeTransfers(made: number, allowance: TransferAllowance): string {
+export function describeTransfers(
+  made: number,
+  allowance: TransferAllowance,
+  chip: Chip | null = null,
+): string {
   if (allowance.unlimited) {
+    if (grantsFreeTransfers(chip)) {
+      return made === 0
+        ? 'Change as many players as you like — this week is free.'
+        : `${made} transfer${made === 1 ? '' : 's'}, and no points cost this week.`;
+    }
     return made === 0 ? 'Free transfers until your first deadline.' : 'No transfer cost for your first squad.';
   }
 

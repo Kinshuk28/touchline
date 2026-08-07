@@ -25,8 +25,10 @@ import {
   transfersBetween,
   transferCost,
   describeTransfers,
+  effectiveAllowance,
   type TransferAllowance,
 } from '@/lib/fantasy/transfers';
+import { CHIP_LABELS, describeChip, type Chip } from '@/lib/fantasy/chips';
 import type { PoolPlayer } from '@/lib/site/queries/fantasy';
 
 /*
@@ -124,6 +126,8 @@ export function SquadPicker({
   gameweekLabel,
   previousIds,
   freeTransfers,
+  chipOptions,
+  initialChip,
 }: {
   pool: PoolPlayer[];
   initial: PickerInitial | null;
@@ -140,6 +144,10 @@ export function SquadPicker({
    * that happens to today.
    */
   freeTransfers: number | null;
+  /** Chips this manager may still play. Empty once all four are spent. */
+  chipOptions: Chip[];
+  /** The chip already chosen for this gameweek, so reopening the picker shows it. */
+  initialChip: Chip | null;
 }) {
   const [name, setName] = useState(initial?.name ?? 'My squad');
   const [squad, setSquad] = useState<SquadState>({
@@ -150,6 +158,7 @@ export function SquadPicker({
   });
   const { starters, bench, captainId, viceCaptainId } = squad;
 
+  const [chip, setChip] = useState<Chip | null>(initialChip);
   const [tab, setTab] = useState<FantasyPosition | 'ALL'>('ALL');
   const [query, setQuery] = useState('');
   const [sort, setSort] = useState<SortKey>('price-desc');
@@ -167,9 +176,12 @@ export function SquadPicker({
   // anything is written — see lib/fantasy/pickerActions.ts — so this is here
   // to let a manager see the price *before* committing to it, which is the
   // whole reason a transfer limit is interesting.
-  const allowance: TransferAllowance = freeTransfers === null
+  const banked: TransferAllowance = freeTransfers === null
     ? { free: Number.POSITIVE_INFINITY, unlimited: true }
     : { free: freeTransfers, unlimited: false };
+  // A Wildcard or Free Hit makes this week free; expressing it as an
+  // unlimited allowance keeps the cost arithmetic identical either way.
+  const allowance = effectiveAllowance(banked, chip);
   const diff = useMemo(
     () => transfersBetween(previousIds, [...starters, ...bench]),
     [previousIds, starters, bench],
@@ -288,7 +300,7 @@ export function SquadPicker({
     return { rows: sorted.slice(0, LIST_LIMIT), total: sorted.length };
   }, [pool, tab, query, sort]);
 
-  const payload = JSON.stringify({ name: name.trim(), starters, bench, captainId, viceCaptainId });
+  const payload = JSON.stringify({ name: name.trim(), starters, bench, captainId, viceCaptainId, chip });
 
   return (
     <div className="space-y-3">
@@ -308,8 +320,12 @@ export function SquadPicker({
           first squad, and a transfer counter would be counting nothing. */}
       {previousIds.length > 0 && (
         <p className="rounded-xl border border-border bg-surface px-3 py-2 text-13 text-muted">
-          {describeTransfers(diff.count, allowance)}
+          {describeTransfers(diff.count, allowance, chip)}
         </p>
+      )}
+
+      {(chipOptions.length > 0 || chip !== null) && (
+        <ChipPicker options={chipOptions} chip={chip} onChip={setChip} />
       )}
 
       {/* Silent until there is something to be wrong about. A manager who
@@ -504,6 +520,58 @@ export function SquadPicker({
         </section>
       </div>
     </div>
+  );
+}
+
+/**
+ * The four chips, as buttons that toggle.
+ *
+ * Deliberately not a dropdown: there are four, each is once a season, and the
+ * decision is which *one* to spend — a list you can see all of at once is the
+ * right shape for that, and it means the description of the chosen one has
+ * somewhere to sit. Clicking the active chip puts it back, because a chip
+ * selected by accident should cost nothing to undo before the deadline.
+ */
+function ChipPicker({
+  options, chip, onChip,
+}: {
+  options: Chip[];
+  chip: Chip | null;
+  onChip: (chip: Chip | null) => void;
+}) {
+  const description = describeChip(chip);
+  return (
+    <section className="rounded-xl border border-border bg-surface px-3 py-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <h2 className="text-11 font-semibold uppercase tracking-wider text-muted">Chips</h2>
+        {options.length === 0 ? (
+          <p className="text-13 text-muted">All four played. That is the season.</p>
+        ) : (
+          options.map((option) => {
+            const active = chip === option;
+            return (
+              <button
+                key={option}
+                type="button"
+                aria-pressed={active}
+                onClick={() => onChip(active ? null : option)}
+                className={`rounded-md border px-2 py-1 text-11 font-semibold uppercase tracking-wider ${
+                  active ? 'border-text bg-surface-2 text-text' : 'border-border text-muted hover:text-text'
+                }`}
+              >
+                {CHIP_LABELS[option]}
+                {/* The chosen chip says so in words as well as by weight —
+                    "Wildcard ✓" survives being read without colour. */}
+                {active && <span aria-hidden="true"> ✓</span>}
+              </button>
+            );
+          })
+        )}
+      </div>
+      <p className="mt-1.5 text-13 text-muted">
+        {description ?? 'One chip a gameweek, each once a season. Playing one is optional.'}
+      </p>
+    </section>
   );
 }
 

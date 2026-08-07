@@ -5,8 +5,21 @@ import { z } from 'zod';
 import { getSession } from '@/lib/auth/session';
 import { getPlayerPool, getFantasyCalendar, getFantasySeason } from '@/lib/site/queries/fantasy';
 import { openGameweek } from '@/lib/fantasy/gameweekWindow';
-import { saveSquad, getSquadId, getSquadForGameweek, getTransferHistory } from '@/lib/fantasy/squadStore';
-import { transfersBetween, transferAllowance, transferCost } from '@/lib/fantasy/transfers';
+import {
+  saveSquad,
+  getSquadId,
+  getSquadForGameweek,
+  getTransferHistory,
+  getChipsPlayed,
+  getChipForGameweek,
+} from '@/lib/fantasy/squadStore';
+import {
+  transfersBetween,
+  transferAllowance,
+  transferCost,
+  effectiveAllowance,
+} from '@/lib/fantasy/transfers';
+import { chipErrors, CHIPS, CHIP_LABELS, type Chip } from '@/lib/fantasy/chips';
 import {
   assignSlots,
   lineupErrors,
@@ -38,6 +51,9 @@ const schema = z.object({
   bench: z.array(z.number().int().positive()).length(4, 'Name four substitutes.'),
   captainId: z.number().int().positive({ message: 'Pick a captain.' }),
   viceCaptainId: z.number().int().positive().nullable(),
+  // Validated against what this squad has already played further down; the
+  // enum here only rejects a value that is not a chip at all.
+  chip: z.enum(CHIPS as unknown as [Chip, ...Chip[]]).nullable().default(null),
 });
 
 export interface SaveState {
@@ -85,7 +101,7 @@ export async function saveSquadAction(_prev: SaveState, formData: FormData): Pro
   if (!parsed.success) {
     return { status: 'error', errors: parsed.error.issues.map((i) => i.message), message: 'That squad is not legal yet.' };
   }
-  const { name, starters, bench, captainId, viceCaptainId } = parsed.data;
+  const { name, starters, bench, captainId, viceCaptainId, chip } = parsed.data;
 
   const season = await getFantasySeason();
   if (season === null) {
@@ -133,13 +149,30 @@ export async function saveSquadAction(_prev: SaveState, formData: FormData): Pro
   // `locked` every time is also what makes changing your mind before the
   // deadline free, which is the behaviour anyone would expect.
   const squadId = await getSquadId(session.accessToken, session.userId, season);
-  const [current, locked] = squadId === null
-    ? [null, null]
+  const [current, locked, chipsPlayed, previousChip] = squadId === null
+    ? [null, null, [], null]
     : await Promise.all([
       getSquadForGameweek(session.accessToken, session.userId, season, gameweek),
       getSquadForGameweek(session.accessToken, session.userId, season, gameweek - 1),
+      getChipsPlayed(session.accessToken, squadId),
+      gameweek > 1 ? getChipForGameweek(session.accessToken, squadId, gameweek - 1) : Promise.resolve(null),
     ]);
-  const previousIds = locked?.picks.map((p) => p.playerId) ?? [];
+
+  // A chip is spent, so whether it may be played is checked here and not
+  // taken from the client at all.
+  const chipProblems = chipErrors(chip, chipsPlayed, gameweek);
+  if (chipProblems.length > 0) {
+    return { status: 'error', errors: chipProblems, message: 'That chip is not available.' };
+  }
+
+  // A Free Hit side lasts one gameweek, so the week after one, the baseline
+  // for counting transfers is the side from *before* the Free Hit — which is
+  // what `getSquadForGameweek` returns for `gameweek - 2`. Without this a
+  // manager would be billed for undoing a free hit they never chose to keep.
+  const baseline = previousChip === 'free-hit' && squadId !== null && gameweek > 2
+    ? await getSquadForGameweek(session.accessToken, session.userId, season, gameweek - 2)
+    : locked;
+  const previousIds = baseline?.picks.map((p) => p.playerId) ?? [];
   const paidFor = new Map<number, number | null>(
     (current?.picks ?? []).map((p) => [p.playerId, p.priceTenths]),
   );
@@ -166,7 +199,9 @@ export async function saveSquadAction(_prev: SaveState, formData: FormData): Pro
 
   const history = squadId === null ? [] : await getTransferHistory(session.accessToken, squadId);
   const diff = transfersBetween(previousIds, ids);
-  const allowance = transferAllowance(history, gameweek);
+  // A Wildcard or Free Hit makes this week's transfers free — expressed as an
+  // unlimited allowance so nothing downstream has to know about chips.
+  const allowance = effectiveAllowance(transferAllowance(history, gameweek), chip);
   const cost = transferCost(diff.count, allowance);
 
   const slots = assignSlots(startingPlayers, benchPlayers);
@@ -185,6 +220,7 @@ export async function saveSquadAction(_prev: SaveState, formData: FormData): Pro
       picks,
       transfersMade: diff.count,
       transferCost: cost,
+      chip,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -192,11 +228,18 @@ export async function saveSquadAction(_prev: SaveState, formData: FormData): Pro
   }
 
   revalidatePath('/fantasy');
-  const note = cost > 0 ? ` ${diff.count} transfers cost ${cost} points.` : '';
+  // A chip is the most consequential thing a save can do and the hardest to
+  // undo, so it is named back explicitly rather than left to be inferred from
+  // a button that now has a tick on it.
+  const notes = [
+    chip === null ? null : `${CHIP_LABELS[chip]} played.`,
+    cost > 0 ? `${diff.count} transfers cost ${cost} points.` : null,
+  ].filter((n): n is string => n !== null);
+
   return {
     status: 'saved',
     errors: [],
-    message: `Saved — this side plays from gameweek ${gameweek}.${note}`,
+    message: [`Saved — this side plays from gameweek ${gameweek}.`, ...notes].join(' '),
   };
 }
 

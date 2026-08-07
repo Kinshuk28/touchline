@@ -14,7 +14,7 @@ const TABLES = [
  * with the file to apply, rather than exiting non-zero and making the
  * verifier useless for its actual job.
  */
-const PENDING: Array<{ name: string; migration: string; effect: string }> = [
+const PENDING: Array<{ name: string; migration: string; effect: string; column?: string }> = [
   {
     name: 'ingest_run_public',
     migration: '0005_ingest_run_public_view.sql',
@@ -50,6 +50,16 @@ const PENDING: Array<{ name: string; migration: string; effect: string }> = [
     migration: '0010_fantasy_transfers.sql',
     effect: 'transfers cannot be counted or charged',
   },
+  {
+    // A column, not a table — 0011 only adds one, and selecting `*` would
+    // not notice it missing. Probing the column by name is what turns
+    // "applied 0010 but not 0011" into a line here rather than a runtime
+    // error in the picker.
+    name: 'fantasy_squad_gameweek',
+    column: 'chip',
+    migration: '0011_fantasy_chips.sql',
+    effect: 'chips cannot be played',
+  },
 ];
 
 const db = serviceClient();
@@ -65,12 +75,13 @@ for (const table of TABLES) {
   }
 }
 
-for (const { name, migration, effect } of PENDING) {
-  const { error } = await db.from(name).select('*').limit(1);
+for (const { name, column, migration, effect } of PENDING) {
+  const label = column === undefined ? name : `${name}.${column}`;
+  const { error } = await db.from(name).select(column ?? '*').limit(1);
   if (error) {
-    console.log(`  pending  ${name}  — apply supabase/migrations/${migration}; until then, ${effect}`);
+    console.log(`  pending  ${label}  — apply supabase/migrations/${migration}; until then, ${effect}`);
   } else {
-    console.log(`  ok       ${name}`);
+    console.log(`  ok       ${label}`);
   }
 }
 

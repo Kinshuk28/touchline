@@ -1,5 +1,6 @@
 import { userClient } from '@/lib/auth/session';
 import type { TransferRecord } from '@/lib/fantasy/transfers';
+import type { Chip } from '@/lib/fantasy/chips';
 
 /**
  * Reading and writing one person's squad.
@@ -53,6 +54,8 @@ export interface SquadInput {
   /** How many players came in, and what the extras cost. See lib/fantasy/transfers.ts. */
   transfersMade: number;
   transferCost: number;
+  /** The chip played this gameweek, or null. See lib/fantasy/chips.ts. */
+  chip: Chip | null;
 }
 
 /**
@@ -137,12 +140,51 @@ export async function getTransferHistory(
 ): Promise<TransferRecord[]> {
   const { data, error } = await userClient(accessToken)
     .from('fantasy_squad_gameweek')
-    .select('gameweek,transfers_made')
+    .select('gameweek,transfers_made,chip')
     .eq('squad_id', squadId)
     .order('gameweek', { ascending: true });
   if (error) throw new Error(`getTransferHistory: ${error.message}`);
-  return ((data ?? []) as Array<{ gameweek: number; transfers_made: number }>)
-    .map((row) => ({ gameweek: row.gameweek, transfersMade: row.transfers_made }));
+  return ((data ?? []) as Array<{ gameweek: number; transfers_made: number; chip: Chip | null }>)
+    .map((row) => ({ gameweek: row.gameweek, transfersMade: row.transfers_made, chip: row.chip }));
+}
+
+/**
+ * Which chips this squad has played, and when — the input `availableChips`
+ * needs.
+ *
+ * Reads the same rows as `getTransferHistory` but is kept separate because
+ * the two answer different questions and one is often wanted without the
+ * other; the partial index in 0011 serves this one directly.
+ */
+export async function getChipsPlayed(
+  accessToken: string,
+  squadId: string,
+): Promise<Array<{ gameweek: number; chip: Chip }>> {
+  const { data, error } = await userClient(accessToken)
+    .from('fantasy_squad_gameweek')
+    .select('gameweek,chip')
+    .eq('squad_id', squadId)
+    .not('chip', 'is', null)
+    .order('gameweek', { ascending: true });
+  if (error) throw new Error(`getChipsPlayed: ${error.message}`);
+  return ((data ?? []) as Array<{ gameweek: number; chip: Chip | null }>)
+    .flatMap((row) => (row.chip === null ? [] : [{ gameweek: row.gameweek, chip: row.chip }]));
+}
+
+/** The chip played in one gameweek, or null. Used to tell a Free Hit side from an ordinary one. */
+export async function getChipForGameweek(
+  accessToken: string,
+  squadId: string,
+  gameweek: number,
+): Promise<Chip | null> {
+  const { data, error } = await userClient(accessToken)
+    .from('fantasy_squad_gameweek')
+    .select('chip')
+    .eq('squad_id', squadId)
+    .eq('gameweek', gameweek)
+    .maybeSingle();
+  if (error) throw new Error(`getChipForGameweek: ${error.message}`);
+  return (data as { chip: Chip | null } | null)?.chip ?? null;
 }
 
 /** The squad row for this user and season, or null. Used before a save to diff against. */
@@ -233,6 +275,7 @@ export async function saveSquad(
         gameweek: input.activeFromGameweek,
         transfers_made: input.transfersMade,
         transfer_cost: input.transferCost,
+        chip: input.chip,
         updated_at: new Date().toISOString(),
       },
       { onConflict: 'squad_id,gameweek' },

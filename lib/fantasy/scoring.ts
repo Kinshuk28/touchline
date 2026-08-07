@@ -38,6 +38,7 @@ export interface SquadPick {
 
 export const STARTING_SLOTS = 11;
 export const SQUAD_SIZE = 15;
+/** The armband's usual multiplier. Triple Captain raises it — see `ScoreOptions`. */
 export const CAPTAIN_MULTIPLIER = 2;
 
 export interface ScoredPick {
@@ -103,6 +104,23 @@ export interface ScoreOptions {
    * substitution would cost a manager points over a gap in our own data.
    */
   positions?: ReadonlyMap<number, FantasyPosition>;
+
+  /**
+   * What the captain's points are multiplied by. Defaults to
+   * `CAPTAIN_MULTIPLIER`; Triple Captain makes it 3
+   * (`lib/fantasy/chips.ts#captainMultiplierFor`).
+   */
+  captainMultiplier?: number;
+
+  /**
+   * Score all fifteen picks rather than the eleven — Bench Boost.
+   *
+   * Auto-substitutions are skipped entirely when this is on, and that is not
+   * an oversight: a substitution exists to replace a starter who did not
+   * play with a bench player who did, and when the bench is already scoring
+   * there is nobody to bring on and nothing to replace.
+   */
+  countBench?: boolean;
 }
 
 function tally(
@@ -175,6 +193,7 @@ export function scoreSquad(
 
   const starters = bySlot.filter((p) => p.slot <= STARTING_SLOTS);
   const bench = bySlot.filter((p) => p.slot > STARTING_SLOTS);
+  const captainMultiplier = opts.captainMultiplier ?? CAPTAIN_MULTIPLIER;
 
   // Auto-subs: each starter *known* to have blanked draws the first bench
   // player *known* to have played whose arrival leaves a legal formation. A
@@ -189,7 +208,10 @@ export function scoreSquad(
   const counts = positions ? tally(starters, positions) : null;
   const usedBench = new Set<number>();
 
-  const active: Array<{ pick: SquadPick; autoSubbed: boolean }> = starters.map((pick) => {
+  const active: Array<{ pick: SquadPick; autoSubbed: boolean }> = opts.countBench
+    // Bench Boost: everyone counts, so nobody is substituted for anybody.
+    ? bySlot.map((pick) => ({ pick, autoSubbed: false }))
+    : starters.map((pick) => {
     if (!blanked(lineByPlayer.get(pick.playerId))) return { pick, autoSubbed: false };
     const replacement = bench.find((b) => {
       if (usedBench.has(b.playerId)) return false;
@@ -222,7 +244,7 @@ export function scoreSquad(
   const scored: ScoredPick[] = active.map(({ pick, autoSubbed }) => {
     const raw = lineByPlayer.get(pick.playerId)?.points ?? null;
     const isCaptain = pick.playerId === effectiveCaptainId;
-    const multiplier = isCaptain ? CAPTAIN_MULTIPLIER : 1;
+    const multiplier = isCaptain ? captainMultiplier : 1;
     if (raw === null) pending += 1;
     const points = raw === null ? 0 : raw * multiplier;
     total += points;
