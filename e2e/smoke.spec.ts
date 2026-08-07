@@ -124,10 +124,30 @@ test('the Clubs route is reachable from the header nav and groups clubs by compe
   // clearly-labelled group rather than being silently dropped or folded
   // into their old league's group (Direction Two spec: "honest handling").
   await expect(page.getByRole('heading', { name: /Not in a top-five league this season/i })).toBeVisible();
-  // Cards must not link anywhere — `/team/[slug]` doesn't exist yet, and a
-  // club crest/name pair rendered as an <a> here would be a guaranteed
-  // dead link, the exact bug this route's spec calls out by name.
-  await expect(page.getByRole('link', { name: /Real Madrid|Manchester City|Bayern/i })).toHaveCount(0);
+  // Cards link to the club page now that `/team/[slug]` exists — the
+  // inverse of what this asserted while it didn't, and the reason that
+  // assertion was written in the first place (no dead links).
+  await expect(page.getByRole('link', { name: /Manchester City/i }).first()).toBeVisible();
+});
+
+// `/team/[slug]` — the route every crest on the site now points at.
+test('a club page renders that club\'s own fixtures, squad and identity', async ({ page }) => {
+  await page.goto('/clubs');
+  await page.getByRole('link', { name: /Manchester City/i }).first().click();
+  await expect(page).toHaveURL(/\/team\/[a-z0-9-]+$/);
+
+  await expect(page.getByRole('heading', { level: 1, name: /Manchester City/i })).toBeVisible();
+  // Panels the page always renders, whatever the season state.
+  await expect(page.getByRole('heading', { name: 'Next up', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Results', exact: true })).toBeVisible();
+  // Real rows, not just chrome: every fixture the spine draws is tagged
+  // with its id, and this club has fixtures in the stored data.
+  await expect(page.locator('[data-fixture-id]').first()).toBeVisible();
+});
+
+test('an unknown club slug is a 404, not a crash', async ({ page }) => {
+  const res = await page.goto('/team/not-a-real-club');
+  expect(res?.status()).toBe(404);
 });
 
 test('the theme toggle persists across a reload', async ({ page }) => {

@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { Crest } from '@/components/Crest';
 import { primaryClubColor } from '@/lib/site/clubColors';
 import {
@@ -73,9 +74,17 @@ export function MiniTable({
                       {unplayed ? '·' : i + 1}
                     </span>
                     <Crest team={row.team} size={18} />
-                    <span className="truncate text-13 font-medium">
-                      {row.team?.short_name ?? row.team?.name ?? 'Unknown club'}
-                    </span>
+                    {/* The club name is the way into /team/[slug] from the
+                        board's table. `row.team` is null only if a standings
+                        row outlives its club, which the schema allows; text
+                        with nowhere to go is better than a link to nowhere. */}
+                    {row.team ? (
+                      <Link href={`/team/${row.team.slug}`} className="truncate text-13 font-medium hover:underline">
+                        {row.team.short_name ?? row.team.name}
+                      </Link>
+                    ) : (
+                      <span className="truncate text-13 font-medium">Unknown club</span>
+                    )}
                   </div>
                 </td>
                 <td className="px-1.5 py-1.5 text-right font-mono text-13 tabular-nums text-muted">{row.played}</td>
