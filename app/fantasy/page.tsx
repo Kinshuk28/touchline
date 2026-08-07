@@ -11,8 +11,15 @@ import {
   type PoolPlayer,
   type Gameweek,
 } from '@/lib/site/queries/fantasy';
-import { getSquadForGameweek, getSquadId, getTransferHistory } from '@/lib/fantasy/squadStore';
+import {
+  getSquadForGameweek,
+  getSquadId,
+  getTransferHistory,
+  getChipsPlayed,
+  getChipForGameweek,
+} from '@/lib/fantasy/squadStore';
 import { transferAllowance } from '@/lib/fantasy/transfers';
+import { availableChips, type Chip } from '@/lib/fantasy/chips';
 import { openGameweek, timeUntilDeadline } from '@/lib/fantasy/gameweekWindow';
 import { STARTING_SLOTS } from '@/lib/fantasy/squadRules';
 import { SquadPicker, type PickerInitial } from '@/components/SquadPicker';
@@ -121,14 +128,33 @@ export default async function FantasyPage() {
   const history = squadId === null ? [] : await getTransferHistory(session.accessToken, squadId);
   const allowance = gameweek === null ? null : transferAllowance(history, gameweek);
 
+  const [chipsPlayed, chipThisWeek, chipLastWeek] = squadId === null || gameweek === null
+    ? [[], null, null]
+    : await Promise.all([
+      getChipsPlayed(session.accessToken, squadId),
+      getChipForGameweek(session.accessToken, squadId, gameweek),
+      gameweek > 1 ? getChipForGameweek(session.accessToken, squadId, gameweek - 1) : Promise.resolve(null),
+    ]);
+
+  // The week after a Free Hit, the side that counts as "what you had" is the
+  // one from before the Free Hit, not the borrowed eleven. Counting transfers
+  // against the borrowed side would bill a manager for giving back a team
+  // they were never keeping. The server action does the same — see
+  // lib/fantasy/pickerActions.ts.
+  const baseline = chipLastWeek === 'free-hit' && gameweek !== null && gameweek > 2
+    ? await getSquadForGameweek(session.accessToken, session.userId, season, gameweek - 2)
+    : locked;
+
   return (
     <FantasyShell email={session.email} current="squad">
       <SquadPicker
         pool={priced}
         initial={initial}
         gameweekLabel={gameweekLabel}
-        previousIds={locked?.picks.map((p) => p.playerId) ?? []}
+        previousIds={baseline?.picks.map((p) => p.playerId) ?? []}
         freeTransfers={allowance === null || allowance.unlimited ? null : allowance.free}
+        chipOptions={gameweek === null ? [] : availableChips(chipsPlayed, gameweek)}
+        initialChip={chipThisWeek as Chip | null}
       />
     </FantasyShell>
   );

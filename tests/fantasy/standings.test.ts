@@ -167,7 +167,7 @@ describe('rankLeague', () => {
         transferCost: cost,
         gameweeks: latest === undefined
           ? []
-          : [{ gameweek: 5, points: latest + cost, transferCost: cost, net: latest, pending: 0 }],
+          : [{ gameweek: 5, chip: null, points: latest + cost, transferCost: cost, net: latest, pending: 0 }],
       },
     };
   }
@@ -224,5 +224,76 @@ describe('rankLeague', () => {
 
   it('is an empty table, not an error, for a league nobody has joined', () => {
     expect(rankLeague([], 3)).toEqual([]);
+  });
+});
+
+describe('scoreSeason — chips', () => {
+  const generations: PickGeneration[] = [{ activeFromGameweek: 1, picks: side(XI_A) }];
+
+  it('applies a chip only to the gameweek it was played in', () => {
+    // The same side is in force all four weeks; a Bench Boost in gameweek 2
+    // must not keep boosting gameweeks 3 and 4.
+    const weeks = [1, 2, 3].map((g) => week(g, 1));
+    const season = scoreSeason(generations, weeks, { chips: new Map([[2, 'bench-boost' as const]]) });
+    // 11 starters + captain's extra = 12; boosted, 15 + 1 = 16.
+    expect(season.gameweeks.map((g) => g.points)).toEqual([12, 16, 12]);
+    expect(season.gameweeks.map((g) => g.chip)).toEqual([null, 'bench-boost', null]);
+  });
+
+  it('triples the captain for a Triple Captain gameweek', () => {
+    const season = scoreSeason(generations, [week(1, 3, XI_A)], {
+      chips: new Map([[1, 'triple-captain' as const]]),
+    });
+    // 11 × 3 = 33, plus two more for the captain's third helping.
+    expect(season.gameweeks[0]!.points).toBe(33 + 6);
+  });
+
+  it('reports the chip alongside the score', () => {
+    const season = scoreSeason(generations, [week(1, 1)], { chips: new Map([[1, 'wildcard' as const]]) });
+    expect(season.gameweeks[0]!.chip).toBe('wildcard');
+  });
+});
+
+describe('generationFor — Free Hit', () => {
+  const withFreeHit: PickGeneration[] = [
+    { activeFromGameweek: 1, picks: side(XI_A) },
+    { activeFromGameweek: 5, picks: side(XI_B), freeHit: true },
+  ];
+
+  it('uses the borrowed side for its own gameweek', () => {
+    expect(generationFor(withFreeHit, 5)!.activeFromGameweek).toBe(5);
+  });
+
+  it('gives the previous side back the week after', () => {
+    // That is the whole chip. Letting the borrowed side persist would make a
+    // Free Hit into a Wildcard — a different chip the manager did not play.
+    expect(generationFor(withFreeHit, 6)!.activeFromGameweek).toBe(1);
+    expect(generationFor(withFreeHit, 38)!.activeFromGameweek).toBe(1);
+  });
+
+  it('does not resurrect a free-hit side for a week before it', () => {
+    expect(generationFor(withFreeHit, 4)!.activeFromGameweek).toBe(1);
+  });
+
+  it('lets a later ordinary save supersede the squad as usual', () => {
+    const then: PickGeneration[] = [
+      ...withFreeHit,
+      { activeFromGameweek: 7, picks: side(XI_B) },
+    ];
+    expect(generationFor(then, 6)!.activeFromGameweek).toBe(1);
+    expect(generationFor(then, 8)!.activeFromGameweek).toBe(7);
+  });
+});
+
+describe('scoreSeason — a Free Hit week in a season', () => {
+  it('scores the borrowed side that week and the old one after', () => {
+    const generations: PickGeneration[] = [
+      { activeFromGameweek: 1, picks: side(XI_A) },
+      { activeFromGameweek: 2, picks: side(XI_B), freeHit: true },
+    ];
+    // Only XI_B players score, so the free-hit week is the only one with points.
+    const weeks = [1, 2, 3].map((g) => week(g, 2, XI_B));
+    const season = scoreSeason(generations, weeks, { chips: new Map([[2, 'free-hit' as const]]) });
+    expect(season.gameweeks.map((g) => g.points)).toEqual([0, 24, 0]);
   });
 });

@@ -4,6 +4,7 @@ import {
   transferAllowance,
   transferCost,
   describeTransfers,
+  effectiveAllowance,
   MAX_BANKED_TRANSFERS,
   TRANSFER_POINTS,
   type TransferRecord,
@@ -146,5 +147,69 @@ describe('describeTransfers', () => {
   it('does not talk about allowances before the first deadline', () => {
     expect(describeTransfers(0, { free: Infinity, unlimited: true })).toMatch(/until your first deadline/);
     expect(describeTransfers(15, { free: Infinity, unlimited: true })).toMatch(/No transfer cost/);
+  });
+});
+
+describe('chips and the transfer bank', () => {
+  const history = (...triples: Array<[number, number, string | null]>): TransferRecord[] =>
+    triples.map(([gameweek, transfersMade, chip]) => ({
+      gameweek,
+      transfersMade,
+      chip: chip as TransferRecord['chip'],
+    }));
+
+  it('leaves the bank untouched when a wildcard week made twelve transfers', () => {
+    // Without this a wildcard would cost a manager every saved transfer, and
+    // the chip would feel like a trade rather than a gift.
+    const banked = history([1, 15, null], [8, 12, 'wildcard']);
+    // GW1 initial, then +1 a week to GW8 (5, capped), wildcard spends none,
+    // so GW9 is still capped.
+    expect(transferAllowance(banked, 9).free).toBe(MAX_BANKED_TRANSFERS);
+  });
+
+  it('does the same for a free hit', () => {
+    const banked = history([1, 15, null], [3, 14, 'free-hit']);
+    // GW2 opens at 1, GW3's free hit spends nothing, GW4 accrues to 3.
+    expect(transferAllowance(banked, 4).free).toBe(3);
+  });
+
+  it('still spends the bank for a chip that does not free transfers', () => {
+    const spent = history([1, 15, null], [3, 2, 'triple-captain']);
+    expect(transferAllowance(spent, 4).free).toBe(1);
+  });
+});
+
+describe('effectiveAllowance', () => {
+  const limited = { free: 1, unlimited: false };
+
+  it('makes a wildcard or free hit week unlimited', () => {
+    expect(effectiveAllowance(limited, 'wildcard')).toEqual({ free: Infinity, unlimited: true });
+    expect(effectiveAllowance(limited, 'free-hit')).toEqual({ free: Infinity, unlimited: true });
+  });
+
+  it('leaves the allowance alone for every other chip and for none', () => {
+    expect(effectiveAllowance(limited, 'triple-captain')).toBe(limited);
+    expect(effectiveAllowance(limited, 'bench-boost')).toBe(limited);
+    expect(effectiveAllowance(limited, null)).toBe(limited);
+  });
+
+  it('makes any number of transfers cost nothing once applied', () => {
+    expect(transferCost(12, effectiveAllowance(limited, 'wildcard'))).toBe(0);
+  });
+});
+
+describe('describeTransfers — chip weeks', () => {
+  const free = { free: Infinity, unlimited: true };
+
+  it('says the week is free rather than talking about a first deadline', () => {
+    expect(describeTransfers(0, free, 'wildcard')).toBe(
+      'Change as many players as you like — this week is free.',
+    );
+    expect(describeTransfers(9, free, 'free-hit')).toBe('9 transfers, and no points cost this week.');
+    expect(describeTransfers(1, free, 'wildcard')).toBe('1 transfer, and no points cost this week.');
+  });
+
+  it('still says "first deadline" when that is genuinely why it is free', () => {
+    expect(describeTransfers(0, free, null)).toMatch(/until your first deadline/);
   });
 });

@@ -1,6 +1,7 @@
 import { userClient } from '@/lib/auth/session';
 import type { FantasyPosition } from '@/lib/fantasy/squadRules';
 import type { PickGeneration, ScoredGameweek } from '@/lib/fantasy/standings';
+import { isOneWeekOnly, type Chip } from '@/lib/fantasy/chips';
 
 /**
  * Leagues, and the reads a league table is made of.
@@ -95,6 +96,8 @@ export interface MemberSquad {
   generations: PickGeneration[];
   /** Gameweek → points docked for transfers. Empty for a manager who has never taken a hit. */
   transferCosts: Map<number, number>;
+  /** Gameweek → chip played. Empty for a manager who has played none. */
+  chips: Map<number, Chip | null>;
 }
 
 export interface LeagueScoringData {
@@ -179,14 +182,21 @@ export async function getLeagueScoringData(
   // that gameweek's deadline has passed, so a table can be computed but a
   // rival's pending changes stay private.
   const costsBySquad = new Map<string, Map<number, number>>();
+  const chipsBySquad = new Map<string, Map<number, Chip | null>>();
   if (squads.length > 0) {
     const { data: costRows, error: costError } = await db
       .from('fantasy_squad_gameweek')
-      .select('squad_id,gameweek,transfer_cost')
+      .select('squad_id,gameweek,transfer_cost,chip')
       .in('squad_id', squads.map((s) => s.id));
     if (costError) throw new Error(`getLeagueScoringData (transfers): ${costError.message}`);
 
-    for (const row of (costRows ?? []) as Array<{ squad_id: string; gameweek: number; transfer_cost: number }>) {
+    for (const row of (costRows ?? []) as Array<{
+      squad_id: string; gameweek: number; transfer_cost: number; chip: Chip | null;
+    }>) {
+      const forChips = chipsBySquad.get(row.squad_id) ?? new Map<number, Chip | null>();
+      forChips.set(row.gameweek, row.chip);
+      chipsBySquad.set(row.squad_id, forChips);
+
       const forSquad = costsBySquad.get(row.squad_id) ?? new Map<number, number>();
       forSquad.set(row.gameweek, row.transfer_cost);
       costsBySquad.set(row.squad_id, forSquad);
@@ -202,8 +212,17 @@ export async function getLeagueScoringData(
       // "No squad yet" rather than blank is the difference between a row
       // that explains itself and one that looks like a rendering bug.
       squadName: squad?.name ?? 'No squad yet',
-      generations: squad ? picksBySquad.get(squad.id) ?? [] : [],
+      // A Free Hit generation lasts one gameweek — marked here, from the chip
+      // played in the gameweek it started, so `generationFor` can put the old
+      // side back the week after. See lib/fantasy/chips.ts#isOneWeekOnly.
+      generations: squad
+        ? (picksBySquad.get(squad.id) ?? []).map((g) => ({
+          ...g,
+          freeHit: isOneWeekOnly(chipsBySquad.get(squad.id)?.get(g.activeFromGameweek) ?? null),
+        }))
+        : [],
       transferCosts: squad ? costsBySquad.get(squad.id) ?? new Map() : new Map(),
+      chips: squad ? chipsBySquad.get(squad.id) ?? new Map() : new Map(),
     };
   });
 

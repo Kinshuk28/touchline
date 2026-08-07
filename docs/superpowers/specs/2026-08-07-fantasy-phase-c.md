@@ -1,8 +1,8 @@
 # Touchline — Fantasy (Phase C)
 
 **Date:** 2026-08-07
-**Status:** Option A chosen. Scoring, gameweek ingest, magic-link auth, the squad picker,
-friends' leagues and transfers are built. Chips are not.
+**Status:** Option A chosen and built end to end — scoring, gameweek ingest, magic-link
+auth, the squad picker, friends' leagues, transfers and chips.
 **Scope:** a new writable surface. Everything shipped so far is read-only.
 
 ---
@@ -345,10 +345,54 @@ more, and be charged for three — each save comparing against the one before it
 than against the side they started the week with. Counting from the previous gameweek's
 side every time is also what makes changing your mind before the deadline free.
 
+---
+
+## Built (chips)
+
+| Piece | Where |
+|---|---|
+| The four chips and when each may be played | `lib/fantasy/chips.ts` |
+| Triple Captain, Bench Boost | `ScoreOptions` in `lib/fantasy/scoring.ts` |
+| Free Hit's one-week side | `generationFor` in `lib/fantasy/standings.ts` |
+| Wildcard / Free Hit and the transfer bank | `lib/fantasy/transfers.ts` |
+| Storage | `supabase/migrations/0011_fantasy_chips.sql` |
+
+Each chip changes exactly one thing, and each of those things was already a parameter:
+
+- **Wildcard** — transfers are free this week.
+- **Free Hit** — transfers are free *and* the side lasts one gameweek.
+- **Triple Captain** — the captain's multiplier is 3.
+- **Bench Boost** — all fifteen score.
+
+Which is why the migration is one column. The rules are code; the database only records
+which chip was played and when.
+
+**Free Hit is the only chip that changes what a stored squad means.** A generation played
+under it is skipped for every gameweek but its own, so the week after, the squad you had
+comes back. Letting the borrowed side persist would turn a Free Hit into a Wildcard — a
+different chip the manager chose not to play. The same rule sets the transfer baseline the
+following week: counting changes against the borrowed eleven would bill a manager for
+giving back a team they were never keeping.
+
+**A wildcard does not spend banked transfers.** FPL's rule, and the one that makes the
+chip feel like a gift rather than a trade — twelve transfers on a wildcard in gameweek 8
+still leaves whatever was saved for gameweek 9.
+
+**Bench Boost makes no substitutions.** A substitution replaces a starter who did not
+play with a bench player who did; when the bench is already scoring, substituting would
+count somebody twice.
+
+**One thing is deliberately *not* enforced in the database.** Ownership rules are, because
+they protect one user from another and must hold against a crafted request. The
+once-a-season and one-per-half chip budgets are checked in the server action instead: they
+are game rules a manager can only break against themselves, and expressing them as
+triggers would put a second copy of `chips.ts` in SQL.
+
 ### Still open
 
-- **Chips** (wildcard, triple captain). Deliberately absent: each is a rule, and rules
-  belong in `transfers.ts`/`squadRules.ts` with tests, not bolted onto a picker.
+Nothing from the original spec. Natural next steps if the game finds an audience: a
+gameweek-by-gameweek history page, cup competitions inside a league, and Option B's
+five-league club fantasy as a second mode.
 - **`saveSquad` is two statements, not a transaction.** PostgREST has no cross-request
   transaction; a failure between the delete and the insert leaves the generation empty,
   which the picker reads as "no squad yet" and offers to rebuild. Recoverable, but a

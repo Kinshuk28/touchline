@@ -382,3 +382,68 @@ describe('scoreSquad — position-aware auto-substitutions', () => {
     expect(score.picks.find((p) => p.playerId === 13)!.autoSubbed).toBe(true);
   });
 });
+
+describe('scoreSquad — chip effects', () => {
+  it('triples the captain when told to', () => {
+    const score = scoreSquad(squad(), gameweek(0, { 1: { points: 9 } }), { captainMultiplier: 3 });
+    expect(score.total).toBe(27);
+    expect(score.picks.find((p) => p.playerId === 1)!.multiplier).toBe(3);
+  });
+
+  it('triples a moved armband too — the chip follows the captaincy', () => {
+    // Captain blanked, vice played: the vice is the captain this week, and
+    // Triple Captain applies to whoever is actually wearing it.
+    const score = scoreSquad(
+      squad(),
+      gameweek(0, { 1: { points: 0, minutes: 0 }, 2: { points: 5 } }),
+      { captainMultiplier: 3 },
+    );
+    expect(score.picks.find((p) => p.playerId === 2)!.points).toBe(15);
+  });
+
+  it('scores all fifteen under Bench Boost', () => {
+    const score = scoreSquad(squad(), gameweek(2), { countBench: true });
+    expect(score.picks).toHaveLength(SQUAD_SIZE);
+    // 15 × 2, plus the captain's extra 2.
+    expect(score.total).toBe(32);
+  });
+
+  it('makes no substitutions under Bench Boost, because there is nobody to replace', () => {
+    // A blank starter stays on the sheet scoring nothing, and the bench
+    // player who would have replaced them is already scoring in their own
+    // right — substituting would count one of them twice.
+    const score = scoreSquad(
+      squad(),
+      gameweek(1, { 5: { points: 0, minutes: 0 }, 12: { points: 6 } }),
+      { countBench: true },
+    );
+    expect(score.picks.some((p) => p.autoSubbed)).toBe(false);
+    expect(score.picks.find((p) => p.playerId === 5)!.points).toBe(0);
+    expect(score.picks.find((p) => p.playerId === 12)!.points).toBe(6);
+    expect(score.picks).toHaveLength(SQUAD_SIZE);
+  });
+
+  it('combines a bench boost with a captain who blanked', () => {
+    // No auto-subs, but the armband still moves — those are separate rules.
+    const score = scoreSquad(
+      squad(),
+      gameweek(0, { 1: { points: 0, minutes: 0 }, 2: { points: 4 } }),
+      { countBench: true },
+    );
+    expect(score.picks.find((p) => p.playerId === 2)!.captain).toBe(true);
+    expect(score.total).toBe(8);
+  });
+
+  it('still counts pending picks on the bench under Bench Boost', () => {
+    const score = scoreSquad(
+      squad(),
+      gameweek(1, { 14: { points: null, minutes: 90 } }),
+      { countBench: true },
+    );
+    expect(score.pending).toBe(1);
+  });
+
+  it('defaults to doubling when no multiplier is given', () => {
+    expect(scoreSquad(squad(), gameweek(0, { 1: { points: 7 } })).total).toBe(7 * CAPTAIN_MULTIPLIER);
+  });
+});

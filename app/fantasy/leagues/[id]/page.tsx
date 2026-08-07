@@ -6,6 +6,7 @@ import { getFantasyCalendar, getFantasySeason, isMissingTable } from '@/lib/site
 import { getLeague, getLeagueScoringData } from '@/lib/fantasy/leagueStore';
 import { leaveLeagueAction } from '@/lib/fantasy/leagueActions';
 import { rankLeague, scoreSeason, type LeagueEntry } from '@/lib/fantasy/standings';
+import { CHIP_LABELS } from '@/lib/fantasy/chips';
 import { FantasyShell } from '@/components/FantasyShell';
 import { BoardPanel } from '@/components/BoardPanel';
 
@@ -50,7 +51,11 @@ export default async function LeaguePage({ params }: { params: Promise<{ id: str
     userId: member.userId,
     squadName: member.squadName,
     score: member.generations.length > 0
-      ? scoreSeason(member.generations, gameweeks, { positions, transferCosts: member.transferCosts })
+      ? scoreSeason(member.generations, gameweeks, {
+        positions,
+        transferCosts: member.transferCosts,
+        chips: member.chips,
+      })
       : null,
   }));
 
@@ -63,6 +68,16 @@ export default async function LeaguePage({ params }: { params: Promise<{ id: str
   const provisional = entries.some((e) => (e.score?.pending ?? 0) > 0);
 
   const table = rankLeague(entries, latestGameweek);
+
+  // Who played a chip in the gameweek the table is showing. Read from the
+  // members rather than the ranked rows because a chip is a fact about a
+  // squad's gameweek, not about its position.
+  const latestChip = new Map(
+    members.flatMap((m) => {
+      const chip = latestGameweek === null ? null : m.chips.get(latestGameweek) ?? null;
+      return chip === null ? [] : [[m.userId, chip] as const];
+    }),
+  );
 
   return (
     <FantasyShell email={session.email} current="leagues">
@@ -133,6 +148,15 @@ export default async function LeaguePage({ params }: { params: Promise<{ id: str
                           <span className="flex items-baseline gap-1.5">
                             <span className={`truncate ${isMe ? 'font-semibold' : ''}`}>{row.squadName}</span>
                             {isMe && <span className="shrink-0 text-11 text-muted">(you)</span>}
+                            {/* A chip played this gameweek explains a score
+                                that would otherwise look inexplicable — a
+                                tripled captain or a boosted bench is most of
+                                the difference between two managers' weeks. */}
+                            {latestChip.get(row.userId) && (
+                              <span className="shrink-0 rounded border border-border px-1 text-11 text-muted">
+                                {CHIP_LABELS[latestChip.get(row.userId)!]}
+                              </span>
+                            )}
                           </span>
                         </td>
                         <td className="px-2 py-1.5 text-right font-mono tabular-nums">
