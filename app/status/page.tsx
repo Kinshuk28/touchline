@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import { getLatestRunPerJob, getLatestUpdate } from '@/lib/site/queries/status';
+import { FRESHNESS_COLUMN, getLatestRunPerJob, getLatestUpdate, type FreshnessTable } from '@/lib/site/queries/status';
 import { jobHealth, sortRunsByHealth, JOB_CADENCE_MINUTES, type JobHealth } from '@/lib/site/ingestHealth';
 import { relativeTime } from '@/lib/site/format';
 import { BoardPanel } from '@/components/BoardPanel';
@@ -40,7 +40,7 @@ const HEALTH_CLASS: Record<JobHealth, string> = {
   running: 'text-muted',
 };
 
-const TABLES = ['fixtures', 'standings', 'news_items', 'players'] as const;
+const TABLES = Object.keys(FRESHNESS_COLUMN) as FreshnessTable[];
 
 export default async function StatusPage() {
   const now = new Date();
@@ -136,7 +136,15 @@ export default async function StatusPage() {
           <ul>
             {TABLES.map((table, i) => (
               <li key={table} className="flex items-baseline justify-between gap-3 border-b border-border px-3 py-2 last:border-b-0">
-                <span className="font-mono text-13">{table}</span>
+                <span className="font-mono text-13">
+                  {table}
+                  {/* Which column this row is reading. They differ —
+                      news_items is written once and never revised, so it
+                      has created_at and no updated_at — and naming it is
+                      what stops "fresh" meaning two different things in
+                      one panel. */}
+                  <span className="ml-1.5 text-11 text-muted">{FRESHNESS_COLUMN[table]}</span>
+                </span>
                 {/* When the data itself last changed, which is not the same
                     as when a job last ran: a successful run against a
                     provider with nothing new leaves this untouched. */}
