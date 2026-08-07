@@ -205,30 +205,36 @@ export async function getSquadId(
   return (data as { id: string } | null)?.id ?? null;
 }
 
+/** A season score, plus the squad's own name — the landing dashboard's summary panel needs both. */
+export interface NamedSeasonScore extends SeasonScore {
+  squadName: string;
+}
+
 /**
  * One manager's own season score — the same arithmetic `getLeagueScoringData`
  * runs for a whole league (lib/fantasy/leagueStore.ts), scoped to a single
  * squad so the squad page can chart a season without joining a league first.
- * Three queries: this squad's id, its per-gameweek transfer cost and chip,
- * and its picks across every generation — then the published points for
- * whichever players it ever contained.
+ * Three queries: this squad's id and name, its per-gameweek transfer cost
+ * and chip, and its picks across every generation — then the published
+ * points for whichever players it ever contained.
  */
 export async function getSeasonScore(
   accessToken: string,
   userId: string,
   season: number,
-): Promise<SeasonScore | null> {
+): Promise<NamedSeasonScore | null> {
   const db = userClient(accessToken);
 
   const { data: squadRow, error: squadError } = await db
     .from('fantasy_squad')
-    .select('id')
+    .select('id,name')
     .eq('user_id', userId)
     .eq('season', season)
     .maybeSingle();
   if (squadError) throw new Error(`getSeasonScore (squad): ${squadError.message}`);
-  const squadId = (squadRow as { id: string } | null)?.id ?? null;
-  if (squadId === null) return null;
+  const squad = squadRow as { id: string; name: string } | null;
+  if (squad === null) return null;
+  const squadId = squad.id;
 
   const { data: gwRows, error: gwError } = await db
     .from('fantasy_squad_gameweek')
@@ -270,7 +276,9 @@ export async function getSeasonScore(
     byWeek.set(row.active_from_gameweek, generation);
   }
   const generations = [...byWeek.values()];
-  if (playerIds.size === 0) return { total: 0, gameweeks: [], pending: 0, transferCost: 0 };
+  if (playerIds.size === 0) {
+    return { squadName: squad.name, total: 0, gameweeks: [], pending: 0, transferCost: 0 };
+  }
 
   const ids = [...playerIds];
   const [gameweeks, positions] = await Promise.all([
@@ -278,7 +286,8 @@ export async function getSeasonScore(
     getPositionsForPlayers(accessToken, season, ids),
   ]);
 
-  return scoreSeason(generations, gameweeks, { positions, transferCosts: costsByGw, chips: chipsByGw });
+  const score = scoreSeason(generations, gameweeks, { positions, transferCosts: costsByGw, chips: chipsByGw });
+  return { squadName: squad.name, ...score };
 }
 
 /**

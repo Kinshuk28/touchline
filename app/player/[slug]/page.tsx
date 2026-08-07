@@ -5,15 +5,19 @@ import { getPlayerBySlug, getPlayerStats } from '@/lib/site/queries/players';
 import { getTeamById } from '@/lib/site/queries/teams';
 import { getFixturesForTeam } from '@/lib/site/queries/fixtures';
 import { getLeagues } from '@/lib/site/queries/leagues';
+import { getFantasySeason, getFantasyPlayerCard, isMissingTable, type FantasyPlayerCard } from '@/lib/site/queries/fantasy';
 import { ageFrom, displayStats } from '@/lib/site/playerPage';
 import { splitTeamFixtures } from '@/lib/site/teamPage';
 import { squadGroupOf } from '@/lib/site/squad';
 import { seasonLabel } from '@/lib/site/standingsDisplay';
 import { getCompetitionMeta } from '@/lib/site/competition';
 import { groupFixturesByDay } from '@/lib/site/spine';
+import { formatPrice } from '@/lib/fantasy/squadRules';
 import { BoardPanel } from '@/components/BoardPanel';
 import { Crest } from '@/components/Crest';
 import { MatchdaySpine } from '@/components/MatchdaySpine';
+import { PositionBadge } from '@/components/fantasy/badges';
+import { PlayerFormChart } from '@/components/fantasy/charts';
 
 /*
  * /player/[slug] — the other half of the club page. The squad list on
@@ -22,9 +26,12 @@ import { MatchdaySpine } from '@/components/MatchdaySpine';
  *
  * What this page can honestly be is set by what is stored: identity,
  * position, nationality, date of birth, current club, and season stats from
- * two providers. There is no per-match player data in this database, so
- * there is no minutes-by-match chart and no form line — the page shows what
- * exists and says nothing about what doesn't.
+ * two providers — plus, for a Premier League player the fantasy game
+ * tracks, real gameweek-by-gameweek points (`fantasy_gameweek_points`),
+ * which is the form line a version of this comment used to say plainly did
+ * not exist in this database. It still doesn't exist for anyone outside the
+ * Premier League, or before the fantasy tables are applied — both handled
+ * below by simply not showing the panel, never by inventing a number.
  */
 
 export const revalidate = 300;
@@ -74,6 +81,8 @@ export default async function PlayerPage({ params }: { params: Promise<{ slug: s
   // this app can know.
   const clubFixtures = club ? await getFixturesForTeam(club.id, 20) : [];
   const { upcoming } = splitTeamFixtures(clubFixtures, now, { upcoming: CLUB_FIXTURE_COUNT });
+
+  const fantasyCard = await getFantasyCardSafely(player.id);
 
   const stats = displayStats(rawStats);
   const age = ageFrom(player.date_of_birth, now);
@@ -171,19 +180,64 @@ export default async function PlayerPage({ params }: { params: Promise<{ slug: s
           )}
         </BoardPanel>
 
-        {club && upcoming.length > 0 && (
-          <BoardPanel
-            order={1}
-            label={`${club.short_name ?? club.name} next`}
-            action={<Link href={`/team/${club.slug}`} className="hover:text-text">Club page →</Link>}
-          >
-            {/* The club's fixtures, not a prediction that this player plays
-                in them — squad selection is not something this database
-                knows, so the panel is labelled by the club, not the player. */}
-            <MatchdaySpine days={groupFixturesByDay(upcoming)} leagues={leagues} now={now} variant="compact" chromeless />
-          </BoardPanel>
-        )}
+        {(club && upcoming.length > 0) || fantasyCard ? (
+          <div className="space-y-3">
+            {fantasyCard && (
+              <BoardPanel order={1} label="Fantasy" meta={`${fantasyCard.seasonPoints} pts`}>
+                <div className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-2">
+                  <PositionBadge position={fantasyCard.position} />
+                  <span className="font-mono text-13 font-semibold tabular-nums">
+                    {formatPrice(fantasyCard.priceTenths)}
+                  </span>
+                  <Link href="/fantasy" className="ml-auto text-11 text-muted hover:text-text">
+                    Pick a squad →
+                  </Link>
+                </div>
+                {fantasyCard.gameweeks.some((g) => g.points !== null) ? (
+                  <PlayerFormChart gameweeks={fantasyCard.gameweeks} />
+                ) : (
+                  <p className="px-3 py-4 text-13 text-muted">
+                    No gameweek has been scored yet this season.
+                  </p>
+                )}
+              </BoardPanel>
+            )}
+
+            {club && upcoming.length > 0 && (
+              <BoardPanel
+                order={2}
+                label={`${club.short_name ?? club.name} next`}
+                action={<Link href={`/team/${club.slug}`} className="hover:text-text">Club page →</Link>}
+              >
+                {/* The club's fixtures, not a prediction that this player
+                    plays in them — squad selection is not something this
+                    database knows, so the panel is labelled by the club, not
+                    the player. */}
+                <MatchdaySpine days={groupFixturesByDay(upcoming)} leagues={leagues} now={now} variant="compact" chromeless />
+              </BoardPanel>
+            )}
+          </div>
+        ) : null}
       </div>
     </div>
   );
+}
+
+/**
+ * The fantasy card is Premier-League-only and depends on migrations the
+ * project owner applies by hand (see docs/superpowers/specs/2026-08-07-
+ * fantasy-phase-c.md) — both `getFantasyPlayerCard` returning `null` and the
+ * table not existing yet are ordinary, expected states here, not errors.
+ * Either way the player page renders exactly as it did before this panel
+ * existed, never a 500.
+ */
+async function getFantasyCardSafely(playerId: number): Promise<FantasyPlayerCard | null> {
+  try {
+    const season = await getFantasySeason();
+    if (season === null) return null;
+    return await getFantasyPlayerCard(season, playerId);
+  } catch (err) {
+    if (isMissingTable(err instanceof Error ? err.message : String(err))) return null;
+    throw err;
+  }
 }

@@ -114,6 +114,51 @@ export async function getSeasonPoints(season: number): Promise<Map<number, numbe
   return totals;
 }
 
+export interface FantasyPlayerCard {
+  position: FantasyPosition;
+  priceTenths: number;
+  /** Summed from `gameweeks`, so it can never disagree with the chart drawn from the same rows. */
+  seasonPoints: number;
+  gameweeks: Array<{ gameweek: number; points: number | null; minutes: number | null }>;
+}
+
+/**
+ * One player's fantasy card, for the public player page — position, price
+ * and the season's points gameweek by gameweek. Two queries, not a join:
+ * `fantasy_player_season` and `fantasy_gameweek_points` share no foreign key
+ * PostgREST can embed across, since the points table is keyed on
+ * `(season, player_id, gameweek)` rather than the season row's id.
+ *
+ * Read with the anon key, same as the rest of this file: both tables are
+ * public — see the module doc — and nothing here is scoped to a signed-in
+ * manager.
+ */
+export async function getFantasyPlayerCard(season: number, playerId: number): Promise<FantasyPlayerCard | null> {
+  const [seasonRow, gwRows] = await Promise.all([
+    readClient()
+      .from('fantasy_player_season')
+      .select('position,price_tenths')
+      .eq('season', season)
+      .eq('player_id', playerId)
+      .maybeSingle(),
+    readClient()
+      .from('fantasy_gameweek_points')
+      .select('gameweek,points,minutes')
+      .eq('season', season)
+      .eq('player_id', playerId)
+      .order('gameweek', { ascending: true }),
+  ]);
+  if (seasonRow.error) throw new Error(`getFantasyPlayerCard (season): ${seasonRow.error.message}`);
+  if (gwRows.error) throw new Error(`getFantasyPlayerCard (gameweeks): ${gwRows.error.message}`);
+
+  const player = seasonRow.data as { position: FantasyPosition; price_tenths: number } | null;
+  if (!player) return null;
+
+  const gameweeks = (gwRows.data ?? []) as Array<{ gameweek: number; points: number | null; minutes: number | null }>;
+  const seasonPoints = gameweeks.reduce((sum, g) => sum + (g.points ?? 0), 0);
+  return { position: player.position, priceTenths: player.price_tenths, seasonPoints, gameweeks };
+}
+
 export interface Gameweek extends GameweekWindow {
   name: string;
   isCurrent: boolean;
