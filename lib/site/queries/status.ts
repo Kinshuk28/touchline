@@ -45,19 +45,37 @@ export async function getLatestRunPerJob(limit = 200): Promise<IngestRun[]> {
 }
 
 /**
- * The freshest `updated_at` in a table — how old the data itself is, as
- * opposed to when a job last claimed to run. The two can disagree: a job
- * that succeeds while its provider returns nothing new leaves the data
- * untouched, and only this number shows that.
+ * The freshest row in a table — how old the data itself is, as opposed to
+ * when a job last claimed to run. The two can disagree: a job that succeeds
+ * while its provider returns nothing new leaves the data untouched, and
+ * only this number shows that.
+ *
+ * The timestamp column is *not* the same in every table, which is why this
+ * is a map rather than a hardcoded `updated_at`. `news_items` has no
+ * `updated_at` at all — a news item is written once and never revised, so
+ * the schema gives it `created_at` — and asking for the wrong column is a
+ * hard PostgREST error, not an empty result (CI caught exactly that:
+ * "column news_items.updated_at does not exist", which the local mock had
+ * been quietly returning as `empty`).
  *
  * `null` when the table is empty, which is a real answer, not an error.
  */
-export async function getLatestUpdate(table: 'fixtures' | 'standings' | 'news_items' | 'players'): Promise<string | null> {
+export const FRESHNESS_COLUMN = {
+  fixtures: 'updated_at',
+  standings: 'updated_at',
+  players: 'updated_at',
+  news_items: 'created_at',
+} as const;
+
+export type FreshnessTable = keyof typeof FRESHNESS_COLUMN;
+
+export async function getLatestUpdate(table: FreshnessTable): Promise<string | null> {
+  const column = FRESHNESS_COLUMN[table];
   const { data, error } = await readClient()
     .from(table)
-    .select('updated_at')
-    .order('updated_at', { ascending: false })
+    .select(column)
+    .order(column, { ascending: false })
     .limit(1);
   if (error) throw new Error(`getLatestUpdate(${table}): ${error.message}`);
-  return (data?.[0] as { updated_at: string } | undefined)?.updated_at ?? null;
+  return (data?.[0] as Record<string, string> | undefined)?.[column] ?? null;
 }

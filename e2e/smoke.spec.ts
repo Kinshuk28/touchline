@@ -205,9 +205,14 @@ test('the status page reports ingest health and data freshness', async ({ page }
   await expect(page.getByRole('heading', { name: 'Status', level: 1 })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Ingest jobs', exact: true })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Data freshness', exact: true })).toBeVisible();
-  // Every job row names the table it feeds from; at minimum the fixtures
-  // freshness line is always present.
-  await expect(page.getByText('fixtures', { exact: true })).toBeVisible();
+  // The freshness panel names each table *and* the timestamp column it
+  // read. That pairing is the assertion, not decoration: the columns
+  // genuinely differ — news_items is written once and never revised, so it
+  // has created_at and no updated_at — and reading the wrong one is a hard
+  // Postgres error that took the whole build down (CI, 2026-08-07).
+  await expect(page.getByText('news_items')).toBeVisible();
+  await expect(page.getByText('created_at')).toBeVisible();
+  await expect(page.getByText('updated_at').first()).toBeVisible();
 });
 
 test('the theme toggle persists across a reload', async ({ page }) => {
