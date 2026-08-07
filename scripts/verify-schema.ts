@@ -25,6 +25,21 @@ const PENDING: Array<{ name: string; migration: string; effect: string }> = [
     migration: '0006_fantasy_gameweek_points.sql',
     effect: 'scripts/ingest/fantasy.ts cannot run',
   },
+  {
+    name: 'fantasy_player_season',
+    migration: '0007_fantasy_player_season.sql',
+    effect: 'the picker has no players to pick from',
+  },
+  {
+    name: 'fantasy_gameweek',
+    migration: '0008_fantasy_squads.sql',
+    effect: 'the picker cannot name a gameweek or a deadline',
+  },
+  {
+    name: 'fantasy_squad',
+    migration: '0008_fantasy_squads.sql',
+    effect: 'squads cannot be saved',
+  },
 ];
 
 const db = serviceClient();

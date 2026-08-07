@@ -84,3 +84,61 @@ export async function getStoredGameweekState(season: number): Promise<GameweekSt
     .map(([gameweek, isFinal]) => ({ gameweek, isFinal }))
     .sort((a, b) => a.gameweek - b.gameweek);
 }
+
+export interface FantasyPoolRow {
+  player_id: number;
+  season: number;
+  position: 'GK' | 'DEF' | 'MID' | 'FWD';
+  price_tenths: number;
+  updated_at: string;
+}
+
+/**
+ * The season's pickable pool — price and FPL position per player.
+ *
+ * Prices move during a season as managers buy and sell, so this is a full
+ * refresh on every run rather than an insert-once: the conflict target is
+ * (player_id, season) and an existing row's price is overwritten with the
+ * current one. A player who leaves the Premier League simply stops being
+ * refreshed; their row stays, which is correct — a squad picked in October
+ * still needs to know what its players were.
+ */
+export async function upsertFantasyPool(rows: FantasyPoolRow[]): Promise<void> {
+  if (rows.length === 0) return;
+  const deduped = dedupeByKey(rows, (r) => `${r.player_id}|${r.season}`);
+  const db = serviceClient();
+  for (let i = 0; i < deduped.length; i += 500) {
+    const { error } = await db
+      .from('fantasy_player_season')
+      .upsert(deduped.slice(i, i + 500), { onConflict: 'player_id,season' });
+    if (error) throw new Error(`upsertFantasyPool: ${error.message}`);
+  }
+}
+
+export interface FantasyGameweekRow {
+  season: number;
+  gameweek: number;
+  name: string;
+  deadline_utc: string | null;
+  finished: boolean;
+  is_final: boolean;
+  is_current: boolean;
+  updated_at: string;
+}
+
+/**
+ * The season calendar, mirrored from FPL's `events`.
+ *
+ * The picker needs it to say which gameweek a save takes effect from and to
+ * show a deadline. Both could in principle be inferred from which rows exist
+ * in `fantasy_gameweek_points`, but inferring a schedule from the presence
+ * of data is how a paused ingest run turns into a wrong deadline on a page.
+ */
+export async function upsertFantasyGameweeks(rows: FantasyGameweekRow[]): Promise<void> {
+  if (rows.length === 0) return;
+  const deduped = dedupeByKey(rows, (r) => `${r.season}|${r.gameweek}`);
+  const { error } = await serviceClient()
+    .from('fantasy_gameweek')
+    .upsert(deduped, { onConflict: 'season,gameweek' });
+  if (error) throw new Error(`upsertFantasyGameweeks: ${error.message}`);
+}

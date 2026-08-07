@@ -16,6 +16,8 @@
  * can point at in tests/fantasy/scoring.test.ts.
  */
 
+import { isLegalFormation, type FantasyPosition } from '@/lib/fantasy/squadRules';
+
 /** A player's published gameweek score, as ingested. `null` means FPL has not published one — not zero. */
 export interface PlayerGameweek {
   playerId: number;
@@ -81,6 +83,67 @@ function blanked(line: PlayerGameweek | undefined): boolean {
   return line !== undefined && line.minutes === 0;
 }
 
+export interface ScoreOptions {
+  /**
+   * Each squad player's position, so auto-substitutions respect the
+   * formation: a keeper only ever replaces a keeper, and an outfielder only
+   * comes on if the eleven left behind is still a formation football
+   * recognises.
+   *
+   * Optional because the rule it enables needs data this module is
+   * otherwise not given, and because the scorer has to keep working for a
+   * squad stored before positions were available. Omitted, substitutions
+   * are position-blind and simply take the first bench player who
+   * appeared — which can produce a lineup with two keepers and no forward.
+   * The picker always supplies it (`lib/fantasy/squadRules.ts` is where the
+   * shape rules live), so that path is a fallback, not the normal one.
+   *
+   * A player missing from the map is not blocked from coming on: an unknown
+   * position is no evidence of an illegal formation, and refusing the
+   * substitution would cost a manager points over a gap in our own data.
+   */
+  positions?: ReadonlyMap<number, FantasyPosition>;
+}
+
+function tally(
+  picks: readonly SquadPick[],
+  positions: ReadonlyMap<number, FantasyPosition>,
+): Record<FantasyPosition, number> {
+  const counts: Record<FantasyPosition, number> = { GK: 0, DEF: 0, MID: 0, FWD: 0 };
+  for (const pick of picks) {
+    const pos = positions.get(pick.playerId);
+    if (pos !== undefined) counts[pos] += 1;
+  }
+  return counts;
+}
+
+function keepsFormationLegal(
+  counts: Record<FantasyPosition, number>,
+  positions: ReadonlyMap<number, FantasyPosition>,
+  outId: number,
+  inId: number,
+): boolean {
+  const out = positions.get(outId);
+  const incoming = positions.get(inId);
+  // Either position unknown: judge nothing rather than block a substitution
+  // on the strength of missing data.
+  if (out === undefined || incoming === undefined) return true;
+  if (out === incoming) return true;
+  return isLegalFormation({ ...counts, [out]: counts[out] - 1, [incoming]: counts[incoming] + 1 });
+}
+
+function applySwap(
+  counts: Record<FantasyPosition, number>,
+  positions: ReadonlyMap<number, FantasyPosition>,
+  outId: number,
+  inId: number,
+): void {
+  const out = positions.get(outId);
+  const incoming = positions.get(inId);
+  if (out !== undefined) counts[out] -= 1;
+  if (incoming !== undefined) counts[incoming] += 1;
+}
+
 /**
  * One squad's score for one gameweek.
  *
@@ -102,24 +165,40 @@ function blanked(line: PlayerGameweek | undefined): boolean {
  * Picks the caller supplies with no matching gameweek line are treated the
  * same way — unknown, not zero.
  */
-export function scoreSquad(picks: readonly SquadPick[], gameweek: readonly PlayerGameweek[]): SquadScore {
+export function scoreSquad(
+  picks: readonly SquadPick[],
+  gameweek: readonly PlayerGameweek[],
+  opts: ScoreOptions = {},
+): SquadScore {
   const lineByPlayer = new Map(gameweek.map((line) => [line.playerId, line]));
   const bySlot = [...picks].sort((a, b) => a.slot - b.slot);
 
   const starters = bySlot.filter((p) => p.slot <= STARTING_SLOTS);
   const bench = bySlot.filter((p) => p.slot > STARTING_SLOTS);
 
-  // Auto-subs: each starter *known* to have blanked draws the next bench
-  // player *known* to have played. A starter whose minutes are merely
-  // unpublished keeps their place — see `playedFor`/`blanked` above.
+  // Auto-subs: each starter *known* to have blanked draws the first bench
+  // player *known* to have played whose arrival leaves a legal formation. A
+  // starter whose minutes are merely unpublished keeps their place — see
+  // `playedFor`/`blanked` above.
+  //
+  // `counts` tracks the eleven as substitutions are made, so each swap is
+  // judged against the lineup as it stands rather than the one that started
+  // — two blank defenders cannot both be replaced by forwards if the second
+  // swap would leave two at the back.
+  const positions = opts.positions;
+  const counts = positions ? tally(starters, positions) : null;
   const usedBench = new Set<number>();
+
   const active: Array<{ pick: SquadPick; autoSubbed: boolean }> = starters.map((pick) => {
     if (!blanked(lineByPlayer.get(pick.playerId))) return { pick, autoSubbed: false };
-    const replacement = bench.find(
-      (b) => !usedBench.has(b.playerId) && playedFor(lineByPlayer.get(b.playerId)),
-    );
+    const replacement = bench.find((b) => {
+      if (usedBench.has(b.playerId)) return false;
+      if (!playedFor(lineByPlayer.get(b.playerId))) return false;
+      return counts === null || keepsFormationLegal(counts, positions!, pick.playerId, b.playerId);
+    });
     if (!replacement) return { pick, autoSubbed: false };
     usedBench.add(replacement.playerId);
+    if (counts !== null) applySwap(counts, positions!, pick.playerId, replacement.playerId);
     // The substitute plays in the starter's slot, so the squad keeps eleven
     // scoring picks and the slot order stays meaningful for display.
     return { pick: { ...replacement, slot: pick.slot }, autoSubbed: true };

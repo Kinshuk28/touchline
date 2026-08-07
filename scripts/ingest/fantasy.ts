@@ -1,7 +1,12 @@
 import 'dotenv/config';
 import { FplClient } from '@/lib/providers/fpl';
 import { getPlayerIdByFplId } from '@/lib/db/repositories/players';
-import { upsertGameweekPoints, getStoredGameweekState } from '@/lib/db/repositories/fantasyPoints';
+import {
+  upsertGameweekPoints,
+  getStoredGameweekState,
+  upsertFantasyPool,
+  upsertFantasyGameweeks,
+} from '@/lib/db/repositories/fantasyPoints';
 import { startRun, finishRun } from '@/lib/db/repositories/runs';
 import { CURRENT_SEASON } from '@/lib/ingest/leagueSeed';
 import { planGameweekIngest } from '@/lib/ingest/gameweekSchedule';
@@ -30,7 +35,14 @@ import type { FantasyGameweekPointsRow } from '@/lib/db/repositories/fantasyPoin
  * That deliberately includes weeks an earlier failed run left half-written,
  * which a "fetch the current one" rule would lose forever.
  *
- * REQUEST COST. One `bootstrap-static` for the calendar and the player
+ * IT ALSO REFRESHES THE PICKABLE POOL. The same `bootstrap-static` response
+ * carries every player's `now_cost` and `element_type`, which are what the
+ * picker needs and what nothing else in this database records. Prices move
+ * all season, so `fantasy_player_season` is overwritten on every run — and
+ * on every run, including ones with no gameweek to fetch, because the picker
+ * is used between gameweeks more than during them.
+ *
+ * REQUEST COST. One `bootstrap-static` for the calendar, the pool and the
  * identity map, plus one per gameweek fetched — normally 2, at most 7. FPL's
  * API is unmetered and needs no key; the count is still reported on the run
  * because an unbounded number of requests is a bug whether or not anyone
@@ -50,24 +62,65 @@ let requests = 0;
 try {
   const fpl = new FplClient();
 
-  const { events } = await fpl.getBootstrap();
+  const { events, players } = await fpl.getBootstrap();
   requests += 1;
   if (events.length === 0) throw new Error('FPL bootstrap-static returned no gameweek calendar');
+
+  // The pickable pool, refreshed from the same request that fetched the
+  // calendar. Prices move all season as managers buy and sell, so this is a
+  // full overwrite rather than an insert-once — and it has to happen even on
+  // a run that fetches no gameweeks, which is why it sits above the early
+  // exit below.
+  const idByFplForPool = await getPlayerIdByFplId();
+  let poolSkipped = 0;
+  const pool = players.flatMap((p) => {
+    const playerId = idByFplForPool.get(p.fplId);
+    // A player with no price or no position is not pickable, and a guessed
+    // one would be free to buy or count toward the wrong shape. Skipped, not
+    // defaulted.
+    if (playerId === undefined || p.nowCost === null || p.positionCode === null) {
+      poolSkipped += 1;
+      return [];
+    }
+    return [{
+      player_id: playerId,
+      season: CURRENT_SEASON,
+      position: p.positionCode,
+      price_tenths: p.nowCost,
+      updated_at: new Date().toISOString(),
+    }];
+  });
+  await upsertFantasyPool(pool);
+  console.log(`fantasy: pool ${pool.length} players priced${poolSkipped > 0 ? `, ${poolSkipped} skipped` : ''}`);
+
+  // The calendar itself, so the picker can name a gameweek and show its
+  // deadline without inferring a schedule from which points rows happen to
+  // exist.
+  await upsertFantasyGameweeks(events.map((e) => ({
+    season: CURRENT_SEASON,
+    gameweek: e.id,
+    name: e.name,
+    deadline_utc: e.deadlineTime,
+    finished: e.finished,
+    is_final: e.dataChecked,
+    is_current: e.isCurrent,
+    updated_at: new Date().toISOString(),
+  })));
 
   const stored = await getStoredGameweekState(CURRENT_SEASON);
   const plan = planGameweekIngest(events, stored, { now: new Date() });
   console.log(`fantasy: ${plan.reason}`);
 
   if (plan.fetch.length === 0) {
-    await finishRun(runId, 'ok', `nothing to fetch — ${plan.reason}`, requests);
-    console.log('fantasy: nothing to fetch');
+    const message = `${events.length} gameweeks, pool ${pool.length} priced; nothing to fetch — ${plan.reason}`;
+    await finishRun(runId, 'ok', message, requests);
+    console.log(`fantasy done: ${message}`);
     process.exit(0);
   }
 
-  // Resolved once and reused across gameweeks — the map is the same for all
-  // of them, and re-reading it per gameweek would be a database round trip
-  // per request saved nothing.
-  const idByFpl = await getPlayerIdByFplId();
+  // Reused across gameweeks — the map is the same for all of them, and the
+  // pool refresh above already paid for reading it.
+  const idByFpl = idByFplForPool;
   const checkedById = new Map(events.map((e) => [e.id, e.dataChecked]));
   const now = new Date().toISOString();
 
@@ -135,7 +188,7 @@ try {
   }
 
   const message =
-    `${written} rows across ${plan.fetch.length} gameweeks (${perGameweek.join(', ')})` +
+    `${events.length} gameweeks, pool ${pool.length} priced; ${written} rows across ${plan.fetch.length} gameweeks (${perGameweek.join(', ')})` +
     (unknown > 0 ? `, ${unknown} unknown players` : '') +
     (plan.deferred.length > 0 ? `, ${plan.deferred.length} deferred` : '');
   await finishRun(runId, 'ok', message, requests);

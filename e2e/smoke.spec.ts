@@ -36,8 +36,11 @@ test('the landing board renders its three columns of real data', async ({ page }
   await expect(page.getByText('Premier League').first()).toBeVisible();
 
   // The Fantasy line survives the rebuild as a single strip — it is a
-  // product statement, not a section (the board's argument is density).
-  await expect(page.getByText(/In development/i)).toBeVisible();
+  // product statement, not a section (the board's argument is density). It
+  // stopped saying "In development" when the picker shipped: the teaser now
+  // links to it, and a teaser whose call to action is a dead end is the
+  // thing this assertion exists to catch.
+  await expect(page.getByRole('link', { name: /Pick your squad/i })).toBeVisible();
 });
 
 // The board's table panel is competition-switchable via `?table=`, the same
@@ -234,4 +237,28 @@ test('the theme toggle persists across a reload', async ({ page }) => {
   expect(after).not.toBe(before);
   await page.reload();
   await expect.poll(() => page.evaluate(() => document.documentElement.dataset.theme)).toBe(after);
+});
+
+// The fantasy game is the site's first signed-in surface. Everything below
+// the sign-in page needs a session, which an anonymous smoke run does not
+// have — so what is asserted here is exactly the part that must work for
+// someone arriving with no account: the route exists, it does not leak a
+// squad, and it offers a way in.
+test('the Fantasy route sends a signed-out visitor to sign in', async ({ page }) => {
+  await page.goto('/fantasy');
+  await expect(page).toHaveURL(/\/fantasy\/sign-in$/);
+
+  // One email field and no password field anywhere — magic links are the
+  // whole account surface, and a password box appearing here would mean
+  // something had been added that stores one.
+  await expect(page.getByLabel('Email address')).toBeVisible();
+  await expect(page.locator('input[type="password"]')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /Email me a link/i })).toBeVisible();
+});
+
+test('the Fantasy route is reachable from the header nav', async ({ page }) => {
+  await page.goto('/');
+  const nav = page.getByRole('navigation', { name: 'Primary' });
+  await nav.getByRole('link', { name: 'Fantasy' }).click();
+  await expect(page).toHaveURL(/\/fantasy(\/sign-in)?$/);
 });

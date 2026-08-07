@@ -17,12 +17,28 @@ const POSITIONS: Record<number, string> = {
 // see `getBootstrap` below.
 const KNOWN_POSITION_TYPES = new Set(Object.keys(POSITIONS).map(Number));
 
+/**
+ * The same four positions as codes, which is the form the fantasy game
+ * reasons in (`lib/fantasy/squadRules.ts`). FPL's `element_type` is the
+ * authoritative classification for fantasy purposes -- football-data's
+ * position text is finer-grained ("Defensive Midfield") and disagrees with
+ * FPL often enough that using it to decide a squad's legal shape would
+ * reject squads FPL itself would accept.
+ */
+const POSITION_CODES: Record<number, 'GK' | 'DEF' | 'MID' | 'FWD'> = {
+  1: 'GK', 2: 'DEF', 3: 'MID', 4: 'FWD',
+};
+
 export interface FplPlayer {
   fplId: number;
   name: string;
   webName: string;
   teamFplId: number;
   position: string | null;
+  /** FPL's own GK/DEF/MID/FWD, the classification the fantasy game's shape rules use. */
+  positionCode: 'GK' | 'DEF' | 'MID' | 'FWD' | null;
+  /** `now_cost` — tenths of a million, so 125 is £12.5m. The game's only source of scarcity. */
+  nowCost: number | null;
   minutes: number | null;
   goals: number | null;
   assists: number | null;
@@ -204,6 +220,10 @@ function mapPlayer(e: FplElement): FplPlayer {
     // should be unreachable, but a guessed position is never an acceptable
     // substitute for `null` if it somehow is.
     position: POSITIONS[e.element_type] ?? null,
+    positionCode: POSITION_CODES[e.element_type] ?? null,
+    // `?? null` for the same reason as the stats below: a missing price is
+    // unknown, and a player priced at £0.0m would be free to pick.
+    nowCost: e.now_cost ?? null,
     // `?? 0` here would turn "this field is absent from the payload" into an
     // authoritative "this player has played 0 minutes / scored 0 goals" —
     // exactly the fabrication this product promises never to do. `null`
@@ -230,6 +250,7 @@ interface FplElement {
   goals_scored?: number;
   assists?: number;
   expected_goals?: string | number;
+  now_cost?: number;
   photo?: string;
 }
 
