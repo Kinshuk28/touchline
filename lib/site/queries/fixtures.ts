@@ -179,21 +179,29 @@ export async function getUpcoming(now: Date, limit = 12, leagueIds?: number[]): 
 }
 
 /**
- * How many fixtures are still to come, in total. The landing board shows a
+ * How many fixtures fall in the next `days`. The landing board shows a
  * fixed number of the soonest ones, and this is what lets it say so out
- * loud ("14 of 87 scheduled") instead of leaving a reader to wonder whether
- * the rest of the weekend exists. `head: true` means PostgREST returns the
- * count in a header and no rows at all, so this costs a count, not a page
- * of joined fixture data.
+ * loud ("14 of 63 this week") rather than leaving a reader to wonder
+ * whether the rest of the weekend exists.
  *
- * Same status and time window as `getUpcoming`, deliberately: a count that
- * doesn't match the list it describes is worse than no count.
+ * Windowed, not total, and that is the whole point: the database holds
+ * every fixture of all five full seasons, so an unbounded count answers
+ * "14 of 1752" — true, useless, and reading as though the board were
+ * hiding 1,738 matches from you. A week is the span a reader is actually
+ * deciding about.
+ *
+ * `head: true` means PostgREST returns the count in a header and no rows,
+ * so this costs a count rather than a page of joined fixture data. Same
+ * status filter as `getUpcoming`: a count that doesn't match the list it
+ * describes is worse than no count.
  */
-export async function countUpcoming(now: Date): Promise<number> {
+export async function countUpcoming(now: Date, days = 7): Promise<number> {
+  const until = new Date(now.getTime() + days * 86_400_000).toISOString();
   const { count, error } = await readClient()
     .from('fixtures')
     .select('id', { count: 'exact', head: true })
     .gt('kickoff_utc', now.toISOString())
+    .lte('kickoff_utc', until)
     .in('status', ['SCHEDULED', 'TIMED']);
   if (error) throw new Error(`countUpcoming: ${error.message}`);
   return count ?? 0;
