@@ -186,11 +186,16 @@ export default async function Home({
           order={0}
           label={fixtureHeading}
           meta={
-            // Range plus how much of the whole this is. A summary panel that
-            // doesn't say it is a summary is how the previous version got
-            // away with hiding two thirds of a matchday.
+            // Range plus how much of the coming week this is. A summary
+            // panel that doesn't say it is a summary is how the previous
+            // version got away with hiding two thirds of a matchday — and
+            // the count is windowed to a week because the unbounded one
+            // ("14 of 1752", every fixture of five full seasons) reads as a
+            // far bigger omission than the board is actually making.
             fixtureRange
-              ? `${fixtureRange}${upcomingTotal > upcoming.length ? ` · ${upcoming.length} of ${upcomingTotal}` : ''}`
+              ? `${fixtureRange}${
+                upcomingTotal > upcoming.length ? ` · ${upcoming.length} of ${upcomingTotal} this week` : ''
+              }`
               : undefined
           }
           action={<Link href="/calendar" className="group/link inline-flex items-center gap-1 hover:text-text">All fixtures <span className="transition-transform group-hover/link:translate-x-0.5 motion-reduce:transition-none" aria-hidden="true">→</span></Link>}
