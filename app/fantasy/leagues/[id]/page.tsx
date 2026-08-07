@@ -49,7 +49,9 @@ export default async function LeaguePage({ params }: { params: Promise<{ id: str
   const entries: LeagueEntry[] = members.map((member) => ({
     userId: member.userId,
     squadName: member.squadName,
-    score: member.generations.length > 0 ? scoreSeason(member.generations, gameweeks, { positions }) : null,
+    score: member.generations.length > 0
+      ? scoreSeason(member.generations, gameweeks, { positions, transferCosts: member.transferCosts })
+      : null,
   }));
 
   // The most recent gameweek anybody has been scored for — the column a
@@ -134,7 +136,20 @@ export default async function LeaguePage({ params }: { params: Promise<{ id: str
                           </span>
                         </td>
                         <td className="px-2 py-1.5 text-right font-mono tabular-nums">
-                          {row.latest ?? <span className="text-muted">—</span>}
+                          {row.latest === null ? (
+                            <span className="text-muted">—</span>
+                          ) : (
+                            <>
+                              {row.latest}
+                              {/* The hit is shown, not folded silently into
+                                  the score: "58 (-4)" is the fact, and a
+                                  manager who paid for transfers should see
+                                  what they paid. */}
+                              {row.latestCost > 0 && (
+                                <span className="ml-1 text-11 text-muted">(-{row.latestCost})</span>
+                              )}
+                            </>
+                          )}
                         </td>
                         <td className="px-2 py-1.5 text-right font-mono font-bold tabular-nums">{row.total}</td>
                       </tr>

@@ -77,6 +77,7 @@ describe('scoreSeason', () => {
     // 11 starters × 2, plus the captain's extra 2, in the two XI_A weeks.
     expect(season.gameweeks.map((g) => g.points)).toEqual([24, 24, 0, 0]);
     expect(season.total).toBe(48);
+    expect(season.transferCost).toBe(0);
   });
 
   it('skips gameweeks the manager was not playing rather than scoring them zero', () => {
@@ -107,7 +108,7 @@ describe('scoreSeason', () => {
 
   it('is an empty season, not an error, when nothing has been scored yet', () => {
     const season = scoreSeason([{ activeFromGameweek: 1, picks: side(XI_A) }], []);
-    expect(season).toEqual({ total: 0, gameweeks: [], pending: 0 });
+    expect(season).toEqual({ total: 0, gameweeks: [], pending: 0, transferCost: 0 });
   });
 
   it('scores nothing for a manager with no picks at all', () => {
@@ -116,15 +117,57 @@ describe('scoreSeason', () => {
   });
 });
 
+describe('scoreSeason — transfer costs', () => {
+  const generations: PickGeneration[] = [{ activeFromGameweek: 1, picks: side(XI_A) }];
+
+  it('docks the cost from the gameweek it was incurred in', () => {
+    const season = scoreSeason(generations, [week(1, 2, XI_A), week(2, 2, XI_A)], {
+      transferCosts: new Map([[2, 8]]),
+    });
+    expect(season.gameweeks.map((g) => [g.points, g.transferCost, g.net])).toEqual([
+      [24, 0, 24],
+      [24, 8, 16],
+    ]);
+    expect(season.total).toBe(40);
+    expect(season.transferCost).toBe(8);
+  });
+
+  it('lets a hit take a gameweek negative rather than flooring it at zero', () => {
+    // A 12-point hit on a 4-point week really is minus eight, and hiding that
+    // would make the season total stop adding up.
+    const season = scoreSeason(generations, [week(1, 0, [])], { transferCosts: new Map([[1, 12]]) });
+    expect(season.gameweeks[0]!.net).toBe(-12);
+    expect(season.total).toBe(-12);
+  });
+
+  it('ignores a cost recorded against a gameweek the manager was not playing', () => {
+    const joinedLate: PickGeneration[] = [{ activeFromGameweek: 3, picks: side(XI_A) }];
+    const season = scoreSeason(joinedLate, [week(1, 1, XI_A), week(3, 1, XI_A)], {
+      transferCosts: new Map([[1, 20], [3, 4]]),
+    });
+    expect(season.gameweeks.map((g) => g.gameweek)).toEqual([3]);
+    expect(season.transferCost).toBe(4);
+  });
+
+  it('never turns a stored cost into a bonus', () => {
+    const season = scoreSeason(generations, [week(1, 1, XI_A)], { transferCosts: new Map([[1, -50]]) });
+    expect(season.gameweeks[0]!.transferCost).toBe(0);
+    expect(season.total).toBe(12);
+  });
+});
+
 describe('rankLeague', () => {
-  function entry(userId: string, squadName: string, total: number, latest?: number): LeagueEntry {
+  function entry(userId: string, squadName: string, total: number, latest?: number, cost = 0): LeagueEntry {
     return {
       userId,
       squadName,
       score: {
         total,
         pending: 0,
-        gameweeks: latest === undefined ? [] : [{ gameweek: 5, points: latest, pending: 0 }],
+        transferCost: cost,
+        gameweeks: latest === undefined
+          ? []
+          : [{ gameweek: 5, points: latest + cost, transferCost: cost, net: latest, pending: 0 }],
       },
     };
   }
@@ -158,6 +201,12 @@ describe('rankLeague', () => {
     // person who is missing.
     const table = rankLeague([entry('a', 'Ant', 30), { userId: 'b', squadName: 'Bee', score: null }], null);
     expect(table.map((r) => [r.squadName, r.total])).toEqual([['Ant', 30], ['Bee', 0]]);
+  });
+
+  it('reports the gameweek net of its transfer cost, and the cost alongside', () => {
+    const table = rankLeague([entry('a', 'Ant', 100, 54, 8)], 5);
+    expect(table[0]!.latest).toBe(54);
+    expect(table[0]!.latestCost).toBe(8);
   });
 
   it('reports this gameweek separately from the season', () => {

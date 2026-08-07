@@ -11,7 +11,8 @@ import {
   type PoolPlayer,
   type Gameweek,
 } from '@/lib/site/queries/fantasy';
-import { getSquadForGameweek } from '@/lib/fantasy/squadStore';
+import { getSquadForGameweek, getSquadId, getTransferHistory } from '@/lib/fantasy/squadStore';
+import { transferAllowance } from '@/lib/fantasy/transfers';
 import { openGameweek, timeUntilDeadline } from '@/lib/fantasy/gameweekWindow';
 import { STARTING_SLOTS } from '@/lib/fantasy/squadRules';
 import { SquadPicker, type PickerInitial } from '@/components/SquadPicker';
@@ -71,11 +72,6 @@ export default async function FantasyPage() {
     );
   }
 
-  // Points are a separate read with a different lifetime, joined here rather
-  // than in the query: a squad can be picked perfectly well before a ball is
-  // kicked, when this map is empty.
-  const priced = pool.map((p) => ({ ...p, seasonPoints: points.get(p.playerId) ?? null }));
-
   const now = new Date();
   const gameweek = openGameweek(calendar, now);
   const gameweekRow = gameweek === null ? null : calendar.find((g) => g.gameweek === gameweek) ?? null;
@@ -87,7 +83,14 @@ export default async function FantasyPage() {
   // The side already saved for the gameweek being picked. Falls back to the
   // most recent generation, which is what `getSquadForGameweek` returns when
   // no save exists for this week yet.
+  // `existing` is the side to edit; `locked` is the side that finished last
+  // gameweek, which is what transfers are counted against. See the note in
+  // lib/fantasy/pickerActions.ts — after one save these differ, and using
+  // the wrong one undercharges a manager who saves twice before a deadline.
   const existing = gameweek === null ? null : await getSquadForGameweek(session.accessToken, session.userId, season, gameweek);
+  const locked = gameweek === null || gameweek <= 1
+    ? null
+    : await getSquadForGameweek(session.accessToken, session.userId, season, gameweek - 1);
   const initial: PickerInitial | null = existing && existing.picks.length > 0
     ? {
       name: existing.name,
@@ -98,9 +101,35 @@ export default async function FantasyPage() {
     }
     : null;
 
+  // A player already owned keeps what they cost; only a new arrival pays
+  // today's price. Applied to the whole pool so the picker's budget
+  // arithmetic is the same arithmetic the server will redo on save — a
+  // picker that says a squad is affordable and a save that disagrees is
+  // worse than either rule on its own. See lib/fantasy/pickerActions.ts.
+  const paid = new Map(
+    (existing?.picks ?? []).flatMap((p) => (p.priceTenths === null ? [] : [[p.playerId, p.priceTenths] as const])),
+  );
+  const priced = pool.map((p) => ({
+    ...p,
+    priceTenths: paid.get(p.playerId) ?? p.priceTenths,
+    seasonPoints: points.get(p.playerId) ?? null,
+  }));
+
+  // How many changes are free this gameweek. `null` means unlimited, which is
+  // the state until a first side has been locked in.
+  const squadId = await getSquadId(session.accessToken, session.userId, season);
+  const history = squadId === null ? [] : await getTransferHistory(session.accessToken, squadId);
+  const allowance = gameweek === null ? null : transferAllowance(history, gameweek);
+
   return (
     <FantasyShell email={session.email} current="squad">
-      <SquadPicker pool={priced} initial={initial} gameweekLabel={gameweekLabel} />
+      <SquadPicker
+        pool={priced}
+        initial={initial}
+        gameweekLabel={gameweekLabel}
+        previousIds={locked?.picks.map((p) => p.playerId) ?? []}
+        freeTransfers={allowance === null || allowance.unlimited ? null : allowance.free}
+      />
     </FantasyShell>
   );
 }

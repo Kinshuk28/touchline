@@ -5,7 +5,8 @@ import { z } from 'zod';
 import { getSession } from '@/lib/auth/session';
 import { getPlayerPool, getFantasyCalendar, getFantasySeason } from '@/lib/site/queries/fantasy';
 import { openGameweek } from '@/lib/fantasy/gameweekWindow';
-import { saveSquad } from '@/lib/fantasy/squadStore';
+import { saveSquad, getSquadId, getSquadForGameweek, getTransferHistory } from '@/lib/fantasy/squadStore';
+import { transfersBetween, transferAllowance, transferCost } from '@/lib/fantasy/transfers';
 import {
   assignSlots,
   lineupErrors,
@@ -44,6 +45,27 @@ export interface SaveState {
   /** Everything wrong at once, so a manager fixes one squad rather than discovering five refusals. */
   errors: string[];
   message: string;
+}
+
+/**
+ * A squad is valued at what it cost, not at today's list price.
+ *
+ * FPL prices move all season, so charging a stored squad today's prices would
+ * push a manager whose players *improved* over the budget and force them to
+ * sell one — being punished for picking well. Instead each pick records what
+ * it cost when bought (supabase/migrations/0010), a player already owned keeps
+ * that price, and only a new arrival pays the current one.
+ *
+ * A pick with no recorded price is one written before 0010; it falls back to
+ * the current price, which is the only honest answer available.
+ */
+function priceFor(
+  playerId: number,
+  owned: ReadonlyMap<number, number | null>,
+  pool: ReadonlyMap<number, PickablePlayer>,
+): number {
+  const paid = owned.get(playerId);
+  return paid ?? pool.get(playerId)?.priceTenths ?? 0;
 }
 
 export async function saveSquadAction(_prev: SaveState, formData: FormData): Promise<SaveState> {
@@ -88,18 +110,6 @@ export async function saveSquadAction(_prev: SaveState, formData: FormData): Pro
     };
   }
 
-  const selected = ids.map((id) => byId.get(id)!);
-  const startingPlayers = starters.map((id) => byId.get(id)!);
-  const benchPlayers = bench.map((id) => byId.get(id)!);
-
-  const errors = [
-    ...selectionErrors(selected),
-    ...lineupErrors(startingPlayers, { captainId, viceCaptainId }),
-  ];
-  if (errors.length > 0) {
-    return { status: 'error', errors: namedClubs(errors, pool), message: 'That squad is not legal yet.' };
-  }
-
   // Which gameweek this takes effect from. Once a deadline passes the picks
   // for that week are settled, so a save becomes the *next* week's side —
   // see lib/fantasy/gameweekWindow.ts for why that rule is the whole game.
@@ -109,23 +119,85 @@ export async function saveSquadAction(_prev: SaveState, formData: FormData): Pro
     return { status: 'error', errors: [], message: 'The season is over — there is no gameweek left to pick for.' };
   }
 
+  // Two different sides matter here, and conflating them is a real bug.
+  //
+  // `current` is what the picker was editing — the newest generation at or
+  // before the open gameweek, which after one save *is* this gameweek's side.
+  // It carries the purchase prices.
+  //
+  // `locked` is the side that finished the previous gameweek, and it is what
+  // transfers are counted against. Diffing against `current` instead would
+  // let a manager save three changes, then three more, and be charged for
+  // three: each save would compare against the one before it rather than
+  // against the side they actually started the week with. Counting from
+  // `locked` every time is also what makes changing your mind before the
+  // deadline free, which is the behaviour anyone would expect.
+  const squadId = await getSquadId(session.accessToken, session.userId, season);
+  const [current, locked] = squadId === null
+    ? [null, null]
+    : await Promise.all([
+      getSquadForGameweek(session.accessToken, session.userId, season, gameweek),
+      getSquadForGameweek(session.accessToken, session.userId, season, gameweek - 1),
+    ]);
+  const previousIds = locked?.picks.map((p) => p.playerId) ?? [];
+  const paidFor = new Map<number, number | null>(
+    (current?.picks ?? []).map((p) => [p.playerId, p.priceTenths]),
+  );
+
+  // Prices: a player already in the squad keeps what they cost; a new arrival
+  // pays today's price. See `priceFor`.
+  const priced = new Map<number, PickablePlayer>(
+    ids.map((id) => {
+      const player = byId.get(id)!;
+      return [id, { ...player, priceTenths: priceFor(id, paidFor, byId) }];
+    }),
+  );
+  const selected = ids.map((id) => priced.get(id)!);
+  const startingPlayers = starters.map((id) => priced.get(id)!);
+  const benchPlayers = bench.map((id) => priced.get(id)!);
+
+  const errors = [
+    ...selectionErrors(selected),
+    ...lineupErrors(startingPlayers, { captainId, viceCaptainId }),
+  ];
+  if (errors.length > 0) {
+    return { status: 'error', errors: namedClubs(errors, pool), message: 'That squad is not legal yet.' };
+  }
+
+  const history = squadId === null ? [] : await getTransferHistory(session.accessToken, squadId);
+  const diff = transfersBetween(previousIds, ids);
+  const allowance = transferAllowance(history, gameweek);
+  const cost = transferCost(diff.count, allowance);
+
   const slots = assignSlots(startingPlayers, benchPlayers);
   const picks = slots.map(({ playerId, slot }) => ({
     playerId,
     slot,
     isCaptain: playerId === captainId,
     isViceCaptain: playerId === viceCaptainId,
+    priceTenths: priced.get(playerId)!.priceTenths,
   }));
 
   try {
-    await saveSquad(session.accessToken, session.userId, season, { name, activeFromGameweek: gameweek, picks });
+    await saveSquad(session.accessToken, session.userId, season, {
+      name,
+      activeFromGameweek: gameweek,
+      picks,
+      transfersMade: diff.count,
+      transferCost: cost,
+    });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return { status: 'error', errors: [], message: `Could not save: ${message}` };
   }
 
   revalidatePath('/fantasy');
-  return { status: 'saved', errors: [], message: `Saved — this side plays from gameweek ${gameweek}.` };
+  const note = cost > 0 ? ` ${diff.count} transfers cost ${cost} points.` : '';
+  return {
+    status: 'saved',
+    errors: [],
+    message: `Saved — this side plays from gameweek ${gameweek}.${note}`,
+  };
 }
 
 /**

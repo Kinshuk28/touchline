@@ -21,6 +21,12 @@ import {
   type FantasyPosition,
   type PickablePlayer,
 } from '@/lib/fantasy/squadRules';
+import {
+  transfersBetween,
+  transferCost,
+  describeTransfers,
+  type TransferAllowance,
+} from '@/lib/fantasy/transfers';
 import type { PoolPlayer } from '@/lib/site/queries/fantasy';
 
 /*
@@ -116,11 +122,24 @@ export function SquadPicker({
   pool,
   initial,
   gameweekLabel,
+  previousIds,
+  freeTransfers,
 }: {
   pool: PoolPlayer[];
   initial: PickerInitial | null;
   /** e.g. "Gameweek 5 — deadline in 3 days". Rendered as given. */
   gameweekLabel: string | null;
+  /** The side currently in force. Empty before a first squad exists. */
+  previousIds: number[];
+  /**
+   * Free transfers for this gameweek, or `null` for unlimited — the state
+   * before a first side has been locked in.
+   *
+   * `null` rather than `Infinity` because this crosses the server/client
+   * boundary, and a sentinel that survives serialisation everywhere beats one
+   * that happens to today.
+   */
+  freeTransfers: number | null;
 }) {
   const [name, setName] = useState(initial?.name ?? 'My squad');
   const [squad, setSquad] = useState<SquadState>({
@@ -143,6 +162,19 @@ export function SquadPicker({
 
   const spent = totalCost(selected);
   const remaining = BUDGET_TENTHS - spent;
+
+  // What this save would cost in points. Recomputed on the server before
+  // anything is written — see lib/fantasy/pickerActions.ts — so this is here
+  // to let a manager see the price *before* committing to it, which is the
+  // whole reason a transfer limit is interesting.
+  const allowance: TransferAllowance = freeTransfers === null
+    ? { free: Number.POSITIVE_INFINITY, unlimited: true }
+    : { free: freeTransfers, unlimited: false };
+  const diff = useMemo(
+    () => transfersBetween(previousIds, [...starters, ...bench]),
+    [previousIds, starters, bench],
+  );
+  const hit = transferCost(diff.count, allowance);
 
   const problems = useMemo(() => {
     const nameOf = (id: number) => pool.find((p) => p.teamId === id)?.teamName ?? `club ${id}`;
@@ -268,7 +300,17 @@ export function SquadPicker({
         picked={selected.length}
         formation={starters.length === STARTING_SLOTS ? formationName(countByPosition(startingPlayers)) : null}
         gameweekLabel={gameweekLabel}
+        transfers={previousIds.length > 0 ? diff.count : null}
+        hit={hit}
       />
+
+      {/* Only once a side exists to change. Before that every pick is the
+          first squad, and a transfer counter would be counting nothing. */}
+      {previousIds.length > 0 && (
+        <p className="rounded-xl border border-border bg-surface px-3 py-2 text-13 text-muted">
+          {describeTransfers(diff.count, allowance)}
+        </p>
+      )}
 
       {/* Silent until there is something to be wrong about. A manager who
           has just arrived does not need to be told their empty squad is
@@ -466,7 +508,7 @@ export function SquadPicker({
 }
 
 function SummaryBar({
-  name, onName, spent, remaining, picked, formation, gameweekLabel,
+  name, onName, spent, remaining, picked, formation, gameweekLabel, transfers, hit,
 }: {
   name: string;
   onName: (value: string) => void;
@@ -475,6 +517,9 @@ function SummaryBar({
   picked: number;
   formation: string | null;
   gameweekLabel: string | null;
+  /** Null until a side exists to change. */
+  transfers: number | null;
+  hit: number;
 }) {
   return (
     <div className="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-xl border border-border bg-surface px-3 py-2">
@@ -510,6 +555,18 @@ function SummaryBar({
           <div>
             <dt className="text-11 uppercase tracking-wider text-muted">Formation</dt>
             <dd className="text-18 font-bold tabular-nums">{formation}</dd>
+          </div>
+        )}
+        {transfers !== null && (
+          <div>
+            <dt className="text-11 uppercase tracking-wider text-muted">Transfers</dt>
+            {/* The cost sits beside the count rather than in a colour: "3"
+                and "3 (-4 pts)" are different facts and read as such in
+                black and white. */}
+            <dd className="text-18 font-bold tabular-nums">
+              {transfers}
+              {hit > 0 && <span className="ml-1 text-13 font-medium">(-{hit} pts)</span>}
+            </dd>
           </div>
         )}
       </dl>

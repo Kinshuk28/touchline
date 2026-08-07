@@ -1,8 +1,8 @@
 # Touchline — Fantasy (Phase C)
 
 **Date:** 2026-08-07
-**Status:** Option A chosen. Scoring, gameweek ingest, magic-link auth, the squad picker
-and friends' leagues are built. Transfers and chips are not.
+**Status:** Option A chosen. Scoring, gameweek ingest, magic-link auth, the squad picker,
+friends' leagues and transfers are built. Chips are not.
 **Scope:** a new writable surface. Everything shipped so far is read-only.
 
 ---
@@ -312,12 +312,43 @@ change — and would reward changing a side after seeing the results. A gameweek
 generation in force is skipped, not scored zero: a manager who joined in October was not
 playing in August, and that is a different fact from playing badly.
 
+---
+
+## Built (transfers)
+
+| Piece | Where |
+|---|---|
+| The rules | `lib/fantasy/transfers.ts` |
+| Purchase prices, per-gameweek records | `supabase/migrations/0010_fantasy_transfers.sql` |
+| Counting and charging on save | `lib/fantasy/pickerActions.ts` |
+| Deducting from a season | `lib/fantasy/standings.ts` |
+
+One free transfer a gameweek, unused ones banking to five, four points for anything
+beyond. Three decisions in there are worth keeping in view.
+
+**A squad is valued at what it cost, not at today's list price.** FPL prices move all
+season, so charging a stored squad today's prices would push a manager whose players
+*improved* over the budget and force them to sell one — punished for picking well. So
+`fantasy_pick.price_tenths` records what each player cost when bought: you pay today's
+price and get your money back when you sell. That is deliberately not FPL's rule (they
+split the difference on price rises, so squad values drift upward); theirs is a small
+economy of its own, ours is a fixed budget. A different game, honestly described, rather
+than a half-built version of theirs.
+
+**The cost is stored, not derived.** Recomputing a past gameweek's hit from the pick
+history would give a different answer the moment the rules were tuned, silently rewriting
+finished seasons. `fantasy_squad_gameweek` holds what actually happened.
+
+**Transfers are counted against the side that was locked in.** Not against the last save.
+Diffing against the pending generation would let a manager save three changes, then three
+more, and be charged for three — each save comparing against the one before it rather
+than against the side they started the week with. Counting from the previous gameweek's
+side every time is also what makes changing your mind before the deadline free.
+
 ### Still open
 
-- **Transfers between gameweeks** — the schema supports it (generations), the UI does
-  not; today a save replaces the whole side.
 - **Chips** (wildcard, triple captain). Deliberately absent: each is a rule, and rules
-  belong in `squadRules.ts` with tests, not bolted onto a picker.
+  belong in `transfers.ts`/`squadRules.ts` with tests, not bolted onto a picker.
 - **`saveSquad` is two statements, not a transaction.** PostgREST has no cross-request
   transaction; a failure between the delete and the insert leaves the generation empty,
   which the picker reads as "no squad yet" and offers to rebuild. Recoverable, but a

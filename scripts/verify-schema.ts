@@ -45,6 +45,11 @@ const PENDING: Array<{ name: string; migration: string; effect: string }> = [
     migration: '0009_fantasy_leagues.sql',
     effect: '/fantasy/leagues says leagues are not set up',
   },
+  {
+    name: 'fantasy_squad_gameweek',
+    migration: '0010_fantasy_transfers.sql',
+    effect: 'transfers cannot be counted or charged',
+  },
 ];
 
 const db = serviceClient();

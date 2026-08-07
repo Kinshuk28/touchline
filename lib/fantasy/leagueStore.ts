@@ -93,6 +93,8 @@ export interface MemberSquad {
   squadId: string | null;
   squadName: string;
   generations: PickGeneration[];
+  /** Gameweek → points docked for transfers. Empty for a manager who has never taken a hit. */
+  transferCosts: Map<number, number>;
 }
 
 export interface LeagueScoringData {
@@ -172,6 +174,25 @@ export async function getLeagueScoringData(
     }
   }
 
+  // Points docked for transfers, per squad per gameweek. Same visibility rule
+  // as the picks they describe (0010): a league-mate's row is readable once
+  // that gameweek's deadline has passed, so a table can be computed but a
+  // rival's pending changes stay private.
+  const costsBySquad = new Map<string, Map<number, number>>();
+  if (squads.length > 0) {
+    const { data: costRows, error: costError } = await db
+      .from('fantasy_squad_gameweek')
+      .select('squad_id,gameweek,transfer_cost')
+      .in('squad_id', squads.map((s) => s.id));
+    if (costError) throw new Error(`getLeagueScoringData (transfers): ${costError.message}`);
+
+    for (const row of (costRows ?? []) as Array<{ squad_id: string; gameweek: number; transfer_cost: number }>) {
+      const forSquad = costsBySquad.get(row.squad_id) ?? new Map<number, number>();
+      forSquad.set(row.gameweek, row.transfer_cost);
+      costsBySquad.set(row.squad_id, forSquad);
+    }
+  }
+
   const members: MemberSquad[] = userIds.map((userId) => {
     const squad = squadByUser.get(userId);
     return {
@@ -182,6 +203,7 @@ export async function getLeagueScoringData(
       // that explains itself and one that looks like a rendering bug.
       squadName: squad?.name ?? 'No squad yet',
       generations: squad ? picksBySquad.get(squad.id) ?? [] : [],
+      transferCosts: squad ? costsBySquad.get(squad.id) ?? new Map() : new Map(),
     };
   });
 
