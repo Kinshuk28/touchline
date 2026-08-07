@@ -53,7 +53,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <span className="order-2 sm:order-3">
               <ThemeToggle />
             </span>
-            <nav className="order-3 flex w-full flex-wrap gap-x-4 gap-y-1 text-11 font-semibold uppercase tracking-wider text-muted sm:order-2 sm:w-auto">
+            <nav aria-label="Primary" className="order-3 flex w-full flex-wrap gap-x-4 gap-y-1 text-11 font-semibold uppercase tracking-wider text-muted sm:order-2 sm:w-auto">
               <a href="/news" className="hover:text-text">News</a>
               <a href="/scores" className="hover:text-text">Scores</a>
               <a href="/tables" className="hover:text-text">Tables</a>

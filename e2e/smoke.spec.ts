@@ -52,13 +52,21 @@ test('the landing table panel switches competition from the query string', async
 });
 
 test('the News and Transfers routes are reachable from the header nav and render', async ({ page }) => {
+  // Scoped to the header's own nav landmark, not the whole page. Playwright
+  // matches an accessible name by substring, so an unscoped
+  // `link, name: 'Transfers'` also matches any headline containing the word
+  // — which is exactly what a transfers rail full of live transfer stories
+  // produces ("strict mode violation: resolved to 2 elements", CI, 2026-08-07).
+  // Scoping is what the test always meant: this is about the header nav.
+  const nav = page.getByRole('navigation', { name: 'Primary' });
+
   await page.goto('/');
-  await page.getByRole('link', { name: 'News' }).click();
+  await nav.getByRole('link', { name: 'News' }).click();
   await expect(page).toHaveURL(/\/news$/);
   await expect(page.getByRole('heading', { name: 'News' })).toBeVisible();
 
   await page.goto('/');
-  await page.getByRole('link', { name: 'Transfers' }).click();
+  await nav.getByRole('link', { name: 'Transfers' }).click();
   await expect(page).toHaveURL(/\/transfers$/);
   await expect(page.getByRole('heading', { name: 'Transfers' })).toBeVisible();
   // Honest labelling (spec): these are aggregated reports, not confirmed deals.
@@ -108,7 +116,7 @@ test('the live endpoint answers with a fixture array', async ({ request }) => {
 
 test('the Clubs route is reachable from the header nav and groups clubs by competition', async ({ page }) => {
   await page.goto('/');
-  await page.getByRole('link', { name: 'Clubs', exact: true }).click();
+  await page.getByRole('navigation', { name: 'Primary' }).getByRole('link', { name: 'Clubs' }).click();
   await expect(page).toHaveURL(/\/clubs$/);
   await expect(page.getByRole('heading', { name: 'Clubs', level: 1 })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Premier League' })).toBeVisible();
