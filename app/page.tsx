@@ -4,6 +4,7 @@ import { countUpcoming, getLiveAndRecent, getUpcoming } from '@/lib/site/queries
 import { getNextKickoffPerLeague, getLeagues } from '@/lib/site/queries/leagues';
 import { getStandings } from '@/lib/site/queries/standings';
 import { getClubNames } from '@/lib/site/queries/teams';
+import { getFantasySeason, isMissingTable } from '@/lib/site/queries/fantasy';
 import { getFollowingLeagues } from '@/lib/site/following';
 import { resolveLeagueIds } from '@/lib/site/leagueFilter';
 import { buildClubIndex, orderByRelevance } from '@/lib/site/newsRelevance';
@@ -11,8 +12,11 @@ import { fixtureDateRange, fixturePanelHeading } from '@/lib/site/boardLabels';
 import { getCompetitionMeta } from '@/lib/site/competition';
 import { isUnplayedSeason, seasonLabel } from '@/lib/site/standingsDisplay';
 import { groupFixturesByDay } from '@/lib/site/spine';
+import { getSession } from '@/lib/auth/session';
+import { getSeasonScore, type NamedSeasonScore } from '@/lib/fantasy/squadStore';
 import { BoardPanel } from '@/components/BoardPanel';
 import { FantasyTeaser } from '@/components/FantasyTeaser';
+import { MyFantasyPanel } from '@/components/fantasy/MyFantasyPanel';
 import { MatchdaySpine } from '@/components/MatchdaySpine';
 import { MiniTable } from '@/components/MiniTable';
 import { NewsRail } from '@/components/NewsRail';
@@ -118,8 +122,9 @@ export default async function Home({
   const now = new Date();
   const { table } = await searchParams;
   const following = await getFollowingLeagues();
+  const session = await getSession();
 
-  const [news, transfers, live, upcoming, upcomingTotal, seasons, leagues, clubNames] = await Promise.all([
+  const [news, transfers, live, upcoming, upcomingTotal, seasons, leagues, clubNames, mySeasonScore] = await Promise.all([
     getTrendingNews(NEWS_FETCH),
     getTransferNews(TRANSFER_FETCH),
     getLiveAndRecent(now),
@@ -128,6 +133,7 @@ export default async function Home({
     getNextKickoffPerLeague(now),
     getLeagues(),
     getClubNames(),
+    session ? getMySeasonScoreSafely(session.accessToken, session.userId) : Promise.resolve(null),
   ]);
 
   // Relevance, the spec's worst-content-bug fix: the feeds are global
@@ -256,13 +262,31 @@ export default async function Home({
         </div>
       </div>
 
-      {/* The one openly promotional block on the page, and so the only
-          place illustrative motion can honestly sit — everything above it is
-          stored data (components/FantasyTeaser.tsx). It replaces the
-          one-line strip this used to be: a flagship feature deserves more
-          than a footnote, and below the board is space the density argument
-          doesn't need. */}
-      <FantasyTeaser />
+      {/* A manager who already plays sees their own season here — real data,
+          not the pitch. Everyone else sees the one openly promotional block
+          on the page (components/FantasyTeaser.tsx), the only place
+          illustrative motion can honestly sit, since everything above it is
+          stored data. Either way this replaces the one-line strip this used
+          to be: a flagship feature deserves more than a footnote. */}
+      {mySeasonScore ? <MyFantasyPanel score={mySeasonScore} /> : <FantasyTeaser />}
     </div>
   );
+}
+
+/**
+ * `getSeasonScore` needs the fantasy tables (0006-0008) and fails outright
+ * without them — expected between this code deploying and the project owner
+ * applying those migrations by hand, and no reason for the whole landing
+ * page to 500 over it. Falling back to the promotional teaser in that case
+ * is exactly what a signed-in-but-not-set-up visitor should see.
+ */
+async function getMySeasonScoreSafely(accessToken: string, userId: string): Promise<NamedSeasonScore | null> {
+  try {
+    const season = await getFantasySeason();
+    if (season === null) return null;
+    return await getSeasonScore(accessToken, userId, season);
+  } catch (err) {
+    if (isMissingTable(err instanceof Error ? err.message : String(err))) return null;
+    throw err;
+  }
 }

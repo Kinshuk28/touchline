@@ -73,6 +73,60 @@ export function GameweekPointsChart({ gameweeks }: { gameweeks: readonly Gamewee
   );
 }
 
+/**
+ * One player's raw points, gameweek by gameweek — the form line
+ * app/player/[slug]/page.tsx used to say plainly did not exist. It exists
+ * now: the fantasy ingest stores exactly this, per gameweek, for every
+ * Premier League player, whether or not they are in anyone's fantasy squad.
+ * A gameweek with no published score yet (`points === null`) is skipped
+ * rather than drawn as zero — the same "missing is not nothing" rule
+ * `lib/fantasy/standings.ts` applies to a manager's own history.
+ */
+export function PlayerFormChart({
+  gameweeks,
+}: {
+  gameweeks: readonly { gameweek: number; points: number | null }[];
+}) {
+  const played = gameweeks.filter((g): g is { gameweek: number; points: number } => g.points !== null);
+  if (played.length === 0) return null;
+
+  const max = Math.max(1, ...played.map((g) => g.points));
+  const width = played.length * (BAR_WIDTH + GAP);
+  const describe = (g: { gameweek: number; points: number }) =>
+    `gameweek ${g.gameweek}, ${g.points} point${g.points === 1 ? '' : 's'}`;
+
+  return (
+    <figure className="px-3 py-3">
+      <div className="overflow-x-auto">
+        <svg
+          role="img"
+          aria-label={`Points by gameweek: ${played.map(describe).join('; ')}`}
+          viewBox={`0 0 ${width} ${CHART_HEIGHT + 14}`}
+          width={Math.max(width, 160)}
+          height={CHART_HEIGHT + 14}
+        >
+          {played.map((g, i) => {
+            const h = Math.max(2, (Math.max(0, g.points) / max) * CHART_HEIGHT);
+            const x = i * (BAR_WIDTH + GAP);
+            const y = CHART_HEIGHT - h;
+            return (
+              <g key={g.gameweek}>
+                <rect x={x} y={y} width={BAR_WIDTH} height={h} rx={2} className="fill-text" opacity={0.82}>
+                  <title>{describe(g)}</title>
+                </rect>
+                <text x={x + BAR_WIDTH / 2} y={CHART_HEIGHT + 11} textAnchor="middle" className="fill-muted" fontSize="7">
+                  {g.gameweek}
+                </text>
+              </g>
+            );
+          })}
+        </svg>
+      </div>
+      <figcaption className="sr-only">Points by gameweek: {played.map(describe).join(', ')}.</figcaption>
+    </figure>
+  );
+}
+
 /** Budget spent, as a filled bar against the £100.0m cap — the number a manager checks most. */
 export function BudgetBar({ spent, total }: { spent: number; total: number }) {
   const pct = Math.min(100, Math.max(0, (spent / total) * 100));
