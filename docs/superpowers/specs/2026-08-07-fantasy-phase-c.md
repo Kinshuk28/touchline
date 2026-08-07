@@ -241,10 +241,18 @@ until it is done `/fantasy` says "not ready yet" rather than failing.
    `0007_fantasy_player_season.sql`, `0008_fantasy_squads.sql`. SQL Editor → New query →
    paste → Run. `npx tsx scripts/verify-schema.ts` lists which are still pending.
 
-2. **Allow the redirect.** Authentication → URL Configuration → Redirect URLs, add
-   `https://football-touchline.netlify.app/auth/confirm`. Supabase refuses any
-   `emailRedirectTo` outside this list, which is also what stops a forged Host header
-   pointing a sign-in link somewhere else.
+2. **Set the Site URL and allow the redirect.** Authentication → URL Configuration has two
+   separate fields — both matter, and missing either produces the same symptom (a magic
+   link that dead-ends on `localhost:3000`):
+   - **Site URL**: `https://football-touchline.netlify.app`. This defaults to
+     `http://localhost:3000` on every new project and is where Supabase's own hosted
+     `/auth/v1/verify` endpoint sends a browser when a token fails to verify — before the
+     request ever reaches this app, and regardless of what `emailRedirectTo` was set to on
+     the request that sent the email. Leaving this at its default is why a failed or
+     already-used link lands on a dead `localhost:3000` in production.
+   - **Redirect URLs**: add `https://football-touchline.netlify.app/auth/confirm`.
+     Supabase refuses any `emailRedirectTo` outside this list on the *success* path, which
+     is also what stops a forged Host header pointing a sign-in link somewhere else.
 
 3. **Run the fantasy ingest once** (Actions → ingest-fantasy → Run workflow) so the
    player pool has prices. Without it the picker has nothing to pick from and says so.
