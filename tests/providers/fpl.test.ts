@@ -227,3 +227,37 @@ describe('FplClient.getGameweekLive', () => {
     await expect(new FplClient({ fetchImpl }).getGameweekLive(3)).rejects.toThrow(/500/);
   });
 });
+
+describe('FplClient.getBootstrap — the gameweek calendar', () => {
+  it('returns the season’s gameweeks alongside players and teams', async () => {
+    const { events } = await clientFor(bootstrap).getBootstrap();
+    expect(events).toHaveLength(38);
+    expect(events[0]).toMatchObject({ id: 1, name: 'Gameweek 1', isNext: true, finished: false });
+    expect(events[0]!.deadlineTime).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+  });
+
+  it('reads finished and data_checked as the separate flags they are', async () => {
+    const { events } = await clientFor({
+      elements: [], teams: [],
+      events: [
+        { id: 1, name: 'Gameweek 1', finished: true, data_checked: true },
+        { id: 2, name: 'Gameweek 2', finished: true, data_checked: false },
+      ],
+    }).getBootstrap();
+    expect(events.map((e) => [e.finished, e.dataChecked])).toEqual([[true, true], [true, false]]);
+  });
+
+  it('defaults a missing flag to false rather than dropping the gameweek', async () => {
+    // An absent data_checked must read as "not settled": that makes ingest
+    // re-fetch the week, where the opposite would freeze provisional points.
+    const { events } = await clientFor({ elements: [], teams: [], events: [{ id: 5 }] }).getBootstrap();
+    expect(events[0]).toEqual({
+      id: 5, name: 'Gameweek 5', deadlineTime: null,
+      finished: false, dataChecked: false, isCurrent: false, isNext: false,
+    });
+  });
+
+  it('returns an empty calendar rather than throwing when FPL sends no events', async () => {
+    expect((await clientFor({ elements: [], teams: [] }).getBootstrap()).events).toEqual([]);
+  });
+});

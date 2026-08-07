@@ -36,9 +36,29 @@ export interface FplTeam {
   shortName: string;
 }
 
+/**
+ * One gameweek, as the season calendar describes it.
+ *
+ * `dataChecked` is the field that matters most to ingest: FPL sets it once a
+ * gameweek is settled — bonus points applied, corrections made — and until
+ * then every score in that week is provisional. `finished` comes earlier,
+ * when the last match ends, and is not the same thing.
+ */
+export interface FplEvent {
+  id: number;
+  name: string;
+  deadlineTime: string | null;
+  finished: boolean;
+  dataChecked: boolean;
+  isCurrent: boolean;
+  isNext: boolean;
+}
+
 export interface FplBootstrap {
   players: FplPlayer[];
   teams: FplTeam[];
+  /** The season's 38 gameweeks, in order. Empty if FPL sent none. */
+  events: FplEvent[];
 }
 
 export class FplClient {
@@ -57,7 +77,11 @@ export class FplClient {
   async getBootstrap(): Promise<FplBootstrap> {
     const res = await this.fetchImpl(BOOTSTRAP);
     if (!res.ok) throw new Error(`FPL API ${res.status} for bootstrap-static`);
-    const data = (await res.json()) as { elements?: FplElement[]; teams?: FplTeamRaw[] };
+    const data = (await res.json()) as {
+      elements?: FplElement[];
+      teams?: FplTeamRaw[];
+      events?: FplEventRaw[];
+    };
 
     const players = (data.elements ?? [])
       // Never store a manager (or any other future non-playing element_type)
@@ -65,8 +89,9 @@ export class FplClient {
       .filter((e) => KNOWN_POSITION_TYPES.has(e.element_type))
       .map(mapPlayer);
     const teams = (data.teams ?? []).map((t) => ({ fplId: t.id, name: t.name, shortName: t.short_name }));
+    const events = (data.events ?? []).map(mapEvent);
 
-    return { players, teams };
+    return { players, teams, events };
   }
 
   async getPlayers(): Promise<FplPlayer[]> {
@@ -212,4 +237,30 @@ interface FplTeamRaw {
   id: number;
   name: string;
   short_name: string;
+}
+
+function mapEvent(e: FplEventRaw): FplEvent {
+  return {
+    id: e.id,
+    name: e.name ?? `Gameweek ${e.id}`,
+    deadlineTime: e.deadline_time ?? null,
+    // These four are booleans upstream and genuinely default to false: an
+    // absent `data_checked` means "not settled", which is the safe reading
+    // in both directions — it makes ingest re-fetch a week rather than
+    // freeze a provisional score as final.
+    finished: e.finished === true,
+    dataChecked: e.data_checked === true,
+    isCurrent: e.is_current === true,
+    isNext: e.is_next === true,
+  };
+}
+
+interface FplEventRaw {
+  id: number;
+  name?: string;
+  deadline_time?: string | null;
+  finished?: boolean;
+  data_checked?: boolean;
+  is_current?: boolean;
+  is_next?: boolean;
 }

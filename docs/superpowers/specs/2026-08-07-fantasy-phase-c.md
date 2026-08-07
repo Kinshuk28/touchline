@@ -1,7 +1,8 @@
 # Touchline — Fantasy (Phase C)
 
 **Date:** 2026-08-07
-**Status:** specified, not built. One decision needed before implementation starts.
+**Status:** Option A chosen. First slice built (scoring + gameweek ingest); auth, picker
+and leagues not started.
 **Scope:** a new writable surface. Everything shipped so far is read-only.
 
 ---
@@ -118,3 +119,51 @@ scoring change is a diff rather than an archaeology exercise.
 
 Steps 1 and 2 are independently useful and carry no product risk: they turn "we could
 score a fantasy game" from an assumption into a demonstrated fact.
+
+---
+
+## Built (steps 1 and 2)
+
+| Piece | Where | What it decides |
+|---|---|---|
+| Squad scoring | `lib/fantasy/scoring.ts` | who counts, who doubles, auto-subs, pending |
+| Gameweek feed | `FplClient.getGameweekLive` | one request → every player's stat line |
+| Gameweek calendar | `FplClient.getBootstrap().events` | `finished` vs `data_checked` |
+| What to fetch | `lib/ingest/gameweekSchedule.ts` | started and not settled, oldest first |
+| Storage | `supabase/migrations/0006_fantasy_gameweek_points.sql` | one row per player per gameweek |
+| The job | `scripts/ingest/fantasy.ts`, `.github/workflows/ingest-fantasy.yml` | two-hourly |
+
+Three decisions in there are worth keeping in view, because each is a place the obvious
+implementation is wrong:
+
+**Points are FPL's, not ours.** `points` stores their published `total_points`
+unchanged. Their rules change between seasons — defensive contribution points arrived in
+2025-26 — so a reimplementation would be a second source of truth drifting from the
+first without anyone noticing. The component stats are stored so a score can be
+*explained* on a page, never so it can be re-derived.
+
+**Unknown is not zero.** A player's minutes are "played", "blanked", or "not published
+yet", and the third is not the second. Auto-subs fire only for a starter known to have
+blanked; the captaincy moves only when the captain blanked *and* the vice played;
+anything unpublished is left alone and counted in `pending`. Collapsing the two would
+make a live total substitute players on and then off again as the gameweek finished.
+
+**A finished gameweek is not a settled one.** Bonus points and corrections land after the
+final whistle, and `data_checked` is FPL's own flag for "settled". The job re-fetches
+until that flag arrives, and stores it as `is_final` so a page can say "provisional"
+honestly. It also re-fetches any *earlier* gameweek that is not stored settled, which is
+how a failed run repairs itself — a rule that only fetched the current gameweek would
+lose that week permanently.
+
+### Before this runs
+
+`supabase/migrations/0006_fantasy_gameweek_points.sql` has not been applied. Until it is,
+the job fails its run with a clear message and the site is unaffected — no read path
+touches the table yet. `scripts/verify-schema.ts` reports it as pending rather than
+missing.
+
+### Still open
+
+Auth is the next real decision, and it is a product one (see Risks). Nothing above needs
+it: the scoring function and the points table are both provable, and are, without a
+single user account existing.
