@@ -1,10 +1,15 @@
 import type { ReactNode } from 'react';
 
 /**
- * One panel of the landing dashboard — the shared chrome so the board's
- * four columns read as one board rather than four unrelated cards: the same
- * hairline frame, the same 11px uppercase label bar, the same place for a
- * "more" link.
+ * One panel of the dashboard — the shared chrome so every panel on every
+ * page reads as one system: the same glass surface, the same laser-cyan top
+ * edge, the same terminal-style label bar.
+ *
+ * The `border-t-2 border-t-comp-pd` top edge plus `bg-surface/80
+ * backdrop-blur-md` is the system's own "Standard Card" pattern, applied
+ * once here rather than at each of the panel's ~15 call sites across the
+ * site — every page that already used `BoardPanel` picked up the reskin
+ * with no change of its own.
  *
  * Deliberately thin. It owns the frame and the header row and nothing else;
  * every panel's contents (the spine, the mini table, the rails) stay
@@ -32,13 +37,15 @@ export function BoardPanel({
 }) {
   return (
     <section
-      className="tl-rise overflow-hidden rounded-xl border border-border bg-surface"
+      className="tl-rise overflow-hidden border border-comp-pl/20 border-t-2 border-t-comp-pd bg-surface/80 backdrop-blur-md"
       style={{ animationDelay: `${order * 70}ms` }}
     >
-      <header className="flex items-center gap-2 border-b border-border bg-surface-2 px-3 py-1.5">
-        <h2 className="font-display text-11 font-bold uppercase tracking-[0.14em]">{label}</h2>
+      <header className="flex items-center gap-2 border-b border-border bg-surface-2/60 px-3 py-1.5">
+        <h2 className="font-display text-11 font-bold uppercase tracking-[0.14em] text-comp-pd drop-shadow-[0_0_5px_rgba(0,255,255,0.6)]">
+          {label}
+        </h2>
         {meta && <span className="min-w-0 truncate font-mono text-11 uppercase tracking-wider text-muted">{meta}</span>}
-        {action && <span className="ml-auto shrink-0 text-11 text-muted">{action}</span>}
+        {action && <span className="ml-auto shrink-0 font-mono text-11 text-muted">{action}</span>}
       </header>
       {children}
     </section>

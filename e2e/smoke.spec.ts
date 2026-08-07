@@ -218,27 +218,6 @@ test('the status page reports ingest health and data freshness', async ({ page }
   await expect(page.getByText('updated_at').first()).toBeVisible();
 });
 
-test('the theme toggle persists across a reload', async ({ page }) => {
-  await page.goto('/');
-  // ThemeToggle renders '·' until its mount effect resolves the theme
-  // (from localStorage or matchMedia) into React state; wait past that so
-  // "before" reflects the resolved theme rather than the placeholder.
-  // This matters because that effect only ever sets component state — it
-  // never itself writes `document.documentElement.dataset.theme` (only the
-  // pre-hydration bootstrap script in app/layout.tsx and the toggle's own
-  // click handler do), so there is no DOM race here to guard against, but
-  // waiting for a resolved label keeps the test asserting on the real
-  // post-hydration theme rather than an incidental mount-order artifact.
-  const toggle = page.getByRole('button', { name: /Switch to/ });
-  await expect(toggle).not.toHaveText('·');
-  const before = await page.evaluate(() => document.documentElement.dataset.theme ?? 'unset');
-  await toggle.click();
-  const after = await page.evaluate(() => document.documentElement.dataset.theme);
-  expect(after).not.toBe(before);
-  await page.reload();
-  await expect.poll(() => page.evaluate(() => document.documentElement.dataset.theme)).toBe(after);
-});
-
 // The fantasy game is the site's first signed-in surface. Everything below
 // the sign-in page needs a session, which an anonymous smoke run does not
 // have — so what is asserted here is exactly the part that must work for

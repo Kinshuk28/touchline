@@ -35,7 +35,7 @@ export default async function SignInPage({
       {bridge === '1' && <SessionBridge />}
 
       {error === 'link' && (
-        <p role="status" className="rounded-lg border border-border bg-surface-2 px-3 py-2 text-13">
+        <p role="status" className="border border-comp-sa/40 bg-comp-sa/10 px-3 py-2 text-13 text-comp-sa">
           That sign-in link has expired or was already used. Links work once, and last an hour.
         </p>
       )}
@@ -47,15 +47,21 @@ export default async function SignInPage({
             change your side each week.
           </p>
 
+          {/* A plain `<a>`, not the `Button` primitive — this is a genuinely
+              external link (Supabase's own OAuth endpoint), and `next/link`
+              is for routes inside this app. Same skewed-button treatment by
+              hand, so it reads as the same control either way. */}
           <a
             href={googleHref}
-            className="flex w-full items-center justify-center gap-2 rounded-lg border border-border bg-surface-2 px-4 py-2 text-13 font-semibold hover:bg-surface"
+            className="-skew-x-12 transform flex h-11 w-full items-center justify-center gap-2 border-2 border-comp-pl bg-transparent font-mono text-13 font-semibold uppercase tracking-wider text-comp-pl transition-all duration-200 hover:bg-comp-pl hover:text-bg hover:shadow-[0_0_20px_var(--comp-pl)]"
           >
-            <GoogleGlyph size={16} />
-            Continue with Google
+            <span className="inline-flex skew-x-12 transform items-center gap-2">
+              <GoogleGlyph size={16} />
+              Continue with Google
+            </span>
           </a>
 
-          <div className="flex items-center gap-3 text-11 uppercase tracking-wider text-muted" aria-hidden="true">
+          <div className="flex items-center gap-3 font-mono text-11 uppercase tracking-wider text-muted" aria-hidden="true">
             <span className="h-px flex-1 bg-border" />
             or
             <span className="h-px flex-1 bg-border" />
@@ -70,8 +76,8 @@ export default async function SignInPage({
         </div>
       </BoardPanel>
 
-      <p className="text-center text-11 text-muted">
-        <Link href="/" className="hover:text-text">← Back to the scores</Link>
+      <p className="text-center font-mono text-11 text-muted">
+        <Link href="/" className="hover:text-comp-pd">← Back to the scores</Link>
       </p>
     </div>
   );
