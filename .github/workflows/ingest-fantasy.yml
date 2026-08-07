@@ -1,0 +1,32 @@
+name: ingest-fantasy
+# Per-gameweek player scoring from FPL's event/{id}/live.
+#
+# Every two hours rather than on a match window: FPL keeps revising a
+# gameweek after the final whistle (bonus points land, then corrections), and
+# `data_checked` — the flag that stops this job re-fetching a week — can
+# arrive a day or two later. Two-hourly means a live total is never more than
+# two hours stale and a settled week is picked up promptly, at a cost of one
+# bootstrap request plus one per unsettled gameweek, on an unmetered API that
+# needs no key.
+#
+# Runs offset from ingest-players (:30) so the identity map this job reads is
+# not being rewritten underneath it.
+on:
+  schedule: [{ cron: '15 */2 * * *' }]
+  workflow_dispatch:
+concurrency:
+  group: ingest-fantasy
+  cancel-in-progress: false
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '24', cache: 'npm' }
+      - run: npm ci
+      - run: npx tsx scripts/ingest/fantasy.ts
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
