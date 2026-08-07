@@ -1,36 +1,49 @@
 import { Mark } from '@/components/Mark';
 
 /**
+ * The move the ball plays, as one path: left-back to a midfielder, out to
+ * the right winger, cut back to the striker, then struck at goal. Defined
+ * once and used twice — as the `d` of the drawn passing line, and as the
+ * `offset-path` the ball travels along — so the line and the ball can never
+ * drift apart.
+ */
+const PASS_PATH = 'M78 72 L160 52 L244 44 L244 90 L306 90';
+
+/**
  * The Fantasy teaser — the one openly promotional block on the site, and
- * therefore the only place a piece of generated or illustrative motion can
- * honestly live. Everything else on this page is real stored data, and a
- * generated clip sitting next to real fixtures would read as match footage
- * we do not have.
+ * therefore the only place illustrative or generated motion can honestly
+ * live. Everything else on this page is stored data, and a clip sitting
+ * next to real fixtures would read as match footage this project does not
+ * have.
  *
- * The art is a formation diagram, drawn in SVG: a pitch and eleven position
- * dots in a 4-3-3, which is what the feature will actually ask you to fill
- * in. It claims nothing about any real match, player or result.
+ * The art is a formation diagram: a pitch, eleven position dots in a 4-3-3,
+ * and a passing move played through them. It claims nothing about any real
+ * match, player or result — it is the shape of the feature, not a record of
+ * anything.
  *
- * MOTION. Three CSS animations, no library, no dependency:
+ * MOTION — four animations, all CSS, no library and no dependency:
  *
- * - the eleven dots arrive one after another (`tl-pop`, 90ms apart), which
- *   is the squad being picked;
- * - a floodlight sweeps across the panel every 9 seconds (`tl-sweep`);
- * - the pitch lines hold still, because a moving pitch is a gimmick.
+ * - the eleven dots arrive one after another (`tl-pop`, 90ms apart): the
+ *   squad being picked;
+ * - the passing line draws itself along `PASS_PATH` (`tl-pass`);
+ * - the ball runs the identical path (`tl-ball`, via `offset-path`), reaches
+ *   goal, holds while the completed move is legible, then everything fades
+ *   and the nine-second loop starts again;
+ * - a floodlight crosses the panel (`tl-sweep`).
  *
- * All three are suppressed by `prefers-reduced-motion` (see app/globals.css)
- * — the dots resolve to their placed state rather than vanishing.
+ * `prefers-reduced-motion` (app/globals.css) resolves the dots to their
+ * placed state, leaves the passing line drawn — a static tactics diagram —
+ * and removes the ball and the sweep, whose only content was the movement.
  *
- * `videoSrc` is the drop-in point for a generated clip: pass it and a
- * `poster` frame, and the panel plays that behind the copy instead of
- * drawing the diagram. Deliberately optional and deliberately unset today —
- * there is no clip in the repo yet, and a `<video>` element with no source
- * is a broken black box.
+ * `videoSrc` is the drop-in point for a generated clip: pass it with a
+ * `poster` frame and the panel plays that instead of drawing this.
+ * Deliberately unset — a `<video>` with no source is a broken black box,
+ * and this animation costs nothing to serve.
  */
 export function FantasyTeaser({
   videoSrc, poster,
 }: {
-  /** Path to a looping, muted background clip in `public/`. Omit to draw the formation diagram instead. */
+  /** Path to a looping, muted background clip in `public/`. Omit to draw the animated formation instead. */
   videoSrc?: string;
   /** First-frame image for `videoSrc`. Required whenever `videoSrc` is set — it is what a reduced-motion or slow-connection reader sees. */
   poster?: string;
@@ -71,7 +84,7 @@ export function FantasyTeaser({
           </p>
         </div>
 
-        <div className="shrink-0 sm:w-[20rem]">
+        <div className="shrink-0 sm:w-[24rem]">
           {videoSrc ? (
             /* Muted + autoplay + playsInline is the only combination browsers
                will start on their own; `loop` because a teaser that stops
@@ -94,7 +107,7 @@ export function FantasyTeaser({
               viewBox="0 0 320 180"
               className="aspect-video w-full rounded-lg border border-border bg-surface-2"
               role="img"
-              aria-label="Illustration: a 4-3-3 formation laid out on a pitch"
+              aria-label="Illustration: a 4-3-3 formation, with a passing move running from left-back to a shot on goal"
             >
               {/* Pitch markings — the same chalk-on-turf vocabulary as the
                   page background, at panel scale. */}
@@ -117,6 +130,28 @@ export function FantasyTeaser({
                   style={{ animationDelay: `${300 + i * 90}ms` }}
                 />
               ))}
+
+              {/* The move, on a nine-second loop: the passing line draws
+                  itself, the ball runs along the identical path, the strike
+                  lands, everything fades and it goes again. `pathLength="1"`
+                  normalises the dash arithmetic, so the draw-on works
+                  without measuring the path in JavaScript. */}
+              <path
+                className="tl-pass"
+                d={PASS_PATH}
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeDasharray="1"
+                pathLength="1"
+                style={{ animationDelay: '1.4s' }}
+              />
+              <circle
+                className="tl-ball"
+                r="4.5"
+                style={{ offsetPath: `path("${PASS_PATH}")`, animationDelay: '1.4s' }}
+              />
             </svg>
           )}
         </div>
