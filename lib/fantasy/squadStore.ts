@@ -1,4 +1,5 @@
 import { userClient } from '@/lib/auth/session';
+import type { TransferRecord } from '@/lib/fantasy/transfers';
 
 /**
  * Reading and writing one person's squad.
@@ -28,6 +29,12 @@ export interface StoredPick {
   playerId: number;
   isCaptain: boolean;
   isViceCaptain: boolean;
+  /**
+   * What this player cost when bought (tenths of a million). `null` for picks
+   * written before supabase/migrations/0010 — readers fall back to the
+   * current price rather than inventing a number.
+   */
+  priceTenths: number | null;
 }
 
 export interface StoredSquad {
@@ -43,6 +50,9 @@ export interface SquadInput {
   name: string;
   activeFromGameweek: number;
   picks: StoredPick[];
+  /** How many players came in, and what the extras cost. See lib/fantasy/transfers.ts. */
+  transfersMade: number;
+  transferCost: number;
 }
 
 /**
@@ -78,7 +88,7 @@ export async function getSquadForGameweek(
 
   const { data: picks, error: pickError } = await db
     .from('fantasy_pick')
-    .select('slot,player_id,is_captain,is_vice_captain,active_from_gameweek')
+    .select('slot,player_id,is_captain,is_vice_captain,active_from_gameweek,price_tenths')
     .eq('squad_id', squad.id)
     .lte('active_from_gameweek', gameweek)
     .order('slot', { ascending: true });
@@ -86,7 +96,7 @@ export async function getSquadForGameweek(
 
   const rows = (picks ?? []) as Array<{
     slot: number; player_id: number; is_captain: boolean;
-    is_vice_captain: boolean; active_from_gameweek: number;
+    is_vice_captain: boolean; active_from_gameweek: number; price_tenths: number | null;
   }>;
   if (rows.length === 0) {
     // A squad row with no picks yet — someone signed in and named a side
@@ -107,8 +117,48 @@ export async function getSquadForGameweek(
         playerId: r.player_id,
         isCaptain: r.is_captain,
         isViceCaptain: r.is_vice_captain,
+        priceTenths: r.price_tenths,
       })),
   };
+}
+
+/**
+ * Every gameweek this manager saved a side for, and how many changes each
+ * made — the input `transferAllowance` needs to know how many free transfers
+ * are banked.
+ *
+ * Gameweeks with no row are gameweeks where the previous side simply carried:
+ * nothing changed, nothing was spent, and a transfer accrued. That is why
+ * this returns only what was saved rather than a row per gameweek.
+ */
+export async function getTransferHistory(
+  accessToken: string,
+  squadId: string,
+): Promise<TransferRecord[]> {
+  const { data, error } = await userClient(accessToken)
+    .from('fantasy_squad_gameweek')
+    .select('gameweek,transfers_made')
+    .eq('squad_id', squadId)
+    .order('gameweek', { ascending: true });
+  if (error) throw new Error(`getTransferHistory: ${error.message}`);
+  return ((data ?? []) as Array<{ gameweek: number; transfers_made: number }>)
+    .map((row) => ({ gameweek: row.gameweek, transfersMade: row.transfers_made }));
+}
+
+/** The squad row for this user and season, or null. Used before a save to diff against. */
+export async function getSquadId(
+  accessToken: string,
+  userId: string,
+  season: number,
+): Promise<string | null> {
+  const { data, error } = await userClient(accessToken)
+    .from('fantasy_squad')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('season', season)
+    .maybeSingle();
+  if (error) throw new Error(`getSquadId: ${error.message}`);
+  return (data as { id: string } | null)?.id ?? null;
 }
 
 /**
@@ -165,9 +215,29 @@ export async function saveSquad(
       player_id: pick.playerId,
       is_captain: pick.isCaptain,
       is_vice_captain: pick.isViceCaptain,
+      price_tenths: pick.priceTenths,
     })),
   );
   if (insertError) throw new Error(`saveSquad (picks): ${insertError.message}`);
+
+  // The gameweek's transfer record. Upserted, not inserted: saving twice
+  // before a deadline recomputes the changes against the previous
+  // *generation*, so the second save's figure replaces the first's rather
+  // than adding to it — which is what makes changing your mind before the
+  // deadline free, as it should be.
+  const { error: recordError } = await db
+    .from('fantasy_squad_gameweek')
+    .upsert(
+      {
+        squad_id: squadId,
+        gameweek: input.activeFromGameweek,
+        transfers_made: input.transfersMade,
+        transfer_cost: input.transferCost,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: 'squad_id,gameweek' },
+    );
+  if (recordError) throw new Error(`saveSquad (transfers): ${recordError.message}`);
 
   return squadId;
 }

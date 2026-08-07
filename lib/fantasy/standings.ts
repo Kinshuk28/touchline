@@ -33,17 +33,25 @@ export interface ScoredGameweek {
 
 export interface GameweekResult {
   gameweek: number;
+  /** What the eleven scored, before any deduction. */
   points: number;
+  /** Points docked for transfers beyond the free allowance. Never negative. */
+  transferCost: number;
+  /** `points - transferCost` — what this gameweek actually added to the season. */
+  net: number;
   /** Picks whose scores FPL has not published — the reason a total can still move. */
   pending: number;
 }
 
 export interface SeasonScore {
+  /** The sum of `net`, which is the number a league table ranks on. */
   total: number;
   /** Every gameweek this squad was picked for, in order. */
   gameweeks: GameweekResult[];
   /** Total across every pick still awaiting a published score. */
   pending: number;
+  /** Points given up to transfers all season — worth showing, and worth regretting. */
+  transferCost: number;
 }
 
 /**
@@ -74,27 +82,43 @@ export function generationFor(
  * Gameweeks with no side in force are skipped entirely rather than scored as
  * zero — see `generationFor`. Gameweeks are returned in order regardless of
  * the order they arrived in, because this feeds a table people read.
+ *
+ * `transferCosts` are the points docked for changing a side beyond the free
+ * allowance (`lib/fantasy/transfers.ts`). They are charged to the gameweek
+ * the transfers took effect for, and only to gameweeks the manager was
+ * actually playing — a cost recorded against a week with no side in force is
+ * ignored rather than deducted from a season it was never part of.
  */
 export function scoreSeason(
   generations: readonly PickGeneration[],
   gameweeks: readonly ScoredGameweek[],
-  opts: { positions?: ReadonlyMap<number, FantasyPosition> } = {},
+  opts: {
+    positions?: ReadonlyMap<number, FantasyPosition>;
+    transferCosts?: ReadonlyMap<number, number>;
+  } = {},
 ): SeasonScore {
   const results: GameweekResult[] = [];
   let total = 0;
   let pending = 0;
+  let transferCost = 0;
 
   for (const week of [...gameweeks].sort((a, b) => a.gameweek - b.gameweek)) {
     const generation = generationFor(generations, week.gameweek);
     if (generation === null) continue;
 
     const score = scoreSquad(generation.picks, week.lines, opts);
-    total += score.total;
+    // `Math.max(0, …)` so a stored cost can never become a bonus, whatever
+    // arrives in the map.
+    const cost = Math.max(0, opts.transferCosts?.get(week.gameweek) ?? 0);
+    const net = score.total - cost;
+
+    total += net;
     pending += score.pending;
-    results.push({ gameweek: week.gameweek, points: score.total, pending: score.pending });
+    transferCost += cost;
+    results.push({ gameweek: week.gameweek, points: score.total, transferCost: cost, net, pending: score.pending });
   }
 
-  return { total, gameweeks: results, pending };
+  return { total, gameweeks: results, pending, transferCost };
 }
 
 export interface LeagueEntry {
@@ -108,8 +132,10 @@ export interface RankedEntry extends LeagueEntry {
   /** 1-based. Tied managers share a position, and the next one skips — 1, 2, 2, 4. */
   rank: number;
   total: number;
-  /** This gameweek's points, `null` when they were not playing that week. */
+  /** This gameweek's net points, `null` when they were not playing that week. */
   latest: number | null;
+  /** This gameweek's transfer deduction, so a table can show "58 (-4)". */
+  latestCost: number;
 }
 
 /**
@@ -126,14 +152,17 @@ export interface RankedEntry extends LeagueEntry {
  * worse than one with an arbitrary but fixed order.
  */
 export function rankLeague(entries: readonly LeagueEntry[], latestGameweek: number | null): RankedEntry[] {
-  const scored = entries.map((entry) => ({
-    ...entry,
-    total: entry.score?.total ?? 0,
-    latest:
-      latestGameweek === null
-        ? null
-        : entry.score?.gameweeks.find((g) => g.gameweek === latestGameweek)?.points ?? null,
-  }));
+  const scored = entries.map((entry) => {
+    const week = latestGameweek === null
+      ? undefined
+      : entry.score?.gameweeks.find((g) => g.gameweek === latestGameweek);
+    return {
+      ...entry,
+      total: entry.score?.total ?? 0,
+      latest: week?.net ?? null,
+      latestCost: week?.transferCost ?? 0,
+    };
+  });
 
   scored.sort((a, b) => (b.total - a.total) || a.squadName.localeCompare(b.squadName));
 
