@@ -8,7 +8,6 @@ function run(overrides: Partial<IngestRun> & { job: string }): IngestRun {
   return {
     id: 1,
     status: 'ok',
-    message: null,
     requests_used: 0,
     started_at: '2026-08-07T11:55:00Z',
     finished_at: '2026-08-07T11:55:30Z',

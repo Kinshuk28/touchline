@@ -13,14 +13,42 @@ export interface IngestRun {
   id: number;
   job: string;
   status: string;
-  message: string | null;
   requests_used: number;
   started_at: string;
   finished_at: string | null;
 }
 
 /**
- * The most recent run of every job, newest first.
+ * The view this reads, not the table.
+ *
+ * `ingest_run` is deliberately unreadable with the public key: migration
+ * 0003 revoked anon SELECT on it because `ingest_run.message` carries a
+ * raw slice of the upstream provider's error body, and that column becomes
+ * world-readable the moment the anon key ships to a browser. That decision
+ * stands — this page is not worth reopening it.
+ *
+ * 0003 suggested `/status` read the table server-side with the service-role
+ * key instead. It cannot: this project's standing rule is that the
+ * service-role client never enters anything the site renders, and putting a
+ * full-power key in the render path to draw a status table is a far worse
+ * trade than not drawing it.
+ *
+ * So migration 0005 proposes a view over the same rows with `message`
+ * omitted — job, status, timings and request count, none of which can carry
+ * an upstream response body — and grants SELECT on that. Everything else
+ * about 0003's posture is untouched.
+ */
+const RUNS_VIEW = 'ingest_run_public';
+
+/**
+ * The most recent run of every job, newest first, or `null` when the view
+ * is not readable.
+ *
+ * `null` rather than a throw, and rather than an empty array, because the
+ * three cases are genuinely different and the page says something different
+ * for each: no runs recorded (empty array), the view is missing or
+ * ungranted (null — migration 0005 has not been applied), or a real query
+ * failure (throws, like every other query here).
  *
  * One query for the last `limit` runs, reduced to one row per job in JS,
  * rather than a per-job query or a `distinct on` (which PostgREST cannot
@@ -29,13 +57,22 @@ export interface IngestRun {
  * recently is in here; one that hasn't is absent, and absence is exactly
  * what the page needs to report.
  */
-export async function getLatestRunPerJob(limit = 200): Promise<IngestRun[]> {
+export async function getLatestRunPerJob(limit = 200): Promise<IngestRun[] | null> {
   const { data, error } = await readClient()
-    .from('ingest_run')
-    .select('id,job,status,message,requests_used,started_at,finished_at')
+    .from(RUNS_VIEW)
+    .select('id,job,status,requests_used,started_at,finished_at')
     .order('started_at', { ascending: false })
     .limit(limit);
-  if (error) throw new Error(`getLatestRunPerJob: ${error.message}`);
+
+  // 42501 permission denied, 42P01 undefined table — both mean "0005 has
+  // not been applied", which is a state this page renders rather than a
+  // failure it crashes on. Anything else is a real error and still throws.
+  if (error) {
+    if (error.code === '42501' || error.code === '42P01' || /permission denied|does not exist/i.test(error.message)) {
+      return null;
+    }
+    throw new Error(`getLatestRunPerJob: ${error.message}`);
+  }
 
   const latest = new Map<string, IngestRun>();
   for (const run of (data ?? []) as IngestRun[]) {
