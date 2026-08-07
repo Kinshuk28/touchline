@@ -49,7 +49,10 @@ export default async function StatusPage() {
     ...TABLES.map((t) => getLatestUpdate(t)),
   ]);
 
-  const ordered = sortRunsByHealth(runs, now);
+  // `null` means the runs view is not readable — migration 0005 has not
+  // been applied. That is a state to report, not a crash: the freshness
+  // panel below reads public tables and works regardless.
+  const ordered = runs === null ? [] : sortRunsByHealth(runs, now);
   const failing = ordered.filter((r) => jobHealth(r, now) === 'failed').length;
   const overdue = ordered.filter((r) => jobHealth(r, now) === 'stale').length;
 
@@ -67,20 +70,34 @@ export default async function StatusPage() {
       {/* A one-line verdict, so the page answers its own question before
           anyone reads a table. */}
       <p className="rounded-xl border border-border bg-surface px-4 py-3 text-sm">
-        {runs.length === 0
-          ? 'No ingest runs recorded yet.'
-          : failing === 0 && overdue === 0
-            ? `All ${runs.length} jobs reporting normally.`
-            : [
-              failing > 0 ? `${failing} failing` : null,
-              overdue > 0 ? `${overdue} overdue` : null,
-            ].filter(Boolean).join(', ') + ` of ${runs.length} jobs.`}
+        {runs === null
+          ? 'Job history isn\u2019t readable with the public key yet — see the panel below. Data freshness still is.'
+          : runs.length === 0
+            ? 'No ingest runs recorded yet.'
+            : failing === 0 && overdue === 0
+              ? `All ${runs.length} jobs reporting normally.`
+              : [
+                failing > 0 ? `${failing} failing` : null,
+                overdue > 0 ? `${overdue} overdue` : null,
+              ].filter(Boolean).join(', ') + ` of ${runs.length} jobs.`}
       </p>
 
       <div className="grid gap-3 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)] lg:items-start">
-        <BoardPanel order={0} label="Ingest jobs" meta={`${runs.length}`}>
-          {ordered.length === 0 ? (
-            <p className="px-3 py-4 text-13 text-muted">Nothing recorded in `ingest_run` yet.</p>
+        <BoardPanel order={0} label="Ingest jobs" meta={runs === null ? undefined : `${runs.length}`}>
+          {runs === null ? (
+            // Said plainly rather than shown as an empty table. `ingest_run`
+            // is deliberately private (migration 0003: its `message` column
+            // carries raw upstream error bodies), and this page reads a
+            // view that omits that column — which exists only once
+            // migration 0005 is applied by hand.
+            <p className="px-3 py-4 text-13 text-muted">
+              Ingest job history is private to the pipeline. Applying migration
+              <span className="font-mono"> 0005_ingest_run_public_view.sql </span>
+              exposes job, status and timings — but never the error message, which can contain a raw
+              upstream response — to this page.
+            </p>
+          ) : ordered.length === 0 ? (
+            <p className="px-3 py-4 text-13 text-muted">No ingest runs recorded yet.</p>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full min-w-[32rem] border-collapse text-13">
@@ -107,16 +124,13 @@ export default async function StatusPage() {
                             </span>
                           )}
                         </td>
-                        <td className={`px-3 py-2 ${HEALTH_CLASS[health]}`}>
-                          {HEALTH_LABEL[health]}
-                          {/* The provider's own message, when there is one —
-                              a failure with no reason is a dead end. */}
-                          {run.message && (
-                            <span className="block max-w-[22rem] truncate text-11 text-muted" title={run.message}>
-                              {run.message}
-                            </span>
-                          )}
-                        </td>
+                        {/* State only. The provider's own error message is
+                            deliberately not exposed here — it is the column
+                            migration 0003 locked down, and reading it would
+                            put a raw upstream response body on a public
+                            page. The GitHub Actions log is where a failure's
+                            reason belongs. */}
+                        <td className={`px-3 py-2 ${HEALTH_CLASS[health]}`}>{HEALTH_LABEL[health]}</td>
                         <td className="px-3 py-2 font-mono tabular-nums text-muted">
                           {relativeTime(run.started_at, now) ?? '—'}
                         </td>
