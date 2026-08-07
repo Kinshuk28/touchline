@@ -294,3 +294,91 @@ describe('validateSquad', () => {
     expect(validateSquad(picks).length).toBeGreaterThan(1);
   });
 });
+
+describe('scoreSquad — position-aware auto-substitutions', () => {
+  // Slots 1-11 in the order assignSlots produces for a 4-4-2: GK, four
+  // defenders, four midfielders, two forwards. Bench 12 is the reserve
+  // keeper, 13-15 outfield.
+  const POSITIONS = new Map<number, 'GK' | 'DEF' | 'MID' | 'FWD'>([
+    [1, 'GK'],
+    [2, 'DEF'], [3, 'DEF'], [4, 'DEF'], [5, 'DEF'],
+    [6, 'MID'], [7, 'MID'], [8, 'MID'], [9, 'MID'],
+    [10, 'FWD'], [11, 'FWD'],
+    [12, 'GK'], [13, 'DEF'], [14, 'MID'], [15, 'FWD'],
+  ]);
+
+  it('brings the reserve keeper on for the keeper', () => {
+    const score = scoreSquad(
+      squad(),
+      gameweek(1, { 1: { points: 0, minutes: 0 }, 12: { points: 6 } }),
+      { positions: POSITIONS },
+    );
+    expect(score.picks.find((p) => p.playerId === 12)!.autoSubbed).toBe(true);
+    expect(score.picks.some((p) => p.playerId === 1)).toBe(false);
+  });
+
+  it('never brings the reserve keeper on for an outfielder', () => {
+    // Without positions this squad would put two keepers on the pitch: the
+    // spare keeper is first on the bench and did play.
+    const week = gameweek(1, { 6: { points: 0, minutes: 0 }, 12: { points: 9 }, 13: { points: 4 } });
+
+    const blind = scoreSquad(squad(), week);
+    expect(blind.picks.find((p) => p.playerId === 12)!.autoSubbed).toBe(true);
+
+    const aware = scoreSquad(squad(), week, { positions: POSITIONS });
+    expect(aware.picks.some((p) => p.playerId === 12)).toBe(false);
+    expect(aware.picks.find((p) => p.playerId === 13)!.autoSubbed).toBe(true);
+  });
+
+  it('refuses a substitution that would leave an illegal formation', () => {
+    // 4-4-2 with three blank defenders and no defender available: the spare
+    // keeper and the bench defender both blanked too. The midfielder comes
+    // on for the first (3-5-2, legal); the forward cannot come on for the
+    // second, because two at the back is not a formation.
+    const score = scoreSquad(
+      squad(),
+      gameweek(1, {
+        2: { points: 0, minutes: 0 },
+        3: { points: 0, minutes: 0 },
+        4: { points: 0, minutes: 0 },
+        12: { points: 0, minutes: 0 },
+        13: { points: 0, minutes: 0 },
+        14: { points: 5 }, 15: { points: 5 },
+      }),
+      { positions: POSITIONS },
+    );
+    const subs = score.picks.filter((p) => p.autoSubbed).map((p) => p.playerId);
+    expect(subs).toEqual([14]);
+    // The remaining blank defenders stay on the sheet, scoring nothing.
+    expect(score.picks.find((p) => p.playerId === 3)!.points).toBe(0);
+    expect(score.picks.some((p) => p.playerId === 15)).toBe(false);
+  });
+
+  it('allows a cross-position swap the formation can absorb', () => {
+    // One blank defender, no defender on the bench: 4-4-2 becomes 3-4-3.
+    const score = scoreSquad(
+      squad(),
+      gameweek(1, {
+        2: { points: 0, minutes: 0 },
+        12: { points: 0, minutes: 0 },
+        13: { points: 0, minutes: 0 },
+        14: { points: 0, minutes: 0 },
+        15: { points: 7 },
+      }),
+      { positions: POSITIONS },
+    );
+    expect(score.picks.find((p) => p.playerId === 15)!.autoSubbed).toBe(true);
+  });
+
+  it('does not block a substitution over a player missing from the map', () => {
+    // A gap in our own data must never cost a manager points.
+    const partial = new Map(POSITIONS);
+    partial.delete(13);
+    const score = scoreSquad(
+      squad(),
+      gameweek(1, { 6: { points: 0, minutes: 0 }, 12: { points: 0, minutes: 0 }, 13: { points: 8 } }),
+      { positions: partial },
+    );
+    expect(score.picks.find((p) => p.playerId === 13)!.autoSubbed).toBe(true);
+  });
+});

@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { Mark } from '@/components/Mark';
 
 /**
@@ -71,16 +72,24 @@ export function FantasyTeaser({
             Fantasy
           </p>
           <h2 className="mt-2 font-display text-24 font-extrabold leading-tight tracking-[-0.02em] sm:text-32">
-            Build an XI from all five leagues.
+            Build a Premier League squad.
           </h2>
+          {/* Narrowed from "all five leagues" when the game was actually
+              built. Per-match player scoring exists on a free tier for the
+              Premier League and nowhere else, and a teaser promising four
+              more competitions would be selling something the data cannot
+              deliver — see docs/superpowers/specs/2026-08-07-fantasy-phase-c.md. */}
           <p className="mt-2 text-15 text-muted">
-            Pick a squad across the Premier League, La Liga, Serie A, the Bundesliga and Ligue 1, score
-            it on real results as they land, and run a league against your friends.
+            Pick fifteen players inside a {'\u00A3'}100m budget, captain one of them, and score
+            your side on real Premier League gameweeks as the results land.
           </p>
-          {/* Honest about state: this is not a link, because there is
-              nothing to link to yet. */}
-          <p className="mt-3 inline-block rounded-full border border-border px-2.5 py-1 font-mono text-11 uppercase tracking-wider text-muted">
-            In development
+          <p className="mt-3">
+            <Link
+              href="/fantasy"
+              className="inline-block rounded-full border border-border px-3 py-1 font-mono text-11 uppercase tracking-wider hover:bg-surface-2"
+            >
+              Pick your squad →
+            </Link>
           </p>
         </div>
 

@@ -1,8 +1,8 @@
 # Touchline — Fantasy (Phase C)
 
 **Date:** 2026-08-07
-**Status:** Option A chosen. First slice built (scoring + gameweek ingest); auth, picker
-and leagues not started.
+**Status:** Option A chosen. Scoring, gameweek ingest, magic-link auth and the squad
+picker are built. Leagues and transfers are not.
 **Scope:** a new writable surface. Everything shipped so far is read-only.
 
 ---
@@ -162,8 +162,112 @@ the job fails its run with a clear message and the site is unaffected — no rea
 touches the table yet. `scripts/verify-schema.ts` reports it as pending rather than
 missing.
 
+---
+
+## Built (auth and the picker)
+
+Magic links, chosen over social sign-in for the reason the Risks section gives: this site
+holds one functional cookie and no tracking, and a third-party account would be a whole
+new privacy surface for a football game. There is no password anywhere in the system —
+nothing to store, leak, reuse or reset. The entire account is an email address.
+
+| Piece | Where |
+|---|---|
+| Session cookies, user-scoped client | `lib/auth/session.ts`, `lib/auth/cookies.ts` |
+| Token claims (never authorisation) | `lib/auth/jwt.ts` |
+| Refresh on the way in | `proxy.ts` |
+| Sign in / confirm / sign out | `app/fantasy/sign-in`, `app/auth/confirm`, `lib/auth/actions.ts` |
+| Squad rules | `lib/fantasy/squadRules.ts` |
+| Deadline rule | `lib/fantasy/gameweekWindow.ts` |
+| Player pool (price, position) | `supabase/migrations/0007`, refreshed by the fantasy job |
+| Squads and picks | `supabase/migrations/0008`, `lib/fantasy/squadStore.ts` |
+| The picker | `components/SquadPicker.tsx`, `lib/fantasy/pickerActions.ts` |
+
+### No new dependency
+
+`@supabase/ssr` is the obvious way to do cookie sessions in the App Router, and it is a
+new dependency. What it actually provides is cookie plumbing plus a PKCE verifier store,
+and the magic-link flow here needs neither: `verifyOtp` exchanges a token hash for a
+session in one server-side call. The plumbing is about a hundred lines in
+`lib/auth/session.ts` instead.
+
+### The email template, and why sign-in works without changing it
+
+The good path is a link carrying `token_hash`, redeemed entirely server-side so the
+session never touches the browser's URL. That needs one template change in the Supabase
+dashboard (below). Supabase's **stock** template instead puts the tokens in the URL
+fragment, which no server can read — so `app/auth/confirm` redirects those to a small
+client component (`components/SessionBridge.tsx`) that hands them to `/auth/session` and
+clears the address bar.
+
+Supporting both means sign-in works on a project with nothing configured beyond the
+redirect allow-list, and gets quietly better when the template is updated. Shipping only
+the good path would have failed with "invalid link" on a fresh project and looked like a
+bug in this code.
+
+### The write posture
+
+This is the first time anything other than `service_role` writes. It is narrowed as far
+as it goes: `anon` gets **nothing at all** on `fantasy_squad` and `fantasy_pick` — not
+even SELECT — and `authenticated` gets writes scoped by RLS to `auth.uid() = user_id`,
+with `with check` as well as `using` so a row cannot be reassigned to someone else on
+update. Enforced in Postgres, because the anon key ships to the browser and anyone
+holding it can skip every line of TypeScript in this repository.
+
+### The budget is the game
+
+Without it every manager picks the same fifteen best players and the league is a tie.
+Prices come from FPL's `now_cost`, stored per season in `fantasy_player_season` and
+refreshed by the same ingest run that fetches the gameweeks. £100.0m, 2/5/5/3, at most
+three from any one club, and a legal formation — all in `lib/fantasy/squadRules.ts`,
+used by the picker as you click *and* re-checked by the server action against a pool read
+from the database. The client-side check is a courtesy; it is never the control.
+
+### Changing a side is a new generation, not an edit
+
+`fantasy_pick.active_from_gameweek` means a save writes a new generation and leaves older
+ones alone. Without it, changing your side in gameweek 12 would silently rewrite what you
+were credited with in gameweek 3 — the scorer reads whatever picks exist now, so mutation
+is retroactive. And a save only ever affects a gameweek whose deadline has not passed
+(`lib/fantasy/gameweekWindow.ts`); otherwise you could watch a goal go in and then buy the
+scorer.
+
+### Owner setup, in order
+
+Nothing below can be done from code — all of it lives in the Supabase dashboard, and
+until it is done `/fantasy` says "not ready yet" rather than failing.
+
+1. **Apply the migrations**, in order: `0006_fantasy_gameweek_points.sql`,
+   `0007_fantasy_player_season.sql`, `0008_fantasy_squads.sql`. SQL Editor → New query →
+   paste → Run. `npx tsx scripts/verify-schema.ts` lists which are still pending.
+
+2. **Allow the redirect.** Authentication → URL Configuration → Redirect URLs, add
+   `https://football-touchline.netlify.app/auth/confirm`. Supabase refuses any
+   `emailRedirectTo` outside this list, which is also what stops a forged Host header
+   pointing a sign-in link somewhere else.
+
+3. **Run the fantasy ingest once** (Actions → ingest-fantasy → Run workflow) so the
+   player pool has prices. Without it the picker has nothing to pick from and says so.
+
+4. **Optional, and worth doing:** Authentication → Email Templates → Magic Link, change
+   the link to
+
+   ```
+   {{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=magiclink
+   ```
+
+   This moves sign-in entirely server-side. Sign-in works without it — see the note above
+   on the fragment fallback — but with it the session never appears in a URL.
+
 ### Still open
 
-Auth is the next real decision, and it is a product one (see Risks). Nothing above needs
-it: the scoring function and the points table are both provable, and are, without a
-single user account existing.
+- **Leagues against friends**, which the teaser no longer promises but the game still
+  wants.
+- **Transfers between gameweeks** — the schema supports it (generations), the UI does
+  not; today a save replaces the whole side.
+- **Chips** (wildcard, triple captain). Deliberately absent: each is a rule, and rules
+  belong in `squadRules.ts` with tests, not bolted onto a picker.
+- **`saveSquad` is two statements, not a transaction.** PostgREST has no cross-request
+  transaction; a failure between the delete and the insert leaves the generation empty,
+  which the picker reads as "no squad yet" and offers to rebuild. Recoverable, but a
+  Postgres function would make it atomic.
