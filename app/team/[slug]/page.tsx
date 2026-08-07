@@ -6,7 +6,7 @@ import { getSquad } from '@/lib/site/queries/players';
 import { getFixturesForTeam } from '@/lib/site/queries/fixtures';
 import { getLeagues } from '@/lib/site/queries/leagues';
 import { getStandings } from '@/lib/site/queries/standings';
-import { getTrendingNews } from '@/lib/site/queries/news';
+import { getNewsForTeam, getTrendingNews } from '@/lib/site/queries/news';
 import { buildClubIndex, orderByRelevance, isRelevantHeadline } from '@/lib/site/newsRelevance';
 import { splitTeamFixtures, teamRecord } from '@/lib/site/teamPage';
 import { groupSquadByPosition } from '@/lib/site/squad';
@@ -60,11 +60,11 @@ export default async function TeamPage({ params }: { params: Promise<{ slug: str
   const now = new Date();
   const team = await loadTeam(slug);
 
-  const [fixtures, squad, leagues, news] = await Promise.all([
+  const [fixtures, squad, leagues, taggedNews] = await Promise.all([
     getFixturesForTeam(team.id),
     getSquad(team.id),
     getLeagues(),
-    getTrendingNews(NEWS_FETCH),
+    getNewsForTeam(team.id, CLUB_NEWS_COUNT),
   ]);
 
   const league = team.league_id !== null ? leagues.find((l) => l.id === team.league_id) ?? null : null;
@@ -93,19 +93,28 @@ export default async function TeamPage({ params }: { params: Promise<{ slug: str
   const record = teamRecord(fixtures, team.id);
   const squadGroups = groupSquadByPosition(squad);
 
-  // Headlines that name this club, by the same word-boundary matcher the
-  // landing rails use — built here from one club rather than all 110, so
-  // "relevant" means this club specifically. `news_items` has no team
-  // tagging yet (Phase B2 lists it as outstanding); until it does, matching
-  // the stored name against the headline is the honest way to do this, and
-  // the panel simply omits itself when nothing matches rather than padding
-  // with unrelated football.
-  const clubIndex = buildClubIndex([team]);
-  const clubNews = orderByRelevance(
-    news.filter((n) => isRelevantHeadline(n.title, clubIndex)),
-    clubIndex,
-    CLUB_NEWS_COUNT,
-  );
+  // Club news comes from the stored tags now (`news_items.team_ids`,
+  // written by the news job and backfilled by
+  // scripts/repair/backfill-news-tags.ts) — one indexed query that reaches
+  // the club's whole history rather than whatever page of recent headlines
+  // this page happened to fetch.
+  //
+  // The render-time matcher stays as a fallback for exactly one situation:
+  // between this code shipping and the backfill running, every historical
+  // row is still untagged, and a club page would show an empty panel while
+  // its stories sat in the database. Falling back to the old behaviour is
+  // strictly better than that, and the branch retires itself the moment
+  // tags exist.
+  let clubNews = taggedNews;
+  if (clubNews.length === 0) {
+    const clubIndex = buildClubIndex([team]);
+    const recent = await getTrendingNews(NEWS_FETCH);
+    clubNews = orderByRelevance(
+      recent.filter((n) => isRelevantHeadline(n.title, clubIndex)),
+      clubIndex,
+      CLUB_NEWS_COUNT,
+    );
+  }
 
   const gradient = clubBarGradient(team.club_colors, team.club_colors);
 

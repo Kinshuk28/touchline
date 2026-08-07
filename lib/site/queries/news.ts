@@ -44,3 +44,29 @@ export async function getTransferNews(limit = 10): Promise<TransferNewsRow[]> {
   if (error) throw new Error(`getTransferNews: ${error.message}`);
   return (data ?? []) as TransferNewsRow[];
 }
+
+/**
+ * One club's news, from the stored tags rather than a render-time match.
+ *
+ * `news_items.team_ids` is written by the news job
+ * (lib/ingest/newsTagging.ts) and backfilled over historical rows by
+ * `scripts/repair/backfill-news-tags.ts`. Querying it means a club page
+ * gets that club's stories however far back they sit, in one indexed
+ * query — where matching headlines at render time could only ever search
+ * whatever page of recent news the page had already fetched.
+ *
+ * Returns an empty array, not an error, for a club with no tagged stories.
+ * The caller decides what that means: while the backfill has not yet run,
+ * app/team/[slug] falls back to matching the headline itself, so the page
+ * degrades to its previous behaviour rather than to a blank panel.
+ */
+export async function getNewsForTeam(teamId: number, limit = 8): Promise<NewsRow[]> {
+  const { data, error } = await readClient()
+    .from('news_items')
+    .select('id,source,title,summary,url,image_url,published_at,categories')
+    .contains('team_ids', [teamId])
+    .order('published_at', { ascending: false, nullsFirst: false })
+    .limit(limit);
+  if (error) throw new Error(`getNewsForTeam: ${error.message}`);
+  return (data ?? []) as NewsRow[];
+}
