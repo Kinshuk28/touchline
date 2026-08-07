@@ -242,11 +242,13 @@ export default async function TeamPage({ params }: { params: Promise<{ slug: str
                         key={player.id}
                         className="flex items-baseline justify-between gap-3 border-b border-border px-3 py-1.5 last:border-b-0"
                       >
-                        {/* Not a link: /player/[slug] does not exist yet, and
-                            a name rendered as an anchor here would be a
-                            guaranteed dead end — the same rule /clubs
-                            followed before this route existed. */}
-                        <span className="truncate text-13 font-medium">{player.name}</span>
+                        {/* Links to /player/[slug] now that it exists. This
+                            was plain text for exactly as long as that route
+                            did not — the same no-dead-ends rule /clubs
+                            followed before /team/[slug] landed. */}
+                        <Link href={`/player/${player.slug}`} className="truncate text-13 font-medium hover:underline">
+                          {player.name}
+                        </Link>
                         {player.nationality && (
                           <span className="shrink-0 font-mono text-11 text-muted">{player.nationality}</span>
                         )}

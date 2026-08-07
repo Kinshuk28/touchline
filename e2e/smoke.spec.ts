@@ -150,6 +150,29 @@ test('an unknown club slug is a 404, not a crash', async ({ page }) => {
   expect(res?.status()).toBe(404);
 });
 
+// `/player/[slug]` — reached from a club's squad list, which rendered as
+// plain text until this route existed.
+test('a squad name opens that player\'s page', async ({ page }) => {
+  await page.goto('/clubs');
+  await page.getByRole('link', { name: /Manchester City/i }).first().click();
+  const squadPanel = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Squad', exact: true }) });
+  const firstPlayer = squadPanel.getByRole('link').first();
+  const playerName = (await firstPlayer.textContent())?.trim() ?? '';
+  await firstPlayer.click();
+
+  await expect(page).toHaveURL(/\/player\/[a-z0-9-]+$/);
+  await expect(page.getByRole('heading', { level: 1, name: playerName })).toBeVisible();
+  // The club is named and links back — a player page that doesn't say who
+  // they play for is a dead end of a different kind.
+  await expect(page.getByRole('link', { name: /Manchester City/i })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Season stats', exact: true })).toBeVisible();
+});
+
+test('an unknown player slug is a 404, not a crash', async ({ page }) => {
+  const res = await page.goto('/player/not-a-real-player');
+  expect(res?.status()).toBe(404);
+});
+
 test('the theme toggle persists across a reload', async ({ page }) => {
   await page.goto('/');
   // ThemeToggle renders '·' until its mount effect resolves the theme

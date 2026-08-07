@@ -67,3 +67,19 @@ export async function getTeamBySlug(slug: string): Promise<ClubRow | null> {
   if (error) throw new Error(`getTeamBySlug: ${error.message}`);
   return (data as unknown as ClubRow | null) ?? null;
 }
+
+/**
+ * One club by internal id — what `/player/[slug]` needs to resolve
+ * `players.team_id` into a name, crest and link. Same `null`-for-missing
+ * contract as `getTeamBySlug`: `team_id` is nullable and can point at a row
+ * that has since been removed, and neither is an error.
+ */
+export async function getTeamById(id: number): Promise<ClubRow | null> {
+  const { data, error } = await readClient()
+    .from('teams')
+    .select(CLUB_FIELDS)
+    .eq('id', id)
+    .maybeSingle();
+  if (error) throw new Error(`getTeamById: ${error.message}`);
+  return (data as unknown as ClubRow | null) ?? null;
+}
