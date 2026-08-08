@@ -2,28 +2,29 @@
   <!--
     The favicon — the same corner-arc mark as the wordmark (components/Mark.tsx),
     drawn as a static asset instead of inline `currentColor` SVG because a
-    favicon renders with no page CSS around it to inherit from. Cyan on the
-    site's own void, at a stroke weight almost twice the wordmark's relative
-    thickness (2.6 on a 32-unit box vs. 1.5 on a 24-unit one) — a mark this
-    small has to survive being rendered at 16px in a browser tab, where the
-    wordmark's hairline weight would vanish.
+    favicon renders with no page CSS around it to inherit from. The system's
+    primary neon (electric green) on the site's own void, at a stroke weight
+    almost twice the wordmark's relative thickness (2.6 on a 32-unit box vs.
+    1.5 on a 24-unit one) — a mark this small has to survive being rendered
+    at 16px in a browser tab, where the wordmark's hairline weight would
+    vanish.
 
     Next.js's App Router convention: a file literally named app/icon.svg is
     picked up automatically as the site's icon, with no <link rel="icon">
     or metadata entry required.
   -->
-  <rect width="32" height="32" fill="#090014" />
+  <rect width="32" height="32" fill="#0A0A0F" />
   <path
     d="M4 27h24M4 27V3"
     fill="none"
-    stroke="#00FFFF"
+    stroke="#00FF88"
     stroke-width="2.6"
     stroke-linecap="square"
   />
   <path
     d="M15 27a12 12 0 0 0-12-12"
     fill="none"
-    stroke="#00FFFF"
+    stroke="#00FF88"
     stroke-width="2.6"
   />
 </svg>

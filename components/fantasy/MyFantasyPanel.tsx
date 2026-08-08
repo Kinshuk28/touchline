@@ -13,14 +13,14 @@ import type { NamedSeasonScore } from '@/lib/fantasy/squadStore';
 export function MyFantasyPanel({ score }: { score: NamedSeasonScore }) {
   const latest = score.gameweeks.at(-1) ?? null;
   return (
-    <section className="overflow-hidden border-2 border-comp-pd bg-black/80 shadow-[0_0_25px_rgba(0,255,255,0.15)]">
+    <section className="cyber-cut overflow-hidden border-2 border-comp-pl bg-black/80 shadow-[0_0_25px_rgba(0,255,136,0.15)]">
       <div className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-6">
         <div className="min-w-0 max-w-prose">
           <p className="flex items-center gap-2 text-11 font-bold uppercase tracking-[0.2em] text-comp-pl">
             <Mark size={14} />
             Your Fantasy squad
           </p>
-          <h2 className="mt-2 truncate font-display text-24 font-black uppercase leading-tight tracking-[-0.01em] text-comp-pd drop-shadow-[0_0_10px_rgba(0,255,255,0.6)] sm:text-32">
+          <h2 className="mt-2 truncate font-display text-24 font-black uppercase leading-tight tracking-[-0.01em] text-comp-pl drop-shadow-[0_0_10px_rgba(0,255,136,0.6)] sm:text-32">
             {score.squadName}
           </h2>
           <p className="mt-2 text-15 text-muted">

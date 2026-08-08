@@ -2,13 +2,14 @@ import type { ReactNode } from 'react';
 
 /**
  * One panel of the dashboard — the shared chrome so every panel on every
- * page reads as one system: the same glass surface, the same laser-cyan top
- * edge, the same terminal-style label bar.
+ * page reads as one system: the same glass surface, the same neon-green top
+ * edge, the same chamfered terminal-style label bar.
  *
- * The `border-t-2 border-t-comp-pd` top edge plus `bg-surface/80` is the
+ * The `border-t-2 border-t-comp-pl` top edge plus `bg-surface/80` is the
  * system's own "Standard Card" pattern, applied once here rather than at
  * each of the panel's ~15-20 call sites across the site — every page that
  * already used `BoardPanel` picked up the reskin with no change of its own.
+ * `.cyber-cut` (app/globals.css) clips the corners instead of rounding them.
  *
  * NOT `backdrop-blur` — the system's own spec calls for it, but this
  * component alone accounts for most of a page's panels, and `backdrop-filter`
@@ -47,11 +48,11 @@ export function BoardPanel({
 }) {
   return (
     <section
-      className="tl-rise overflow-hidden border border-comp-pl/20 border-t-2 border-t-comp-pd bg-surface/80"
+      className="cyber-cut tl-rise overflow-hidden border border-comp-pl/20 border-t-2 border-t-comp-pl bg-surface/80"
       style={{ animationDelay: `${order * 70}ms` }}
     >
       <header className="flex items-center gap-2 border-b border-border bg-surface-2/60 px-3 py-1.5">
-        <h2 className="font-display text-11 font-bold uppercase tracking-[0.14em] text-comp-pd drop-shadow-[0_0_5px_rgba(0,255,255,0.6)]">
+        <h2 className="font-display text-11 font-bold uppercase tracking-[0.14em] text-comp-pl drop-shadow-[0_0_5px_rgba(0,255,136,0.6)]">
           {label}
         </h2>
         {meta && <span className="min-w-0 truncate font-mono text-11 uppercase tracking-wider text-muted">{meta}</span>}

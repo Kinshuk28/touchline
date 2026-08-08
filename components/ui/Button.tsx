@@ -2,13 +2,12 @@ import Link from 'next/link';
 import type { ButtonHTMLAttributes, ReactNode } from 'react';
 
 /**
- * The system's signature interaction: a skewed rectangle that snaps upright
- * on hover while filling with neon. One shared primitive rather than the
- * skew/counter-skew markup repeated at every call site — the previous
- * (turf-and-chalk) system had no such component because it never needed
- * one; this system's buttons are theatrical enough that copying the
- * transform by hand at a dozen call sites would drift the first time one of
- * them got tweaked.
+ * The system's signature control: a chamfered (cut-corner) rectangle that
+ * carries a real neon glow, not a skew — this brief drops Vaporwave's
+ * skew/counter-skew theatrics in favour of `.cyber-cut-sm` (app/globals.css)
+ * plus a stacked `box-shadow` glow, on by default at low intensity and
+ * flaring up on hover/focus. One shared primitive rather than repeating
+ * either treatment by hand at a dozen call sites.
  *
  * Polymorphic on `href`: with one, it's a `next/link`; without, a `<button>`
  * that forwards every native attribute (`type`, `disabled`, `onClick`, a
@@ -19,19 +18,24 @@ import type { ButtonHTMLAttributes, ReactNode } from 'react';
 type Variant = 'primary' | 'secondary' | 'outline' | 'ghost';
 type Size = 'sm' | 'default' | 'lg';
 
+// Each glow is a stacked box-shadow — a tight inner ring plus a wider, softer
+// wash — because a single-layer shadow reads as a blur, not a light source.
 const VARIANT_CLASSES: Record<Variant, string> = {
   primary:
-    'border-2 border-comp-pd bg-transparent text-comp-pd ' +
-    'hover:bg-comp-pd hover:text-bg hover:shadow-[0_0_20px_var(--comp-pd)]',
-  secondary:
     'border-2 border-comp-pl bg-comp-pl text-bg ' +
-    'hover:scale-105 hover:opacity-90 hover:shadow-[0_0_20px_var(--comp-pl)]',
+    'shadow-[0_0_6px_var(--comp-pl),0_0_16px_color-mix(in_srgb,var(--comp-pl)_45%,transparent)] ' +
+    'hover:shadow-[0_0_10px_var(--comp-pl),0_0_28px_color-mix(in_srgb,var(--comp-pl)_65%,transparent)]',
+  secondary:
+    'border-2 border-comp-sa bg-transparent text-comp-sa ' +
+    'shadow-[0_0_5px_color-mix(in_srgb,var(--comp-sa)_50%,transparent)] ' +
+    'hover:bg-comp-sa hover:text-bg hover:shadow-[0_0_10px_var(--comp-sa),0_0_28px_color-mix(in_srgb,var(--comp-sa)_65%,transparent)]',
   outline:
-    'border-2 border-comp-pl bg-transparent text-comp-pl ' +
-    'hover:bg-comp-pl hover:text-bg hover:shadow-[0_0_20px_var(--comp-pl)]',
+    'border-2 border-comp-pd bg-transparent text-comp-pd ' +
+    'shadow-[0_0_5px_color-mix(in_srgb,var(--comp-pd)_50%,transparent)] ' +
+    'hover:bg-comp-pd hover:text-bg hover:shadow-[0_0_10px_var(--comp-pd),0_0_28px_color-mix(in_srgb,var(--comp-pd)_65%,transparent)]',
   ghost:
     'border-2 border-transparent text-text ' +
-    'hover:border-comp-pd/40 hover:bg-comp-pd/10 hover:text-comp-pd',
+    'hover:border-comp-pl/40 hover:bg-comp-pl/10 hover:text-comp-pl',
 };
 
 const SIZE_CLASSES: Record<Size, string> = {
@@ -41,9 +45,9 @@ const SIZE_CLASSES: Record<Size, string> = {
 };
 
 const BASE =
-  '-skew-x-12 transform inline-flex shrink-0 items-center justify-center gap-1.5 ' +
-  'font-mono font-semibold uppercase tracking-wider transition-all duration-200 ' +
-  'disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none disabled:hover:scale-100';
+  'cyber-cut-sm inline-flex shrink-0 items-center justify-center gap-1.5 ' +
+  'font-mono font-semibold uppercase tracking-wider transition-all duration-150 ' +
+  'disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none';
 
 interface CommonProps {
   variant?: Variant;
@@ -61,22 +65,17 @@ export function Button({
   ...rest
 }: CommonProps & { href?: string } & Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'children' | 'className'>) {
   const cls = `${BASE} ${VARIANT_CLASSES[variant]} ${SIZE_CLASSES[size]} ${className}`;
-  // The un-skew is on the inner span, never the outer element: skewing the
-  // element that also carries the border would skew the border with it, and
-  // a rectangle whose top and bottom edges tilt in opposite directions from
-  // its own text reads as broken, not stylised.
-  const inner = <span className="inline-block skew-x-12 transform">{children}</span>;
 
   if (href) {
     return (
       <Link href={href} className={cls}>
-        {inner}
+        {children}
       </Link>
     );
   }
   return (
     <button className={cls} {...rest}>
-      {inner}
+      {children}
     </button>
   );
 }

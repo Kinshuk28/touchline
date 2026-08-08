@@ -35,7 +35,7 @@ export default async function SignInPage({
       {bridge === '1' && <SessionBridge />}
 
       {error === 'link' && (
-        <p role="status" className="border border-comp-sa/40 bg-comp-sa/10 px-3 py-2 text-13 text-comp-sa">
+        <p role="status" className="border border-live/40 bg-live/10 px-3 py-2 text-13 text-live">
           That sign-in link has expired or was already used. Links work once, and last an hour.
         </p>
       )}
@@ -49,16 +49,14 @@ export default async function SignInPage({
 
           {/* A plain `<a>`, not the `Button` primitive — this is a genuinely
               external link (Supabase's own OAuth endpoint), and `next/link`
-              is for routes inside this app. Same skewed-button treatment by
-              hand, so it reads as the same control either way. */}
+              is for routes inside this app. Same chamfer-and-glow treatment
+              by hand, so it reads as the same control either way. */}
           <a
             href={googleHref}
-            className="-skew-x-12 transform flex h-11 w-full items-center justify-center gap-2 border-2 border-comp-pl bg-transparent font-mono text-13 font-semibold uppercase tracking-wider text-comp-pl transition-all duration-200 hover:bg-comp-pl hover:text-bg hover:shadow-[0_0_20px_var(--comp-pl)]"
+            className="cyber-cut-sm flex h-11 w-full items-center justify-center gap-2 border-2 border-comp-pl bg-transparent font-mono text-13 font-semibold uppercase tracking-wider text-comp-pl shadow-[0_0_5px_color-mix(in_srgb,var(--comp-pl)_50%,transparent)] transition-all duration-150 hover:bg-comp-pl hover:text-bg hover:shadow-[0_0_10px_var(--comp-pl),0_0_28px_color-mix(in_srgb,var(--comp-pl)_65%,transparent)]"
           >
-            <span className="inline-flex skew-x-12 transform items-center gap-2">
-              <GoogleGlyph size={16} />
-              Continue with Google
-            </span>
+            <GoogleGlyph size={16} />
+            Continue with Google
           </a>
 
           <div className="flex items-center gap-3 font-mono text-11 uppercase tracking-wider text-muted" aria-hidden="true">

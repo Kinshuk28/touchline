@@ -32,6 +32,7 @@ export function SignInForm() {
       <div className="space-y-1.5">
         <label htmlFor="email" className="block text-11 font-semibold uppercase tracking-wider text-muted">
           Email address
+          <span aria-hidden="true" className="cyber-cursor text-comp-pl">_</span>
         </label>
         <input
           id="email"
