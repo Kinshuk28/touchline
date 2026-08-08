@@ -47,7 +47,7 @@ export function FollowToggle({
       type="button"
       onClick={handleClick}
       aria-pressed={following}
-      className={`rounded-full border px-3 py-1 text-11 font-semibold uppercase tracking-wider transition-colors ${
+      className={`rounded-full border px-3 py-1.5 text-11 font-semibold uppercase tracking-wider transition-colors ${
         following
           ? `bg-surface-2 ${comp.borderClass} ${comp.textClass}`
           : 'border-border text-muted hover:text-text'

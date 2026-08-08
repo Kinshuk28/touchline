@@ -454,7 +454,7 @@ export function SquadPicker({
                   role="tab"
                   aria-selected={tab === key}
                   onClick={() => setTab(key)}
-                  className={`rounded-md border px-2 py-1 text-11 font-semibold uppercase tracking-wider ${
+                  className={`rounded-md border px-2.5 py-1.5 text-11 font-semibold uppercase tracking-wider ${
                     tab === key ? 'border-text bg-surface-2 text-text' : 'border-border text-muted hover:text-text'
                   }`}
                 >
@@ -519,15 +519,20 @@ export function SquadPicker({
                   <span className="w-14 shrink-0 text-right font-mono text-13 tabular-nums">
                     {formatPrice(player.priceTenths)}
                   </span>
+                  {/* Same invisible-hit-area trick as IconButton below: the
+                      visible chip stays small enough for a dense 360px row,
+                      `p-1.5 -m-1.5` grows only what a tap can land on. */}
                   <button
                     type="button"
                     onClick={() => add(player)}
                     disabled={reason !== null}
                     title={reason ?? `Add ${player.name}`}
                     aria-label={reason === null ? `Add ${player.name}` : `Cannot add ${player.name}: ${reason}`}
-                    className="shrink-0 rounded-md border border-border px-2 py-0.5 text-11 font-semibold hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-40"
+                    className="group/add shrink-0 p-1.5 -m-1.5 disabled:cursor-not-allowed"
                   >
-                    {reason === null ? 'Add' : '—'}
+                    <span className="grid place-items-center rounded-md border border-border px-2 py-0.5 text-11 font-semibold group-hover/add:bg-surface-2 group-disabled/add:opacity-40">
+                      {reason === null ? 'Add' : '—'}
+                    </span>
                   </button>
                 </li>
               );
@@ -581,7 +586,7 @@ function ChipPicker({
                 type="button"
                 aria-pressed={active}
                 onClick={() => onChip(active ? null : option)}
-                className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-11 font-semibold uppercase tracking-wider ${
+                className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-11 font-semibold uppercase tracking-wider ${
                   active ? `${color.borderClass} ${color.bgClass} ${color.textClass}` : 'border-border text-muted hover:text-text'
                 }`}
               >
@@ -722,12 +727,10 @@ function PickedRow({
       )}
       {onMoveUp && <IconButton onClick={onMoveUp} label={`Move ${player.name} up the bench`}>↑</IconButton>}
       {onMoveDown && <IconButton onClick={onMoveDown} label={`Move ${player.name} down the bench`}>↓</IconButton>}
-      <button
-        type="button"
-        onClick={onToggleStarting}
-        className="shrink-0 rounded-md border border-border px-2 py-0.5 text-11 font-semibold hover:bg-surface-2"
-      >
-        {starting ? 'Bench' : 'Start'}
+      <button type="button" onClick={onToggleStarting} className="group/toggle shrink-0 p-1.5 -m-1.5">
+        <span className="grid place-items-center rounded-md border border-border px-2 py-0.5 text-11 font-semibold group-hover/toggle:bg-surface-2">
+          {starting ? 'Bench' : 'Start'}
+        </span>
       </button>
       <IconButton onClick={onRemove} label={`Remove ${player.name}`}>×</IconButton>
     </li>
@@ -748,11 +751,25 @@ function IconButton({
       onClick={onClick}
       aria-label={label}
       aria-pressed={pressed}
-      className={`shrink-0 rounded-md border px-1.5 py-0.5 font-mono text-11 font-semibold ${
-        pressed ? 'border-text bg-surface-2 text-text' : 'border-border text-muted hover:text-text'
-      }`}
+      // The visible chip stays `px-1.5 py-0.5` — as small as the squad rows
+      // can afford with four of these plus a Start/Bench toggle in one
+      // 360px-wide row (measured: 21x23px rendered). `p-1.5 -m-1.5` grows
+      // only the tappable area, not the box: padding extends the hit
+      // region a real touch can land in, the matching negative margin
+      // cancels it back out of the layout, so neighbouring buttons in the
+      // same row don't visibly shift or grow. Their invisible hit regions
+      // now touch in the middle of the 6px gap between them, which is the
+      // trade this row's density requires — better than a pixel-precise
+      // 21px target, which is what shipped before this.
+      className={`shrink-0 p-1.5 -m-1.5 ${pressed ? 'text-text' : 'text-muted hover:text-text'}`}
     >
-      {children}
+      <span
+        className={`grid place-items-center rounded-md border px-1.5 py-0.5 font-mono text-11 font-semibold ${
+          pressed ? 'border-text bg-surface-2' : 'border-border'
+        }`}
+      >
+        {children}
+      </span>
     </button>
   );
 }
