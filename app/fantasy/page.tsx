@@ -11,6 +11,8 @@ import {
   type PoolPlayer,
   type Gameweek,
 } from '@/lib/site/queries/fantasy';
+import { getLeagues } from '@/lib/site/queries/leagues';
+import { getUpcoming } from '@/lib/site/queries/fixtures';
 import {
   getSquadForGameweek,
   getSquadId,
@@ -22,11 +24,17 @@ import {
 import { transferAllowance } from '@/lib/fantasy/transfers';
 import { availableChips, type Chip } from '@/lib/fantasy/chips';
 import { openGameweek, timeUntilDeadline } from '@/lib/fantasy/gameweekWindow';
+import { nextFixtureByTeam } from '@/lib/fantasy/nextFixture';
 import { STARTING_SLOTS } from '@/lib/fantasy/squadRules';
 import { SquadPicker, type PickerInitial } from '@/components/SquadPicker';
 import { FantasyShell } from '@/components/FantasyShell';
 import { BoardPanel } from '@/components/BoardPanel';
 import { GameweekPointsChart } from '@/components/fantasy/charts';
+
+// Enough to cover roughly three PL gameweeks (10 fixtures each) — a couple
+// of weeks ahead is what a transfer decision actually needs; the whole
+// season's fixture list would be wasted rows for a badge showing one game.
+const UPCOMING_FIXTURES_WINDOW = 30;
 
 export const metadata: Metadata = {
   title: 'Fantasy — pick your squad — Touchline',
@@ -54,14 +62,18 @@ export default async function FantasyPage() {
     );
   }
 
+  const now = new Date();
+
   let pool: PoolPlayer[];
   let calendar: Gameweek[];
   let points: Map<number, number>;
+  let leagues: Awaited<ReturnType<typeof getLeagues>>;
   try {
-    [pool, calendar, points] = await Promise.all([
+    [pool, calendar, points, leagues] = await Promise.all([
       getPlayerPool(season),
       getFantasyCalendar(season),
       getSeasonPoints(season),
+      getLeagues(),
     ]);
   } catch (err) {
     if (isMissingTable(err instanceof Error ? err.message : String(err))) {
@@ -81,7 +93,6 @@ export default async function FantasyPage() {
     );
   }
 
-  const now = new Date();
   const gameweek = openGameweek(calendar, now);
   const gameweekRow = gameweek === null ? null : calendar.find((g) => g.gameweek === gameweek) ?? null;
   const remaining = gameweekRow ? timeUntilDeadline(gameweekRow.deadlineUtc, now) : null;
@@ -109,6 +120,15 @@ export default async function FantasyPage() {
       viceCaptainId: existing.picks.find((p) => p.isViceCaptain)?.playerId ?? null,
     }
     : null;
+
+  // Who's up next for every club — the context a price and a season total
+  // can't give: a player whose club is about to play the bottom side at
+  // home reads very differently from one about to play away at the
+  // leaders. `nextFixtureByTeam` needs its input soonest-first, which is
+  // exactly the order `getUpcoming` already returns.
+  const plLeague = leagues.find((l) => l.fd_code === 'PL');
+  const upcomingFixtures = plLeague ? await getUpcoming(now, UPCOMING_FIXTURES_WINDOW, [plLeague.id]) : [];
+  const nextFixture = nextFixtureByTeam(upcomingFixtures);
 
   // A player already owned keeps what they cost; only a new arrival pays
   // today's price. Applied to the whole pool so the picker's budget
@@ -166,6 +186,10 @@ export default async function FantasyPage() {
         freeTransfers={allowance === null || allowance.unlimited ? null : allowance.free}
         chipOptions={gameweek === null ? [] : availableChips(chipsPlayed, gameweek)}
         initialChip={chipThisWeek as Chip | null}
+        // A Map can't cross the server/client boundary as a prop — plain
+        // entries instead, rebuilt into a Map once inside the client
+        // component (see SquadPicker.tsx).
+        nextFixtureEntries={[...nextFixture.entries()]}
       />
     </FantasyShell>
   );

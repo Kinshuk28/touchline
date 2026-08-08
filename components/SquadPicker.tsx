@@ -30,6 +30,7 @@ import {
 } from '@/lib/fantasy/transfers';
 import { CHIP_LABELS, describeChip, type Chip } from '@/lib/fantasy/chips';
 import type { PoolPlayer } from '@/lib/site/queries/fantasy';
+import type { UpcomingOpponent } from '@/lib/fantasy/nextFixture';
 import { PositionBadge } from '@/components/fantasy/badges';
 import { ChipIcon } from '@/components/fantasy/icons';
 import { BudgetBar } from '@/components/fantasy/charts';
@@ -133,6 +134,7 @@ export function SquadPicker({
   freeTransfers,
   chipOptions,
   initialChip,
+  nextFixtureEntries,
 }: {
   pool: PoolPlayer[];
   initial: PickerInitial | null;
@@ -153,7 +155,15 @@ export function SquadPicker({
   chipOptions: Chip[];
   /** The chip already chosen for this gameweek, so reopening the picker shows it. */
   initialChip: Chip | null;
+  /**
+   * Each club's next fixture, keyed by team id — a `Map` reconstructed from
+   * plain entries, since a `Map` itself can't cross the server/client
+   * boundary as a prop. Optional and defaulted to empty so this component
+   * still works with nothing wired up.
+   */
+  nextFixtureEntries?: Array<[number, UpcomingOpponent]>;
 }) {
+  const nextFixtureByTeam = useMemo(() => new Map(nextFixtureEntries ?? []), [nextFixtureEntries]);
   const [name, setName] = useState(initial?.name ?? 'My squad');
   const [squad, setSquad] = useState<SquadState>({
     starters: initial?.starters ?? [],
@@ -484,11 +494,23 @@ export function SquadPicker({
           <ul className="lg:max-h-[70dvh] lg:overflow-y-auto">
             {visible.rows.map((player) => {
               const reason = blockedReason(player, squad, byId);
+              const next = player.teamId !== null ? nextFixtureByTeam.get(player.teamId) : undefined;
               return (
                 <li key={player.playerId} className="flex items-center gap-2 border-b border-border px-3 py-1.5 last:border-b-0">
                   <PositionBadge position={player.position} />
                   <span className="min-w-0 flex-1 truncate text-13 font-medium">{player.name}</span>
                   <span className="shrink-0 font-mono text-11 text-muted">{player.teamTla ?? '—'}</span>
+                  {/* Hidden below `sm`: the row is already tight at 360px,
+                      and a transfer decision can be made from the desktop
+                      picker where there's room to show it. */}
+                  {next && (
+                    <span
+                      className="hidden shrink-0 items-center gap-1 rounded border border-border px-1 font-mono text-11 text-muted sm:inline-flex"
+                      title={`Next: ${next.home ? 'home to' : 'away to'} ${next.opponentName}`}
+                    >
+                      {next.home ? 'vs' : '@'} {next.opponentTla ?? next.opponentName}
+                    </span>
+                  )}
                   {player.seasonPoints !== null && (
                     <span className="w-10 shrink-0 text-right font-mono text-11 tabular-nums text-muted">
                       {player.seasonPoints} pt
