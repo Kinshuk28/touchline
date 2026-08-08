@@ -224,9 +224,17 @@ body::after {
 }
 
 /* Hover and focus: fast and unnatural, not eased — the brief's own words
-   ("digital, no organic easing curves"). */
+   ("digital, no organic easing curves"). Deliberately not `box-shadow` or
+   `transform` here: those are the two properties actually expensive to
+   animate (unlike `color`/`background-color`/`opacity`, a browser cannot
+   just composite them, it has to repaint), and blanketing every `a` and
+   `button` in the DOM with a standing transition on them — most of which
+   never touch either property — was watched cost for nothing. The handful
+   of elements that do glow or skew on hover (components/ui/Button.tsx, the
+   Google sign-in link, the news-rail thumbnails) declare their own
+   `transition-all`/`transition-transform`, scoped to just themselves. */
 :where(a, button) {
-  transition: color .15s linear, background-color .15s linear, border-color .15s linear, opacity .15s linear, box-shadow .15s linear, transform .15s linear;
+  transition: color .15s linear, background-color .15s linear, border-color .15s linear, opacity .15s linear;
 }
 
 /* A neon ring, not a chalk one — the one universal accent every interactive

@@ -32,7 +32,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           className="pointer-events-none fixed left-1/2 top-[-220px] -z-10 h-[600px] w-[600px] -translate-x-1/2 rounded-full bg-gradient-to-b from-comp-sa to-comp-pl opacity-20 blur-[100px]"
         />
 
-        <header className="relative z-10 border-b-2 border-border bg-surface/60 backdrop-blur-sm">
+        <header className="relative z-10 border-b-2 border-border bg-surface/60">
           {/* Window chrome, not a plain nav bar — the three coloured dots
               read as an OS title bar the instant you see them, which is
               exactly the terminal/vintage-GUI reference the system asks

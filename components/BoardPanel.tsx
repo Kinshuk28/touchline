@@ -5,11 +5,21 @@ import type { ReactNode } from 'react';
  * page reads as one system: the same glass surface, the same laser-cyan top
  * edge, the same terminal-style label bar.
  *
- * The `border-t-2 border-t-comp-pd` top edge plus `bg-surface/80
- * backdrop-blur-md` is the system's own "Standard Card" pattern, applied
- * once here rather than at each of the panel's ~15 call sites across the
- * site — every page that already used `BoardPanel` picked up the reskin
- * with no change of its own.
+ * The `border-t-2 border-t-comp-pd` top edge plus `bg-surface/80` is the
+ * system's own "Standard Card" pattern, applied once here rather than at
+ * each of the panel's ~15-20 call sites across the site — every page that
+ * already used `BoardPanel` picked up the reskin with no change of its own.
+ *
+ * NOT `backdrop-blur` — the system's own spec calls for it, but this
+ * component alone accounts for most of a page's panels, and `backdrop-filter`
+ * is one of the few CSS properties that forces a browser to keep re-blurring
+ * everything behind an element on every scroll and repaint, not just paint it
+ * once. Fifteen-plus of those stacked over the fixed grid/scanline
+ * background (app/globals.css) measurably slowed down interaction on the
+ * live site — clicks and hovers visibly lagged behind the compositor
+ * catching up. `bg-surface/80` alone still reads as a translucent glass
+ * panel; it just doesn't cost a re-blur of the whole page under it on every
+ * frame to get there.
  *
  * Deliberately thin. It owns the frame and the header row and nothing else;
  * every panel's contents (the spine, the mini table, the rails) stay
@@ -37,7 +47,7 @@ export function BoardPanel({
 }) {
   return (
     <section
-      className="tl-rise overflow-hidden border border-comp-pl/20 border-t-2 border-t-comp-pd bg-surface/80 backdrop-blur-md"
+      className="tl-rise overflow-hidden border border-comp-pl/20 border-t-2 border-t-comp-pd bg-surface/80"
       style={{ animationDelay: `${order * 70}ms` }}
     >
       <header className="flex items-center gap-2 border-b border-border bg-surface-2/60 px-3 py-1.5">
