@@ -127,6 +127,103 @@ export function PlayerFormChart({
   );
 }
 
+const TREND_HEIGHT = 120;
+const TREND_STEP = 34;
+const TREND_PAD = 10;
+
+/**
+ * Fixed, literal cycles — Tailwind only generates CSS for class names it can
+ * find as substrings in source, so neither of these can be built from a
+ * template at the call site (`text-comp-pl` → `bg-comp-pl` by string
+ * replacement would silently produce no rule). Five hues, the same ones
+ * every competition badge on the site already uses; the two arrays are
+ * index-aligned on purpose.
+ */
+const LINE_COLORS = ['text-comp-pl', 'text-comp-pd', 'text-comp-sa', 'text-comp-bl1', 'text-comp-fl1'] as const;
+const LINE_SWATCH_COLORS = ['bg-comp-pl', 'bg-comp-pd', 'bg-comp-sa', 'bg-comp-bl1', 'bg-comp-fl1'] as const;
+
+export interface TrendSeries {
+  userId: string;
+  label: string;
+  /** Cumulative points, one entry per member of `gameweeks`, same order. */
+  points: readonly number[];
+  /** The viewer's own line — drawn heavier, so it's findable in a crowded chart without depending on colour alone. */
+  isYou?: boolean;
+}
+
+/**
+ * A season's shape, not just its current total: cumulative points across
+ * every scored gameweek, one line per manager. The table already says who
+ * is ahead; this says how they got there — a manager who has been tied for
+ * three weeks reads completely differently from one who has been ahead the
+ * whole way, and the total alone cannot tell those two seasons apart.
+ *
+ * Capped upstream (app/fantasy/leagues/[id]/page.tsx) to the top few
+ * managers — a line chart with twenty overlapping series is not more
+ * informative than one with six, and the panel says outright when it is
+ * showing fewer than the whole league.
+ */
+export function LeagueTrendChart({ gameweeks, series }: { gameweeks: readonly number[]; series: readonly TrendSeries[] }) {
+  if (gameweeks.length === 0 || series.length === 0) return null;
+
+  const max = Math.max(1, ...series.flatMap((s) => s.points));
+  const width = TREND_PAD * 2 + (gameweeks.length - 1) * TREND_STEP;
+  const xAt = (i: number) => TREND_PAD + i * TREND_STEP;
+  const yAt = (v: number) => TREND_HEIGHT - (v / max) * (TREND_HEIGHT - 8) - 4;
+
+  const describe = (s: TrendSeries) =>
+    `${s.label}: ${gameweeks.map((gw, i) => `gameweek ${gw} ${s.points[i] ?? 0} points`).join(', ')}`;
+
+  return (
+    <figure className="px-3 py-3">
+      <div className="overflow-x-auto">
+        <svg
+          role="img"
+          aria-label={`Cumulative points by gameweek. ${series.map(describe).join('. ')}`}
+          viewBox={`0 0 ${Math.max(width, 120)} ${TREND_HEIGHT + 16}`}
+          width={Math.max(width, 220)}
+          height={TREND_HEIGHT + 16}
+        >
+          {gameweeks.map((gw, i) => (
+            <text key={gw} x={xAt(i)} y={TREND_HEIGHT + 13} textAnchor="middle" className="fill-muted" fontSize="7">
+              {gw}
+            </text>
+          ))}
+          {series.map((s, si) => {
+            const color = LINE_COLORS[si % LINE_COLORS.length];
+            const d = s.points.map((v, i) => `${i === 0 ? 'M' : 'L'}${xAt(i)},${yAt(v)}`).join(' ');
+            return (
+              <path
+                key={s.userId}
+                d={d}
+                fill="none"
+                className={color}
+                stroke="currentColor"
+                strokeWidth={s.isYou ? 2.75 : 1.5}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                opacity={s.isYou ? 1 : 0.65}
+              >
+                <title>{describe(s)}</title>
+              </path>
+            );
+          })}
+        </svg>
+      </div>
+      <ul className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
+        {series.map((s, si) => (
+          <li key={s.userId} className="flex items-center gap-1.5 text-11 text-muted">
+            <span className={`size-1.5 rounded-full ${LINE_SWATCH_COLORS[si % LINE_SWATCH_COLORS.length]}`} aria-hidden="true" />
+            <span className={s.isYou ? 'font-semibold text-text' : ''}>{s.label}</span>
+            <span className="font-mono tabular-nums">{s.points.at(-1) ?? 0}</span>
+          </li>
+        ))}
+      </ul>
+      <figcaption className="sr-only">{series.map(describe).join('. ')}.</figcaption>
+    </figure>
+  );
+}
+
 /** Budget spent, as a filled bar against the £100.0m cap — the number a manager checks most. */
 export function BudgetBar({ spent, total }: { spent: number; total: number }) {
   const pct = Math.min(100, Math.max(0, (spent / total) * 100));
