@@ -136,12 +136,25 @@ export default async function Home({
     session ? getMySeasonScoreSafely(session.accessToken, session.userId) : Promise.resolve(null),
   ]);
 
+  // A transfer story is also, honestly, "the latest news" — it has no
+  // separate identity in `news_items`, just a `transfer` tag alongside
+  // whatever else is stored. Fetched independently for two different panels
+  // on the *same* page, the newest transfer stories routinely land in both:
+  // the Transfers rail by construction, and the Latest rail because they are
+  // also simply recent. Excluding anything already shown in Transfers is
+  // page-level, not query-level, on purpose — `getTrendingNews` is also used
+  // on /news and /team/[slug], neither of which has a competing Transfers
+  // panel to duplicate against, so the query itself has no reason to exclude
+  // transfer stories.
+  const transferIds = new Set(transfers.map((t) => t.id));
+  const nonTransferNews = news.filter((n) => !transferIds.has(n.id));
+
   // Relevance, the spec's worst-content-bug fix: the feeds are global
   // football, this site is the top five leagues. Ordering, not filtering —
   // when nothing in the feed names a stored club the rail still fills, with
   // the newest items, rather than going empty.
   const clubIndex = buildClubIndex(clubNames);
-  const railNews = orderByRelevance(news, clubIndex, NEWS_RAIL_COUNT);
+  const railNews = orderByRelevance(nonTransferNews, clubIndex, NEWS_RAIL_COUNT);
   const railTransfers = orderByRelevance(transfers, clubIndex, TRANSFER_RAIL_COUNT);
 
   const pending = seasons.filter(hasKickoff);
