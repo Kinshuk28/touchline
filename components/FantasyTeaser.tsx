@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { Mark } from '@/components/Mark';
 import { Button } from '@/components/ui/Button';
 
@@ -82,8 +83,11 @@ export function FantasyTeaser({
             Pick fifteen players inside a {'\u00A3'}100m budget, captain one of them, and score
             your side on real Premier League gameweeks as the results land.
           </p>
-          <p className="mt-3">
+          <p className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2">
             <Button href="/fantasy" size="sm">Pick your squad →</Button>
+            <Link href="/fantasy/stats" className="font-mono text-11 text-muted hover:text-comp-pd">
+              See last gameweek&rsquo;s top scorers →
+            </Link>
           </p>
         </div>
 

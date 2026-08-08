@@ -159,6 +159,52 @@ export async function getFantasyPlayerCard(season: number, playerId: number): Pr
   return { position: player.position, priceTenths: player.price_tenths, seasonPoints, gameweeks };
 }
 
+export interface GameweekPerformer extends PoolPlayer {
+  points: number;
+  minutes: number | null;
+}
+
+/**
+ * Every player who scored in a gameweek, ranked highest first — the public
+ * "who actually had a big week" view, needing no sign-in because none of it
+ * is anyone's squad. `/fantasy/stats` uses it for a top-scorers list and a
+ * best-by-position breakdown; both are views over the same ranking rather
+ * than two separate queries.
+ *
+ * Two requests, not an embedded join: `fantasy_gameweek_points` and
+ * `fantasy_player_season` share `(season, player_id)`, not a foreign key
+ * PostgREST can traverse, so this reads points for the gameweek and the
+ * whole pool (`getPlayerPool`, already fetched for the picker and cached by
+ * nothing — Next's request memoisation dedupes it within a render) and
+ * joins them in code. A player who scored but has since dropped out of the
+ * pool (transferred out of the league, say) is left out rather than shown
+ * with blank price and club — the same "can't attribute it, don't fake it"
+ * rule the rest of this file follows.
+ */
+export async function getGameweekPerformers(season: number, gameweek: number): Promise<GameweekPerformer[]> {
+  const [pointsResult, pool] = await Promise.all([
+    readClient()
+      .from('fantasy_gameweek_points')
+      .select('player_id,points,minutes')
+      .eq('season', season)
+      .eq('gameweek', gameweek)
+      .not('points', 'is', null)
+      .range(0, 4999),
+    getPlayerPool(season),
+  ]);
+  if (pointsResult.error) throw new Error(`getGameweekPerformers: ${pointsResult.error.message}`);
+
+  const poolById = new Map(pool.map((p) => [p.playerId, p]));
+  const rows = (pointsResult.data ?? []) as Array<{ player_id: number; points: number | null; minutes: number | null }>;
+  return rows
+    .flatMap((row) => {
+      if (row.points === null) return [];
+      const player = poolById.get(row.player_id);
+      return player ? [{ ...player, points: row.points, minutes: row.minutes }] : [];
+    })
+    .sort((a, b) => b.points - a.points);
+}
+
 export interface Gameweek extends GameweekWindow {
   name: string;
   isCurrent: boolean;

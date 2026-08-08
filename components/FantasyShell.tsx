@@ -17,7 +17,7 @@ export function FantasyShell({
   children,
 }: {
   email: string | null;
-  current: 'squad' | 'leagues';
+  current: 'squad' | 'leagues' | 'stats';
   children: React.ReactNode;
 }) {
   return (
@@ -43,6 +43,13 @@ export function FantasyShell({
             className={current === 'leagues' ? 'text-comp-pd underline decoration-2 underline-offset-4 drop-shadow-[0_0_6px_rgba(0,255,255,0.8)]' : 'text-muted hover:text-comp-pd'}
           >
             Leagues
+          </Link>
+          <Link
+            href="/fantasy/stats"
+            aria-current={current === 'stats' ? 'page' : undefined}
+            className={current === 'stats' ? 'text-comp-pd underline decoration-2 underline-offset-4 drop-shadow-[0_0_6px_rgba(0,255,255,0.8)]' : 'text-muted hover:text-comp-pd'}
+          >
+            Stats
           </Link>
         </nav>
 
