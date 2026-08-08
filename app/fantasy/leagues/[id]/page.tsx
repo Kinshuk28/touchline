@@ -10,6 +10,10 @@ import { FantasyShell } from '@/components/FantasyShell';
 import { BoardPanel } from '@/components/BoardPanel';
 import { ChipBadge } from '@/components/fantasy/badges';
 import { TrophyIcon } from '@/components/fantasy/icons';
+import { LeagueTrendChart, type TrendSeries } from '@/components/fantasy/charts';
+
+/** A line chart of more than this many managers is noise, not a trend — see the note on `LeagueTrendChart`. */
+const MAX_TREND_SERIES = 8;
 
 export const dynamic = 'force-dynamic';
 
@@ -70,6 +74,27 @@ export default async function LeaguePage({ params }: { params: Promise<{ id: str
 
   const table = rankLeague(entries, latestGameweek);
 
+  // The season's shape, not just its current total — see the comment on
+  // `LeagueTrendChart`. Built from the same ranked rows as the table (each
+  // still carries its own `score`), so the chart and the table can never
+  // disagree about a manager's total. Capped to the leaders: a chart with
+  // every member of a large league overlapping is not more informative than
+  // one with a handful, and the panel says outright when it is showing
+  // fewer than the whole league rather than implying it is everyone.
+  const gameweekNumbers = [...new Set(gameweeks.map((g) => g.gameweek))].sort((a, b) => a - b);
+  const scoredRows = table.filter((row) => row.score !== null && row.score.gameweeks.length > 0);
+  const trendSeries: TrendSeries[] = scoredRows.slice(0, MAX_TREND_SERIES).map((row) => {
+    const byWeek = new Map(row.score!.gameweeks.map((g) => [g.gameweek, g.net]));
+    let running = 0;
+    const points = gameweekNumbers.map((gw) => {
+      const net = byWeek.get(gw);
+      if (net !== undefined) running += net;
+      return running;
+    });
+    return { userId: row.userId, label: row.squadName, points, isYou: row.userId === session.userId };
+  });
+  const trendOmitted = scoredRows.length - trendSeries.length;
+
   // Who played a chip in the gameweek the table is showing. Read from the
   // members rather than the ranked rows because a chip is a fact about a
   // squad's gameweek, not about its position.
@@ -109,6 +134,15 @@ export default async function LeaguePage({ params }: { params: Promise<{ id: str
             </form>
           </div>
         </header>
+
+        {trendSeries.length > 0 && (
+          <BoardPanel
+            label="Season"
+            meta={trendOmitted > 0 ? `top ${trendSeries.length} of ${scoredRows.length}` : undefined}
+          >
+            <LeagueTrendChart gameweeks={gameweekNumbers} series={trendSeries} />
+          </BoardPanel>
+        )}
 
         <BoardPanel
           label="Table"
