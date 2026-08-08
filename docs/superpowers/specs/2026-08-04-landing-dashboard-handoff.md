@@ -1,7 +1,7 @@
 # Touchline — Landing Page Dashboard Rebuild (handoff)
 
 **Date:** 2026-08-04
-**Status:** specified, not built. Three dispatch attempts died to API failures before writing code.
+**Status:** built. `app/page.tsx` implements the ticker/fixtures/table/transfers/news board this spec describes.
 **Scope:** `app/page.tsx` and supporting components. No data-layer changes.
 
 ---

@@ -215,7 +215,7 @@ export async function saveSquadAction(_prev: SaveState, formData: FormData): Pro
   }));
 
   try {
-    await saveSquad(session.accessToken, session.userId, season, {
+    await saveSquad(session.accessToken, season, {
       name,
       activeFromGameweek: gameweek,
       picks,

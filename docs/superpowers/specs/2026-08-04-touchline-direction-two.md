@@ -77,7 +77,7 @@ The landing page is doing too much. Split it.
 
 **`/tables`:** one table per competition, tabbed or stacked. Season 2026 exists but is all zeros at matchday 1, so **show the completed 2025-26 table by default, clearly labelled as last season**, with the current table available and honestly marked as not yet played. Position in mono; club colour bar on each row; promotion/relegation boundaries marked with rules, not colour alone.
 
-**`/clubs`:** grouped by competition. Each club shows crest, name, its parsed colours, and venue. Cards link nowhere for now — `/team/[slug]` is a later phase — so do not render dead links.
+**`/clubs`:** grouped by competition. Each club shows crest, name, its parsed colours, and venue. Cards link to `/team/[slug]`, which now exists (`components/ClubCard.tsx`).
 
 ---
 

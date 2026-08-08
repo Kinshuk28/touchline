@@ -238,8 +238,10 @@ Nothing below can be done from code — all of it lives in the Supabase dashboar
 until it is done `/fantasy` says "not ready yet" rather than failing.
 
 1. **Apply the migrations**, in order: `0006_fantasy_gameweek_points.sql`,
-   `0007_fantasy_player_season.sql`, `0008_fantasy_squads.sql`. SQL Editor → New query →
-   paste → Run. `npx tsx scripts/verify-schema.ts` lists which are still pending.
+   `0007_fantasy_player_season.sql`, `0008_fantasy_squads.sql`, `0009_fantasy_leagues.sql`,
+   `0010_fantasy_transfers.sql`, `0011_fantasy_chips.sql`, `0012_fantasy_save_squad_atomic.sql`.
+   SQL Editor → New query → paste → Run. `npx tsx scripts/verify-schema.ts` lists which are
+   still pending.
 
 2. **Set the Site URL and allow the redirect.** Authentication → URL Configuration has two
    separate fields — both matter, and missing either produces the same symptom (a magic
@@ -424,12 +426,22 @@ once-a-season and one-per-half chip budgets are checked in the server action ins
 are game rules a manager can only break against themselves, and expressing them as
 triggers would put a second copy of `chips.ts` in SQL.
 
+### Built (history)
+
+| Piece | Where |
+|---|---|
+| Gameweek-by-gameweek breakdown for a manager's own squad | `app/fantasy/history/page.tsx` |
+| Atomic save (closes the transaction gap below) | `supabase/migrations/0012_fantasy_save_squad_atomic.sql`, `lib/fantasy/squadStore.ts#saveSquad` |
+
+`saveSquad` used to be four separate PostgREST statements (upsert the squad, delete the old
+generation, insert the new one, upsert the gameweek record), with this section noting plainly
+that a failure between the delete and the insert left a generation empty. `fantasy_save_squad`
+does all four writes inside one `plpgsql` function body, which Postgres runs as a single
+implicit transaction — the same `security definer` + `auth.uid()`-only pattern
+`fantasy_join_league` (0009) already established, so ownership is decided the same way, just
+in one round trip instead of four.
+
 ### Still open
 
-Nothing from the original spec. Natural next steps if the game finds an audience: a
-gameweek-by-gameweek history page, cup competitions inside a league, and Option B's
-five-league club fantasy as a second mode.
-- **`saveSquad` is two statements, not a transaction.** PostgREST has no cross-request
-  transaction; a failure between the delete and the insert leaves the generation empty,
-  which the picker reads as "no squad yet" and offers to rebuild. Recoverable, but a
-  Postgres function would make it atomic.
+Natural next steps if the game finds an audience: cup competitions inside a league, and
+Option B's five-league club fantasy as a second mode.

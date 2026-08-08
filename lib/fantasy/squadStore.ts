@@ -299,75 +299,45 @@ export async function getSeasonScore(
  * the same slots. Generations *before* this one are never touched — that is
  * the history the schema exists to keep.
  *
- * NOT A TRANSACTION, and honest about it: PostgREST has no transaction
- * across requests, so the delete and the insert below are two statements.
- * The window between them is one round trip, and a failure in it leaves the
- * generation empty rather than corrupted — the picker reads that as "no
- * squad yet" and offers to build one, which is recoverable. Making it atomic
- * needs a Postgres function, which is a reasonable follow-up and not worth
- * blocking the picker on.
+ * ONE ROUND TRIP, ONE TRANSACTION. This used to be four separate PostgREST
+ * statements (upsert the squad, delete the old generation, insert the new
+ * one, upsert the gameweek record) with a comment admitting a failure
+ * between the delete and the insert left a generation empty. That gap is
+ * closed by `fantasy_save_squad` (supabase/migrations/0012), a `plpgsql`
+ * function that does all four writes inside the one implicit transaction a
+ * function body runs in: every write commits together, or none of them do.
+ * `userId` is not sent — the function reads `auth.uid()` from the same
+ * verified session token this client already carries, exactly like every
+ * other write path in this project, so it cannot be pointed at someone
+ * else's squad by a wrong argument. There is deliberately no `userId`
+ * parameter here (every other function in this file takes one, to filter
+ * reads defensively — see the file's own top comment) — accepting one here
+ * would be a value this function cannot honestly use, since ownership is
+ * decided entirely inside the database function from the caller's session.
  */
 export async function saveSquad(
   accessToken: string,
-  userId: string,
   season: number,
   input: SquadInput,
 ): Promise<string> {
   const db = userClient(accessToken);
 
-  // `upsert` on (user_id, season) so a returning manager renames their side
-  // rather than colliding with their own unique constraint.
-  const { data: squadRow, error: squadError } = await db
-    .from('fantasy_squad')
-    .upsert(
-      { user_id: userId, season, name: input.name, updated_at: new Date().toISOString() },
-      { onConflict: 'user_id,season' },
-    )
-    .select('id')
-    .single();
-  if (squadError) throw new Error(`saveSquad (squad): ${squadError.message}`);
-
-  const squadId = (squadRow as { id: string }).id;
-
-  const { error: deleteError } = await db
-    .from('fantasy_pick')
-    .delete()
-    .eq('squad_id', squadId)
-    .eq('active_from_gameweek', input.activeFromGameweek);
-  if (deleteError) throw new Error(`saveSquad (clear generation): ${deleteError.message}`);
-
-  const { error: insertError } = await db.from('fantasy_pick').insert(
-    input.picks.map((pick) => ({
-      squad_id: squadId,
-      active_from_gameweek: input.activeFromGameweek,
+  const { data, error } = await db.rpc('fantasy_save_squad', {
+    p_season: season,
+    p_name: input.name,
+    p_active_from_gameweek: input.activeFromGameweek,
+    p_picks: input.picks.map((pick) => ({
       slot: pick.slot,
       player_id: pick.playerId,
       is_captain: pick.isCaptain,
       is_vice_captain: pick.isViceCaptain,
       price_tenths: pick.priceTenths,
     })),
-  );
-  if (insertError) throw new Error(`saveSquad (picks): ${insertError.message}`);
+    p_transfers_made: input.transfersMade,
+    p_transfer_cost: input.transferCost,
+    p_chip: input.chip,
+  });
+  if (error) throw new Error(`saveSquad: ${error.message}`);
 
-  // The gameweek's transfer record. Upserted, not inserted: saving twice
-  // before a deadline recomputes the changes against the previous
-  // *generation*, so the second save's figure replaces the first's rather
-  // than adding to it — which is what makes changing your mind before the
-  // deadline free, as it should be.
-  const { error: recordError } = await db
-    .from('fantasy_squad_gameweek')
-    .upsert(
-      {
-        squad_id: squadId,
-        gameweek: input.activeFromGameweek,
-        transfers_made: input.transfersMade,
-        transfer_cost: input.transferCost,
-        chip: input.chip,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: 'squad_id,gameweek' },
-    );
-  if (recordError) throw new Error(`saveSquad (transfers): ${recordError.message}`);
-
-  return squadId;
+  return data as string;
 }
