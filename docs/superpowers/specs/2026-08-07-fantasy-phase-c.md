@@ -280,6 +280,21 @@ until it is done `/fantasy` says "not ready yet" rather than failing.
    - No code change and no redeploy needed either way — the link is already live, it just
      errors until the provider is turned on.
 
+6. **Optional: turn on analytics.** `components/Analytics.tsx` (pageviews, Do Not Track
+   respected, no autocapture, no session recording) and `lib/site/analytics.ts` (a handful
+   of named server-side events: `signed_in`, `squad_saved`, `league_created`,
+   `league_joined`) are both wired up already, and both are no-ops without a key — nothing
+   to break by skipping this.
+   - Create a project at [PostHog](https://posthog.com) (the free tier is enough for this
+     site's traffic) and copy its **Project API Key** and its **host** (e.g.
+     `https://us.i.posthog.com` — the region you picked when creating the project).
+   - In Netlify, Site configuration → Environment variables, add `NEXT_PUBLIC_POSTHOG_KEY`
+     and `NEXT_PUBLIC_POSTHOG_HOST`. Both are safe to expose to the browser — that's what
+     `NEXT_PUBLIC_` means to Next.js, and PostHog's project key is designed to be public.
+   - **This one does need a redeploy**: `NEXT_PUBLIC_*` variables are baked in at build
+     time, not read at request time, so setting them alone does nothing until the next
+     build picks them up.
+
 ---
 
 ## Built (leagues)

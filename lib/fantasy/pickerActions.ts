@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { getSession } from '@/lib/auth/session';
+import { trackServerEvent } from '@/lib/site/analytics';
 import { getPlayerPool, getFantasyCalendar, getFantasySeason } from '@/lib/site/queries/fantasy';
 import { openGameweek } from '@/lib/fantasy/gameweekWindow';
 import {
@@ -228,6 +229,7 @@ export async function saveSquadAction(_prev: SaveState, formData: FormData): Pro
   }
 
   revalidatePath('/fantasy');
+  await trackServerEvent('squad_saved', session.userId, { gameweek, transfers: diff.count, transferCost: cost, chip });
   // A chip is the most consequential thing a save can do and the hardest to
   // undo, so it is named back explicitly rather than left to be inferred from
   // a button that now has a tick on it.

@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { Orbitron, Share_Tech_Mono } from 'next/font/google';
 import { Mark } from '@/components/Mark';
+import { Analytics } from '@/components/Analytics';
 import './globals.css';
 
 // Two roles, per the design system: Orbitron for display (headings, prices,
@@ -21,6 +22,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en" className={`${orbitron.variable} ${shareTechMono.variable}`}>
       <body className="min-h-dvh font-sans antialiased">
+        <Analytics />
         {/* The sun — a real blurred element, not a gradient standing in for
             one (see the comment on `body::before`/`body::after` in
             globals.css for the other two background layers). Fixed, behind
