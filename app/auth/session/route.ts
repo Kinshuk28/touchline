@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { authClient, setSessionCookies } from '@/lib/auth/session';
+import { trackServerEvent } from '@/lib/site/analytics';
 
 /**
  * Turns a session that arrived in a URL fragment into this site's cookies.
@@ -52,5 +53,10 @@ export async function POST(request: NextRequest) {
   }
 
   await setSessionCookies({ accessToken, refreshToken });
+  // Covers both doors this route serves: a stock-template magic link and a
+  // Google sign-in both deliver their tokens in the URL fragment, and
+  // nothing in the request tells the two apart without decoding the token —
+  // more than "minimal" tracking needs.
+  await trackServerEvent('signed_in', data.user.id, { method: 'fragment' });
   return NextResponse.json({ ok: true });
 }

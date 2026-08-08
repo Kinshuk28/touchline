@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { authClient, setSessionCookies } from '@/lib/auth/session';
+import { trackServerEvent } from '@/lib/site/analytics';
 import type { EmailOtpType } from '@supabase/supabase-js';
 
 /**
@@ -62,6 +63,7 @@ export async function GET(request: NextRequest) {
     accessToken: data.session.access_token,
     refreshToken: data.session.refresh_token,
   });
+  await trackServerEvent('signed_in', data.session.user.id, { method: 'magic_link' });
 
   return NextResponse.redirect(new URL('/fantasy', request.url));
 }

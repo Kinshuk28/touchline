@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { z } from 'zod';
 import { getSession } from '@/lib/auth/session';
+import { trackServerEvent } from '@/lib/site/analytics';
 import { getFantasySeason } from '@/lib/site/queries/fantasy';
 import { createLeague, joinLeague, leaveLeague } from '@/lib/fantasy/leagueStore';
 
@@ -56,6 +57,7 @@ export async function createLeagueAction(
   }
 
   revalidatePath('/fantasy/leagues');
+  await trackServerEvent('league_created', session.userId);
   redirect(`/fantasy/leagues/${id}`);
 }
 
@@ -80,6 +82,7 @@ export async function joinLeagueAction(
   }
 
   revalidatePath('/fantasy/leagues');
+  await trackServerEvent('league_joined', session.userId);
   redirect(`/fantasy/leagues/${id}`);
 }
 
