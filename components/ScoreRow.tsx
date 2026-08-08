@@ -1,14 +1,16 @@
+import Link from 'next/link';
 import { memo } from 'react';
 import { Crest } from '@/components/Crest';
 import { stateLabel } from '@/lib/site/scoreDisplay';
 import type { FixtureWithTeams } from '@/lib/site/rows';
 
-// Deliberately a plain <span>, never a <Link>: there is no `app/team/`
-// route in Phase B1 (team pages arrive in Plan B2), so linking to
-// `/team/${team.slug}` here was a guaranteed 404 on every home and away
-// name across `/scores` and the landing live panel — and with no
-// `app/not-found.tsx` at the time, users landed on Next's unstyled
-// default 404. Reintroduce the `<Link>` only once `app/team/[slug]` exists.
+// A `<Link>` to `/team/${team.slug}` when there's a club to link to, a plain
+// `<span>` for a fixture whose teams the provider hasn't confirmed ("TBC") —
+// the same fallback `components/MatchdaySpine.tsx` and `app/scores/page.tsx`'s
+// `CompetitionGroup` already use, now that `app/team/[slug]` exists. This
+// component used to render both as plain text: `app/team/` didn't exist yet
+// when it was written, and linking to it then would have been a guaranteed
+// 404 on every name across `/scores` and the landing live panel.
 //
 // `align="end"` for the home side, mirroring the fixed-width,
 // home-hugs-the-score layout `app/scores/page.tsx`'s `CompetitionGroup`
@@ -23,7 +25,13 @@ import type { FixtureWithTeams } from '@/lib/site/rows';
 // `CompetitionGroup` makes, since there isn't 2x128px to spare at 360px.
 function Side({ team, align = 'start' }: { team: FixtureWithTeams['home']; align?: 'start' | 'end' }) {
   const label = team?.short_name ?? team?.name ?? 'TBC';
-  const name = <span className="truncate text-sm font-medium">{label}</span>;
+  const name = team ? (
+    <Link href={`/team/${team.slug}`} className="truncate text-sm font-medium hover:underline">
+      {label}
+    </Link>
+  ) : (
+    <span className="truncate text-sm font-medium">{label}</span>
+  );
   return (
     <span
       className={`flex min-w-0 flex-1 items-center gap-2 sm:w-32 sm:flex-none ${

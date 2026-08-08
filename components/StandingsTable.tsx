@@ -1,4 +1,5 @@
 import { Fragment } from 'react';
+import Link from 'next/link';
 import { Crest } from '@/components/Crest';
 import { getCompetitionMeta } from '@/lib/site/competition';
 import { primaryClubColor } from '@/lib/site/clubColors';
@@ -131,7 +132,20 @@ export function StandingsTable({ league, rows }: { league: LeagueRow; rows: Stan
                             />
                             <span className="w-5 shrink-0 text-right font-mono text-13 tabular-nums text-muted">{pos}</span>
                             <Crest team={row.team} size={22} />
-                            <span className="truncate text-14 font-medium">{row.team?.short_name ?? row.team?.name ?? 'Unknown club'}</span>
+                            {/* The club name is the way into /team/[slug] —
+                                same pattern as the landing board's
+                                MiniTable, which already links this. `row.team`
+                                is null only if a standings row outlives its
+                                club, which the schema allows; text with
+                                nowhere to go is better than a link to
+                                nowhere. */}
+                            {row.team ? (
+                              <Link href={`/team/${row.team.slug}`} className="truncate text-14 font-medium hover:underline">
+                                {row.team.short_name ?? row.team.name}
+                              </Link>
+                            ) : (
+                              <span className="truncate text-14 font-medium">Unknown club</span>
+                            )}
                           </div>
                         </td>
                         <td className="px-2 py-2 text-right font-mono text-13 tabular-nums">{row.played}</td>
