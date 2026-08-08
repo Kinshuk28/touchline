@@ -76,8 +76,10 @@ export default async function SignInPage({
         </div>
       </BoardPanel>
 
-      <p className="text-center font-mono text-11 text-muted">
+      <p className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-center font-mono text-11 text-muted">
         <Link href="/" className="hover:text-comp-pd">← Back to the scores</Link>
+        <span aria-hidden="true">·</span>
+        <Link href="/fantasy/stats" className="hover:text-comp-pd">See last gameweek&rsquo;s top scorers</Link>
       </p>
     </div>
   );
