@@ -155,7 +155,7 @@ function PublicFrame({ children }: { children: React.ReactNode }) {
   return (
     <div className="space-y-3">
       <header className="flex flex-wrap items-center gap-x-4 gap-y-2 border-2 border-comp-pl/40 bg-surface/80 px-3 py-2">
-        <h1 className="font-display text-24 font-black uppercase tracking-[-0.01em] text-comp-pl drop-shadow-[0_0_10px_rgba(255,0,255,0.6)]">
+        <h1 className="font-display text-24 font-black uppercase tracking-[-0.01em] text-comp-pl drop-shadow-[0_0_10px_rgba(0,255,136,0.6)]">
           Fantasy
         </h1>
         <p className="text-11 font-semibold uppercase tracking-wider text-muted">Stats</p>

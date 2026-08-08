@@ -1,52 +1,63 @@
 @import "tailwindcss";
 
 /*
- * VAPORWAVE / OUTRUN.
+ * CYBERPUNK / GLITCH.
  *
- * A full replacement of the "turf and chalk" system (Direction Two) with
- * the design system given: hot magenta, electric cyan and sunset orange
- * glowing out of a near-black void, Orbitron display type over a Share Tech
- * Mono body, a perspective grid floor, a blurred sun, and a scanline
- * overlay across the whole viewport. Dark mode only, by the system's own
- * declaration — the light theme and its toggle (components/ThemeToggle.tsx)
- * are gone rather than left inert, because a toggle that silently does
- * nothing is worse than no toggle.
+ * Replaces the Vaporwave/Outrun system with the design system given:
+ * electric green as the primary neon against a near-black void, magenta and
+ * cyan as secondary/tertiary accents, Orbitron display type over a
+ * JetBrains Mono body, a flat circuit-grid texture, a much quieter scanline
+ * overlay than the previous system carried, and chamfered (cut-corner)
+ * panels in place of Vaporwave's skewed buttons.
  *
- * Token *names* are kept from the previous palette (--bg, --surface,
+ * THE REASON FOR THIS REWRITE: the previous system was reported illegible
+ * ("I cannot see the texts clearly"). Two concrete causes, both fixed here
+ * rather than carried forward:
+ *
+ *   1. The scanline overlay sat at 25% black on every other 2px line, over
+ *      the *entire* page, above every other layer including all text. That
+ *      is a real, measurable contrast hit on top of whatever a token's own
+ *      ratio was — halved again, effectively, on the darkened rows.
+ *      Rebuilt at 8% here, same mechanic, an order of magnitude lighter.
+ *   2. The design brief's own `mutedForeground` (#6b7280) measures 3.85:1
+ *      on this system's card colour and 4.09:1 on its background — below
+ *      the 4.5:1 AA floor for normal text, despite the brief's own claim
+ *      that "all text meets WCAG AA". `--muted` below is lightened to
+ *      #9aa1af (7.18:1 / 7.61:1) to actually clear it; every other colour
+ *      in this file is contrast-checked the same way (numbers in the
+ *      comment beside each one), not taken on the brief's word.
+ *
+ * Token *names* are kept from the previous system (--bg, --surface,
  * --surface-2, --border, --text, --muted, --live, --comp-*) so every
  * component that already reads them repaints for free; only the values
  * change. `lib/site/competition.ts`, `lib/fantasy/fantasyColors.ts` and
  * every badge built on them inherit this palette without a line of their
  * own changing.
- *
- * Every colour below is contrast-checked against both `--bg` and
- * `--surface` at the sizes it is actually used at (script run inline while
- * choosing these values — see the commit). `--live` keeps the previous
- * rule of never sitting on `--surface-2`, where it falls just under 4.5:1.
  */
 :root {
-  --bg:        #090014;   /* the void */
-  --surface:   #1A103C;   /* glass panel */
-  --surface-2: #241454;   /* elevated / hover */
-  --border:    #3D2563;   /* default hairline — quiet on purpose; interactive borders go full neon at the call site */
-  --text:      #E0E0E0;   /* chrome */
-  --muted:     #A79FC7;   /* dim lavender chrome, 8.25:1 on --bg, 6.47:1 on --surface-2 */
-  --live:      #FF2D55;   /* neon red — the one non-spec colour, for the one thing that must still read as "alert" at a glance */
-  --live-ink:  #090014;   /* text ON --live: the void colour clears 5.64:1 there, white only clears 3.65:1 */
-  --scrim:     rgba(9, 0, 20, .86);
+  --bg:        #0A0A0F;   /* the void — deep black, faint blue undertone */
+  --surface:   #12121A;   /* card */
+  --surface-2: #1C1C2E;   /* muted / elevated chrome */
+  --border:    #2A2A3A;   /* hairline — quiet on purpose; interactive borders go full neon at the call site */
+  --text:      #E0E0E0;   /* foreground */
+  --muted:     #9AA1AF;   /* secondary text — lightened from the brief's #6b7280; see the file comment for why */
+  --live:      #FF3366;   /* destructive/alert red-pink, 5.57:1 on --bg, 5.25:1 on --surface */
+  --live-ink:  #0A0A0F;   /* text ON --live: the void clears 5.57:1 there, white only 3.55:1 */
+  --scrim:     rgba(10, 10, 15, .86);
 
   /* Five distinct neon hues for the five competitions
      (lib/site/competition.ts) and, downstream of that, every fantasy
      position/chip badge (lib/fantasy/fantasyColors.ts). The system names
-     three hero colours (magenta, cyan, orange); gold and violet extend the
-     family for the two competitions it doesn't have a colour for, at the
-     same saturation and the same contrast floor (>=4.5:1 on --bg and
-     --surface, checked individually — see the commit for the numbers). */
-  --comp-pl:  #FF00FF;   /* Premier League — hot magenta, the system's hero colour, for the flagship league */
-  --comp-pd:  #00FFFF;   /* La Liga — electric cyan */
-  --comp-sa:  #FF9900;   /* Serie A — sunset orange */
-  --comp-bl1: #FFE600;   /* Bundesliga — neon gold */
-  --comp-fl1: #C77DFF;   /* Ligue 1 — electric violet */
+     three (green as the primary/hero neon, magenta secondary, cyan
+     tertiary); amber and violet extend the family for the two competitions
+     it doesn't name a colour for, at the same contrast floor (checked
+     individually against --bg/--surface/--surface-2, all comfortably
+     >=4.6:1 — see the commit for the exact numbers). */
+  --comp-pl:  #00FF88;   /* Premier League — electric green, the system's primary neon, for the flagship league */
+  --comp-pd:  #00D4FF;   /* La Liga — cyan */
+  --comp-sa:  #FF00FF;   /* Serie A — magenta */
+  --comp-bl1: #FFB300;   /* Bundesliga — amber */
+  --comp-fl1: #C77DFF;   /* Ligue 1 — violet */
 }
 
 @theme inline {
@@ -66,15 +77,16 @@
   --color-comp-bl1: var(--comp-bl1);
   --color-comp-fl1: var(--comp-fl1);
 
-  /* Orbitron for display (headings, prices, scores — anything that should
-     feel struck rather than typed), Share Tech Mono for everything else,
-     body copy included — the system calls for a monospace body, not just a
-     monospace data column, and that is the single boldest, least generic
-     choice in the whole brief. Both loaded via next/font/google in
-     app/layout.tsx; no CSS @import, no new dependency. */
+  /* Orbitron for display — unchanged from the previous system, it already
+     fit this brief's "geometric, futuristic, robotic" heading spec exactly.
+     JetBrains Mono replaces Share Tech Mono for body/UI/data: still a
+     genuinely monospace "terminal" body, the boldest call either brief
+     makes, but a face actually drawn for reading at small sizes rather than
+     a display face stretched down to 11px. Both loaded via next/font/google
+     in app/layout.tsx; no CSS @import, no new dependency. */
   --font-display: var(--font-orbitron);
-  --font-sans: var(--font-share-tech-mono);
-  --font-mono: var(--font-share-tech-mono);
+  --font-sans: var(--font-jetbrains-mono);
+  --font-mono: var(--font-jetbrains-mono);
 
   --text-11: 0.6875rem;
   --text-13: 0.8125rem;
@@ -84,14 +96,14 @@
   --text-32: 2rem;
   --text-44: 2.75rem;
 
-  /* Sharp and geometric is the system's default: every radius Tailwind
-     would otherwise round a card, panel or button to collapses to a hard
-     corner. `rounded-full` is untouched by this (Tailwind's `full` step is
-     a static 9999px, not one of these tokens), which is exactly the split
-     the system asks for — square cards and buttons, round dots, pills and
-     avatars. Overriding the scale here repaints every existing
-     `rounded-xl`/`rounded-lg`/`rounded-md` call site site-wide with no
-     change to a single component file. */
+  /* Sharp corners stay the system's default (unchanged from Vaporwave —
+     both briefs agree here), overridden once for every existing
+     `rounded-xl`/`rounded-lg`/`rounded-md` call site site-wide.
+     `rounded-full` is untouched (Tailwind's `full` step is a static
+     9999px, not one of these tokens), which is what keeps dots and pills
+     round. This system layers cut (chamfered) corners on top via
+     `clip-path` — see `.cyber-cut`/`.cyber-cut-sm` below — which a
+     `border-radius` override cannot express at all. */
   --radius-xs: 0px;
   --radius-sm: 0px;
   --radius-md: 0px;
@@ -109,18 +121,18 @@ html { color-scheme: dark; }
  * Three fixed layers, all decorative, all `pointer-events: none`, none of
  * them ever competing with a fixture row for attention:
  *
- * 1. The sun — a real blurred element (`app/layout.tsx`), not a gradient
+ * 1. The glow — a real blurred element (`app/layout.tsx`), not a gradient
  *    trick, because a genuine `blur(100px)` reads softer than any radial
- *    gradient standing in for one.
- * 2. The grid — `body::before`, a line pattern thrown into perspective and
- *    masked to fade into the void before it reaches the fold. `z-index:
- *    -1` rather than relying on paint order, so it stays behind real
- *    content regardless of what stacking contexts the page above it
- *    creates.
+ *    gradient standing in for one. Green-to-magenta, the system's own
+ *    "light source" pairing.
+ * 2. The circuit grid — `body::before`, flat (no perspective this time —
+ *    the brief's own token for this is a plain two-axis line grid, not a
+ *    receding floor), at 3% opacity so it reads as PCB-trace texture
+ *    rather than a drawn pattern.
  * 3. The scanlines — `body::after`, a 4px repeating band over the entire
  *    viewport, `z-index: 9999` so it sits above everything including the
- *    sun. At 25% black every other line it never drops body text below
- *    its already very high contrast floor (see the token comment above).
+ *    glow. **8% black**, not the previous system's 25% — see the file
+ *    comment at the top for why that number changed.
  */
 body {
   background-color: var(--bg);
@@ -132,21 +144,14 @@ body {
 body::before {
   content: '';
   position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 70vh;
+  inset: 0;
   z-index: -1;
   pointer-events: none;
   background-image:
-    linear-gradient(transparent 94%, color-mix(in srgb, var(--comp-pl) 70%, transparent) 94%),
-    linear-gradient(90deg, transparent 94%, color-mix(in srgb, var(--comp-pl) 70%, transparent) 94%);
-  background-size: 56px 56px;
-  transform: perspective(480px) rotateX(62deg) scale(1.6);
-  transform-origin: bottom center;
-  opacity: .3;
-  -webkit-mask-image: linear-gradient(to bottom, transparent, black 55%);
-  mask-image: linear-gradient(to bottom, transparent, black 55%);
+    linear-gradient(color-mix(in srgb, var(--comp-pl) 60%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in srgb, var(--comp-pl) 60%, transparent) 1px, transparent 1px);
+  background-size: 50px 50px;
+  opacity: .03;
 }
 
 body::after {
@@ -155,17 +160,41 @@ body::after {
   inset: 0;
   z-index: 9999;
   pointer-events: none;
-  background-image: linear-gradient(rgba(9, 0, 20, 0) 50%, rgba(0, 0, 0, .25) 50%);
+  background-image: linear-gradient(rgba(0, 0, 0, 0) 50%, rgba(0, 0, 0, .08) 50%);
   background-size: 100% 4px;
+}
+
+/*
+ * Chamfered (cut) corners — this system's signature shape, replacing both
+ * Vaporwave's rounded-corner override *and* its skewed buttons. Two sizes:
+ * `.cyber-cut` for panels, `.cyber-cut-sm` for buttons/inputs, where a 10px
+ * cut would eat too much of a compact control. A `border` on a
+ * `clip-path`-cut element is clipped along with the box in every current
+ * browser, so a bordered panel keeps a straight-edged border that actually
+ * follows the cut corner, not a rounded one fighting a straight clip.
+ */
+.cyber-cut {
+  clip-path: polygon(
+    0 12px, 12px 0,
+    calc(100% - 12px) 0, 100% 12px,
+    100% calc(100% - 12px), calc(100% - 12px) 100%,
+    12px 100%, 0 calc(100% - 12px)
+  );
+}
+.cyber-cut-sm {
+  clip-path: polygon(
+    0 6px, 6px 0,
+    calc(100% - 6px) 0, 100% 6px,
+    100% calc(100% - 6px), calc(100% - 6px) 100%,
+    6px 100%, 0 calc(100% - 6px)
+  );
 }
 
 /*
  * Motion. Kept from the previous system where the mechanic still fits — a
  * board arriving, a match being in play — because both are honest signals,
- * not decoration, and the brief's own motion section asks for exactly that
- * restraint ("nothing here loops for decoration" survives the reskin even
- * though the palette didn't). Every colour they reference is a token, so
- * the new palette applies without touching the keyframes.
+ * not decoration. Every colour they reference is a token, so the new
+ * palette applies without touching the keyframes.
  */
 @keyframes tl-rise {
   from { opacity: 0; transform: translateY(14px); }
@@ -218,32 +247,60 @@ body::after {
   offset-rotate: 0deg;
 }
 .tl-sweep {
-  background: linear-gradient(100deg, transparent 0%, rgba(0, 255, 255, .1) 45%, transparent 90%);
+  background: linear-gradient(100deg, transparent 0%, rgba(0, 255, 136, .1) 45%, transparent 90%);
   width: 45%;
   animation: tl-sweep 9s ease-in-out infinite;
 }
 
-/* Hover and focus: fast and unnatural, not eased — the brief's own words
-   ("digital, no organic easing curves"). Deliberately not `box-shadow` or
-   `transform` here: those are the two properties actually expensive to
-   animate (unlike `color`/`background-color`/`opacity`, a browser cannot
+/*
+ * The glitch — this system's other signature, and deliberately confined to
+ * exactly one headline on the whole site (components/FantasyTeaser.tsx),
+ * the same restraint the previous system applied to its gradient-text
+ * treatment. A permanent chromatic-aberration text-shadow (magenta left,
+ * cyan right) plus a brief positional flicker roughly every 4 seconds —
+ * mostly still, never a continuous shimmer sitting across body text
+ * anywhere. `prefers-reduced-motion` drops the flicker and keeps the
+ * static aberration, which is what the brief itself asks for.
+ */
+@keyframes cyber-glitch-flicker {
+  0%, 92%, 100% { transform: translate(0, 0); }
+  93% { transform: translate(-2px, 1px); }
+  94% { transform: translate(2px, -1px); }
+  95% { transform: translate(-1px, -1px); }
+  96% { transform: translate(1px, 1px); }
+  97% { transform: translate(0, 0); }
+}
+.cyber-glitch {
+  text-shadow: -2px 0 var(--comp-sa), 2px 0 var(--comp-pd);
+  animation: cyber-glitch-flicker 4s steps(1) infinite;
+}
+
+/* A blinking terminal cursor — used once, on the sign-in page's "awaiting
+   input" hint, not decoratively scattered. */
+@keyframes cyber-blink { 50% { opacity: 0; } }
+.cyber-cursor { animation: cyber-blink 1s step-end infinite; }
+
+/* Hover and focus: quick and mechanical, not eased — this brief's own
+   words ("sharp, digital, slightly mechanical. Quick snaps rather than
+   smooth eases"). Deliberately not `box-shadow` or `transform` here: those
+   are the two properties actually expensive to animate (a browser cannot
    just composite them, it has to repaint), and blanketing every `a` and
    `button` in the DOM with a standing transition on them — most of which
-   never touch either property — was watched cost for nothing. The handful
-   of elements that do glow or skew on hover (components/ui/Button.tsx, the
-   Google sign-in link, the news-rail thumbnails) declare their own
-   `transition-all`/`transition-transform`, scoped to just themselves. */
+   never touch either property — is cost paid for nothing. The handful of
+   elements that do glow on hover (components/ui/Button.tsx, the Google
+   sign-in link, the news-rail thumbnails) declare their own transition,
+   scoped to just themselves. */
 :where(a, button) {
-  transition: color .15s linear, background-color .15s linear, border-color .15s linear, opacity .15s linear;
+  transition: color .12s linear, background-color .12s linear, border-color .12s linear, opacity .12s linear;
 }
 
 /* A neon ring, not a chalk one — the one universal accent every interactive
    element gets regardless of local colour, so keyboard focus is never
    ambiguous. */
 :where(a, button, input, select, [tabindex]):focus-visible {
-  outline: 2px solid var(--comp-pd);
+  outline: 2px solid var(--comp-pl);
   outline-offset: 2px;
-  box-shadow: 0 0 12px var(--comp-pd);
+  box-shadow: 0 0 5px var(--comp-pl), 0 0 10px color-mix(in srgb, var(--comp-pl) 40%, transparent);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -258,4 +315,8 @@ body::after {
   .tl-sweep { animation: none !important; display: none !important; }
   .tl-pass { animation: none !important; stroke-dashoffset: 0 !important; opacity: .85 !important; }
   .tl-ball { animation: none !important; opacity: 0 !important; }
+  /* The glitch keeps its static aberration and loses only the flicker —
+     see the rule's own comment above. */
+  .cyber-glitch { animation: none !important; transform: none !important; }
+  .cyber-cursor { animation: none !important; opacity: 1 !important; }
 }

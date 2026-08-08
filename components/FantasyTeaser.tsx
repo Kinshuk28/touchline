@@ -60,7 +60,7 @@ export function FantasyTeaser({
   ];
 
   return (
-    <section className="relative overflow-hidden border-2 border-comp-pl bg-black/80 shadow-[0_0_30px_rgba(255,0,255,0.15)]">
+    <section className="cyber-cut relative overflow-hidden border-2 border-comp-pl bg-black/80 shadow-[0_0_30px_rgba(0,255,136,0.15)]">
       {/* The floodlight sweep, now a cyan scanning beam. Purely decorative,
           sits under the content, and never touches text contrast. */}
       <span className="tl-sweep pointer-events-none absolute inset-0 z-0" aria-hidden="true" />
@@ -71,7 +71,14 @@ export function FantasyTeaser({
             <Mark size={14} />
             Fantasy
           </p>
-          <h2 className="mt-2 bg-gradient-to-r from-comp-sa via-comp-pl to-comp-pd bg-clip-text font-display text-24 font-black uppercase leading-tight tracking-[-0.01em] text-transparent drop-shadow-[0_0_30px_rgba(255,0,255,0.4)] sm:text-32">
+          {/* The one headline on the whole site that carries the glitch
+              treatment (app/globals.css#.cyber-glitch) — a permanent
+              chromatic-aberration text-shadow plus a brief positional
+              flicker roughly every 4s, replacing Vaporwave's gradient-text
+              signature. Solid `text-comp-pl` (the system's primary neon)
+              rather than transparent-with-gradient, since the aberration
+              shadow is itself the flourish here. */}
+          <h2 className="cyber-glitch mt-2 font-display text-24 font-black uppercase leading-tight tracking-[-0.01em] text-comp-pl sm:text-32">
             Build a Premier League squad.
           </h2>
           {/* Narrowed from "all five leagues" when the game was actually
