@@ -28,5 +28,14 @@ jobs:
       - run: npm ci
       - run: npx tsx scripts/ingest/fantasy.ts
         env:
+          # This job never calls football-data.org — it reads FPL only — but
+          # `startRun`/`serviceClient` (lib/db/repositories/runs.ts,
+          # lib/db/client.ts) validate the full ingest env schema regardless
+          # of which provider the caller actually uses, the same as every
+          # other ingest workflow in this directory. Omitted here by mistake
+          # when this workflow was written; every run failed at the first
+          # line with "FOOTBALL_DATA_KEY: Invalid input: expected string,
+          # received undefined" until this was added.
+          FOOTBALL_DATA_KEY: ${{ secrets.FOOTBALL_DATA_KEY }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
