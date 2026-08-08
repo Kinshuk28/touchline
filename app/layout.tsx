@@ -57,15 +57,25 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <Mark />
               TOUCHLINE
             </a>
+            {/* `p-2 -m-2` on every link: padding grows the tappable area,
+                the matching negative margin cancels the same amount back out
+                of the flex layout, so the visible text and the 16px/6px
+                gaps this row is laid out with (gap-x-4/gap-y-1.5) are
+                unchanged. Horizontally the 8px-per-side extension exactly
+                meets a neighbour's own extension in the middle of the
+                existing gap; vertically, where the row wraps at narrow
+                widths, it eats slightly into the 6px row gap — an accepted
+                trade for turning an 11px-tall text link into a real touch
+                target on a nav that is on every single page. */}
             <nav aria-label="Primary" className="order-2 flex w-full flex-wrap gap-x-4 gap-y-1.5 font-mono text-11 uppercase tracking-[0.14em] text-muted sm:w-auto">
-              <a href="/news" className="hover:text-comp-pl hover:drop-shadow-[0_0_6px_rgba(0,255,136,0.8)]">News</a>
-              <a href="/scores" className="hover:text-comp-pl hover:drop-shadow-[0_0_6px_rgba(0,255,136,0.8)]">Scores</a>
-              <a href="/tables" className="hover:text-comp-pl hover:drop-shadow-[0_0_6px_rgba(0,255,136,0.8)]">Tables</a>
-              <a href="/clubs" className="hover:text-comp-pl hover:drop-shadow-[0_0_6px_rgba(0,255,136,0.8)]">Clubs</a>
-              <a href="/calendar" className="hover:text-comp-pl hover:drop-shadow-[0_0_6px_rgba(0,255,136,0.8)]">Calendar</a>
-              <a href="/transfers" className="hover:text-comp-pl hover:drop-shadow-[0_0_6px_rgba(0,255,136,0.8)]">Transfers</a>
-              <a href="/fantasy" className="hover:text-comp-pl hover:drop-shadow-[0_0_6px_rgba(0,255,136,0.8)]">Fantasy</a>
-              <a href="/search" className="hover:text-comp-pl hover:drop-shadow-[0_0_6px_rgba(0,255,136,0.8)]">Search</a>
+              <a href="/news" className="inline-block p-2 -m-2 hover:text-comp-pl hover:drop-shadow-[0_0_6px_rgba(0,255,136,0.8)]">News</a>
+              <a href="/scores" className="inline-block p-2 -m-2 hover:text-comp-pl hover:drop-shadow-[0_0_6px_rgba(0,255,136,0.8)]">Scores</a>
+              <a href="/tables" className="inline-block p-2 -m-2 hover:text-comp-pl hover:drop-shadow-[0_0_6px_rgba(0,255,136,0.8)]">Tables</a>
+              <a href="/clubs" className="inline-block p-2 -m-2 hover:text-comp-pl hover:drop-shadow-[0_0_6px_rgba(0,255,136,0.8)]">Clubs</a>
+              <a href="/calendar" className="inline-block p-2 -m-2 hover:text-comp-pl hover:drop-shadow-[0_0_6px_rgba(0,255,136,0.8)]">Calendar</a>
+              <a href="/transfers" className="inline-block p-2 -m-2 hover:text-comp-pl hover:drop-shadow-[0_0_6px_rgba(0,255,136,0.8)]">Transfers</a>
+              <a href="/fantasy" className="inline-block p-2 -m-2 hover:text-comp-pl hover:drop-shadow-[0_0_6px_rgba(0,255,136,0.8)]">Fantasy</a>
+              <a href="/search" className="inline-block p-2 -m-2 hover:text-comp-pl hover:drop-shadow-[0_0_6px_rgba(0,255,136,0.8)]">Search</a>
             </nav>
           </div>
         </header>

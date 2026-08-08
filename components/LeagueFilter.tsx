@@ -24,7 +24,7 @@ export function LeagueFilter({
       <Link
         href={hrefFor(null)}
         aria-current={allActive ? 'true' : undefined}
-        className={`rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-wider ${
+        className={`rounded-full border px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider ${
           allActive ? 'border-text bg-surface-2 text-text' : 'border-border text-muted hover:text-text'
         }`}
       >
@@ -38,7 +38,7 @@ export function LeagueFilter({
             key={l.fd_code}
             href={hrefFor(l.fd_code)}
             aria-current={active ? 'true' : undefined}
-            className={`rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-wider ${
+            className={`rounded-full border px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider ${
               active
                 ? `bg-surface-2 ${comp.borderClass} ${comp.textClass}`
                 : 'border-border text-muted hover:text-text'
