@@ -267,8 +267,8 @@ function rank(item: Pick<NewsRow, 'title'>, index: ClubIndex): 0 | 1 | 2 | 3 {
  * is stable in modern V8, but bucketing states the intent instead of
  * relying on it).
  *
- * Generic over the row type so `TransferNewsRow` (which carries an extra
- * `league_id`) keeps its own type through the call.
+ * Generic over the row type only so a caller's own subtype survives the
+ * call unchanged, rather than widening back down to plain `NewsRow`.
  */
 export function orderByRelevance<T extends Pick<NewsRow, 'title'>>(
   items: readonly T[],

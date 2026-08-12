@@ -25,8 +25,12 @@ describe('isSearchable', () => {
     expect(isSearchable('a')).toBe(false);
   });
 
-  it('accepts two characters and up', () => {
-    expect(isSearchable('ar')).toBe(true);
+  it('rejects two characters, still too short to mean much', () => {
+    expect(isSearchable('ar')).toBe(false);
+  });
+
+  it('accepts three characters and up', () => {
+    expect(isSearchable('ars')).toBe(true);
     expect(isSearchable('arsenal')).toBe(true);
   });
 });

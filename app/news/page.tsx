@@ -1,12 +1,14 @@
 import { getTrendingNews } from '@/lib/site/queries/news';
 import { getClubNames } from '@/lib/site/queries/teams';
+import { getLeagues } from '@/lib/site/queries/leagues';
 import { buildClubIndex, orderByRelevance } from '@/lib/site/newsRelevance';
+import { parseLeagueCodes, resolveLeagueIds } from '@/lib/site/leagueFilter';
 import { NewsCard } from '@/components/NewsCard';
+import { LeagueFilter } from '@/components/LeagueFilter';
 
-// Same 5-minute cap as the landing page (app/page.tsx) — comfortably below
-// the ingest cadence, and this route has no dynamic per-request input (no
-// cookie read, no searchParams) so it's actually ISR-eligible, unlike
-// the landing page's own inert `revalidate`.
+// `searchParams` (the league filter) forces dynamic rendering, same
+// reasoning as app/scores/page.tsx — this route was ISR-eligible before it
+// had a filter to read.
 export const revalidate = 300;
 
 // Capped, not paginated (spec: "paginated or capped at a sensible number").
@@ -16,10 +18,19 @@ export const revalidate = 300;
 // and doesn't need any new UI for page controls.
 const NEWS_FEED_LIMIT = 60;
 
-export default async function NewsPage() {
+export default async function NewsPage({
+  searchParams,
+}: { searchParams: Promise<{ leagues?: string }> }) {
+  const { leagues: raw } = await searchParams;
+  const selected = parseLeagueCodes(raw);
   const now = new Date();
+  const leagues = await getLeagues();
+  // Resolved up front, same reason /scores does: an unrecognised code must
+  // resolve to "match nothing", never silently widen back to "everything".
+  const leagueIds = selected.length > 0 ? resolveLeagueIds(leagues, selected) : undefined;
+
   const [feed, clubNames] = await Promise.all([
-    getTrendingNews(NEWS_FEED_LIMIT),
+    getTrendingNews(NEWS_FEED_LIMIT, leagueIds),
     getClubNames(),
   ]);
   // The spec's relevance rule applies "wherever news appears", and this
@@ -31,8 +42,11 @@ export default async function NewsPage() {
   const news = orderByRelevance(feed, buildClubIndex(clubNames));
 
   return (
-    <div className="space-y-6">
-      <h1 className="text-2xl font-extrabold tracking-tight">News</h1>
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-baseline justify-between gap-3">
+        <h1 className="text-2xl font-extrabold tracking-tight">News</h1>
+        <LeagueFilter leagues={leagues} selected={selected} basePath="/news" />
+      </div>
       {/* The full feed, so it keeps components/NewsCard.tsx — image-led at
           16:9 with a type-only fallback for the items that have no stored
           image (the Guardian stores none at all; that's expected, not a gap
@@ -43,7 +57,18 @@ export default async function NewsPage() {
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {news.map((n) => <NewsCard key={n.id} item={n} now={now} />)}
         {news.length === 0 && (
-          <p className="text-sm text-muted">No headlines yet — the news job runs every 15 minutes.</p>
+          <p className="text-sm text-muted">
+            {/* `leagueIds !== undefined` means a filter is active at all —
+                not `leagueIds.length === 0`, which only covers unrecognised
+                codes. A real, resolved league (Ligue 1, say) can easily have
+                no story in the newest LIMIT rows on its own; that's still a
+                filtered-empty result, not the site having no news, and
+                telling a reader "the job runs every 15 minutes" for it
+                blames ingestion for what the filter actually did. */}
+            {leagueIds !== undefined
+              ? 'No headlines for that selection yet.'
+              : 'No headlines yet — the news job runs every 15 minutes.'}
+          </p>
         )}
       </div>
     </div>

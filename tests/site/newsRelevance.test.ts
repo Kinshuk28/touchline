@@ -33,6 +33,7 @@ function row(overrides: Partial<NewsRow> & { id: number; title: string }): NewsR
     image_url: null,
     published_at: '2026-08-04T12:00:00Z',
     categories: [],
+    league_id: null,
     ...overrides,
   };
 }

@@ -1,7 +1,6 @@
 import { getCompetitionMeta } from '@/lib/site/competition';
 import { relativeTime } from '@/lib/site/format';
-import type { LeagueRow } from '@/lib/site/rows';
-import type { TransferNewsRow } from '@/lib/site/queries/news';
+import type { LeagueRow, NewsRow } from '@/lib/site/rows';
 
 /**
  * The dense Transfermarkt-style block the spec calls for: one story per
@@ -25,7 +24,7 @@ import type { TransferNewsRow } from '@/lib/site/queries/news';
 export function TransfersRail({
   items, leagues, now, chromeless = false, stacked = false,
 }: {
-  items: TransferNewsRow[];
+  items: NewsRow[];
   leagues: LeagueRow[];
   now: Date;
   /**

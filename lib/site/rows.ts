@@ -128,4 +128,12 @@ export interface NewsRow {
   image_url: string | null;
   published_at: string | null;
   categories: string[];
+  /**
+   * Which top-five competition this story is tied to, or `null` — not every
+   * story names a single club (a transfer-window roundup, an award, a
+   * refereeing story). Selected by every query that returns a `NewsRow` (see
+   * lib/site/queries/news.ts) so a league filter works identically wherever
+   * news appears, not just on the one page that happened to need it first.
+   */
+  league_id: number | null;
 }

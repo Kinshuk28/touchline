@@ -1,16 +1,15 @@
 import { getLeagues } from '@/lib/site/queries/leagues';
 import { getTeams } from '@/lib/site/queries/teams';
 import { getCompetitionMeta } from '@/lib/site/competition';
+import { CompetitionTabs } from '@/components/CompetitionTabs';
 import { ClubCard } from '@/components/ClubCard';
 import type { ClubRow, LeagueRow } from '@/lib/site/rows';
 
-// No searchParams, no cookie read — this route is ISR-eligible, same
-// reasoning as app/news/page.tsx. Club identity data (crest, venue,
-// founded, colours) changes far less often than fixtures/scores, but 300s
-// keeps this consistent with the rest of the site's "no page is stale for
-// more than a few minutes" convention rather than inventing a longer,
-// page-specific cap.
-export const revalidate = 300;
+// Reading `searchParams` forces dynamic rendering (same reasoning as
+// app/tables/page.tsx) — the season/league toggle these pages share is
+// exactly why /tables already pays this cost, and this route is now the
+// same shape.
+export const revalidate = 60;
 
 /**
  * A club counts as historical — no longer in a current top-five
@@ -67,6 +66,9 @@ function CompetitionGroup({
  * belongs mixed into a *current* competition's group. No competition
  * colour on the header: these clubs aren't currently tied to one, and
  * reusing their last league's colour here would misrepresent this season.
+ *
+ * Only ever shown in the "All" view — these clubs have no `league_id`, so
+ * there is no single-league tab they could belong to.
  */
 function HistoricalGroup({ clubs }: { clubs: ClubRow[] }) {
   if (clubs.length === 0) return null;
@@ -92,26 +94,44 @@ function HistoricalGroup({ clubs }: { clubs: ClubRow[] }) {
   );
 }
 
-export default async function ClubsPage() {
+export default async function ClubsPage({
+  searchParams,
+}: { searchParams: Promise<{ league?: string }> }) {
+  const { league: leagueParam } = await searchParams;
   const [leagues, teams] = await Promise.all([getLeagues(), getTeams()]);
 
   const historical = teams.filter(isHistoricalClub);
   const current = teams.filter((c) => !isHistoricalClub(c));
 
-  const groups = leagues
+  // Same "one league at a time by default, `all` opts back into the full
+  // scroll" shape as /tables — 110 cards across five sections plus the
+  // historical group was the other page this complaint named directly.
+  const showingAll = leagueParam === 'all';
+  const selectedLeague = showingAll ? null : leagues.find((l) => l.fd_code === leagueParam) ?? leagues[0] ?? null;
+  const leaguesToShow = showingAll ? leagues : selectedLeague ? [selectedLeague] : [];
+
+  const groups = leaguesToShow
     .map((league) => ({ league, clubs: current.filter((c) => c.league_id === league.id) }))
     .filter((g) => g.clubs.length > 0);
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-extrabold tracking-tight">Clubs</h1>
         <p className="mt-1 text-sm text-muted">
-          All {teams.length} clubs across Europe&rsquo;s top five leagues, grouped by competition.
+          {teams.length} clubs across Europe&rsquo;s top five leagues.
         </p>
       </div>
 
-      {groups.length === 0 && historical.length === 0 && (
+      <CompetitionTabs
+        leagues={leagues}
+        selected={selectedLeague}
+        showAll
+        ariaLabel="Choose a league"
+        hrefFor={(league) => (league === null ? '/clubs?league=all' : `/clubs?league=${league.fd_code}`)}
+      />
+
+      {groups.length === 0 && (!showingAll || historical.length === 0) && (
         <p className="rounded-xl border border-border bg-surface p-6 text-sm text-muted">No clubs on file yet.</p>
       )}
 
@@ -119,7 +139,7 @@ export default async function ClubsPage() {
         <CompetitionGroup key={g.league.id} league={g.league} clubs={g.clubs} eager={i === 0} />
       ))}
 
-      <HistoricalGroup clubs={historical} />
+      {showingAll && <HistoricalGroup clubs={historical} />}
     </div>
   );
 }
