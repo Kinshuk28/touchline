@@ -53,9 +53,19 @@ export default async function NewsPage({
           to fill). The landing page's own rail is a different, much denser
           component (components/NewsRail.tsx) precisely because eight of
           these cards would be 1800px of column. Club-relevant stories
-          first, newest-first within that. */}
+          first, newest-first within that.
+
+          The top story runs `lead`: a wider image at a higher-resolution
+          CDN rendition (NewsCard's own `LEAD_IMAGE_WIDTH`) in a
+          `sm:col-span-2` cell — half the row from `lg:` up, the full row
+          below it — plus its summary underneath the headline, which no
+          other card in the grid shows. One lead per page load, not per
+          row: a grid where every third card were double-width would read
+          as a mistake, not a hierarchy. */}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        {news.map((n) => <NewsCard key={n.id} item={n} now={now} />)}
+        {news.map((n, i) => (
+          <NewsCard key={n.id} item={n} now={now} lead={i === 0} className={i === 0 ? 'sm:col-span-2' : ''} />
+        ))}
         {news.length === 0 && (
           <p className="text-sm text-muted">
             {/* `leagueIds !== undefined` means a filter is active at all —
