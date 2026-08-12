@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { Orbitron, JetBrains_Mono } from 'next/font/google';
 import { Mark } from '@/components/Mark';
 import { Analytics } from '@/components/Analytics';
+import { SearchBox } from '@/components/SearchBox';
 import './globals.css';
 
 // Two roles, per the design system: Orbitron for display (headings, prices,
@@ -32,7 +33,17 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           className="pointer-events-none fixed left-1/2 top-[-220px] -z-10 h-[600px] w-[600px] -translate-x-1/2 rounded-full bg-gradient-to-b from-comp-sa to-comp-pl opacity-10 blur-[100px]"
         />
 
-        <header className="relative z-10 border-b-2 border-border bg-surface/60">
+        {/* `z-20`, not `z-10` like `<main>` below: a z-index only outranks
+            siblings *within the same stacking context*, and header/main are
+            siblings at the same level. At equal z-index the later element in
+            DOM order wins ties — `<main>` — which meant the search box's own
+            z-30 dropdown (components/SearchBox.tsx) was correctly on top of
+            everything *inside* header, but the whole header stacking
+            context still painted underneath `<main>`, so the ticker row
+            showed through it. Bumping header above main fixes that without
+            needing every one of main's descendants to individually avoid
+            z-30 and up. */}
+        <header className="relative z-20 border-b-2 border-border bg-surface/60">
           {/* Window chrome, not a plain nav bar — the three coloured dots
               read as an OS title bar the instant you see them, which is
               exactly the terminal/vintage-GUI reference the system asks
@@ -75,8 +86,14 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <a href="/calendar" className="inline-block p-2 -m-2 hover:text-comp-pl hover:drop-shadow-[0_0_6px_rgba(0,255,136,0.8)]">Calendar</a>
               <a href="/transfers" className="inline-block p-2 -m-2 hover:text-comp-pl hover:drop-shadow-[0_0_6px_rgba(0,255,136,0.8)]">Transfers</a>
               <a href="/fantasy" className="inline-block p-2 -m-2 hover:text-comp-pl hover:drop-shadow-[0_0_6px_rgba(0,255,136,0.8)]">Fantasy</a>
-              <a href="/search" className="inline-block p-2 -m-2 hover:text-comp-pl hover:drop-shadow-[0_0_6px_rgba(0,255,136,0.8)]">Search</a>
             </nav>
+            {/* A live search box, not a link to a search page — typing
+                3+ letters queries /api/search directly and shows matching
+                clubs/players in a dropdown (components/SearchBox.tsx).
+                `order-3` alongside the nav's own `order-2 w-full sm:w-auto`
+                trick: stacks below the nav at mobile widths, sits inline
+                at the end of the row from `sm:` up. */}
+            <SearchBox />
           </div>
         </header>
         {/* max-w-7xl (1280px): three asymmetric dashboard columns need the

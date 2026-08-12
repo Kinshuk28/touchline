@@ -9,12 +9,12 @@ import { getFollowingLeagues } from '@/lib/site/following';
 import { resolveLeagueIds } from '@/lib/site/leagueFilter';
 import { buildClubIndex, orderByRelevance } from '@/lib/site/newsRelevance';
 import { fixtureDateRange, fixturePanelHeading } from '@/lib/site/boardLabels';
-import { getCompetitionMeta } from '@/lib/site/competition';
 import { isUnplayedSeason, seasonLabel } from '@/lib/site/standingsDisplay';
 import { groupFixturesByDay } from '@/lib/site/spine';
 import { getSession } from '@/lib/auth/session';
 import { getSeasonScore, type NamedSeasonScore } from '@/lib/fantasy/squadStore';
 import { BoardPanel } from '@/components/BoardPanel';
+import { CompetitionTabs } from '@/components/CompetitionTabs';
 import { FantasyTeaser } from '@/components/FantasyTeaser';
 import { MyFantasyPanel } from '@/components/fantasy/MyFantasyPanel';
 import { MatchdaySpine } from '@/components/MatchdaySpine';
@@ -75,45 +75,6 @@ export const revalidate = 300;
 
 function hasKickoff(entry: { league: LeagueRow; kickoffUtc: string | null }): entry is PendingKickoff {
   return entry.kickoffUtc !== null;
-}
-
-/**
- * The table panel's competition tabs. `?table=PD` in the query string, same
- * mechanism as `/scores`' `?leagues=` and `/tables`' `?season=` — a refresh
- * keeps your choice, and the whole board stays server-rendered with no
- * client state.
- *
- * Labels are the competition codes because five full league names do not
- * fit across a 340px column, and a wrapped two-line tab row would cost the
- * board more than the abbreviation costs a reader. The code is text (not
- * colour), the colour dot is decoration on top of it, the selected
- * competition's full name is printed in the line directly beneath these
- * tabs, and every tab carries its full name for assistive tech — so the
- * abbreviation is never the only thing carrying the meaning.
- */
-function TableTabs({ leagues, selected }: { leagues: LeagueRow[]; selected: LeagueRow }) {
-  return (
-    <nav className="flex flex-wrap gap-1 border-b border-border px-2 py-1.5" aria-label="Choose a competition table">
-      {leagues.map((league) => {
-        const comp = getCompetitionMeta(league.fd_code);
-        const active = league.id === selected.id;
-        return (
-          <Link
-            key={league.id}
-            href={league.fd_code === leagues[0]?.fd_code ? '/' : `/?table=${league.fd_code}`}
-            aria-current={active ? 'true' : undefined}
-            className={`flex items-center gap-1 rounded px-1.5 py-0.5 font-mono text-11 font-semibold uppercase tracking-wider ${
-              active ? 'bg-surface-2 text-text' : 'text-muted hover:text-text'
-            }`}
-          >
-            <span className={`size-1.5 rounded-full ${comp.bgClass}`} aria-hidden="true" />
-            {league.fd_code}
-            <span className="sr-only"> — {league.name}</span>
-          </Link>
-        );
-      })}
-    </nav>
-  );
 }
 
 export default async function Home({
@@ -239,7 +200,12 @@ export default async function Home({
               label="Table"
               action={<Link href="/tables" className="group/link inline-flex items-center gap-1 hover:text-text">All tables <span className="transition-transform group-hover/link:translate-x-0.5 motion-reduce:transition-none" aria-hidden="true">→</span></Link>}
             >
-              <TableTabs leagues={leagues} selected={selectedLeague} />
+              <CompetitionTabs
+                leagues={leagues}
+                selected={selectedLeague}
+                ariaLabel="Choose a competition table"
+                hrefFor={(league) => (league === null || league.fd_code === leagues[0]?.fd_code ? '/' : `/?table=${league.fd_code}`)}
+              />
               {/* The competition's full name in text, next to the season
                   actually being shown — "2025-26 final" is a claim about
                   which season this is, so it is stated, never implied. */}

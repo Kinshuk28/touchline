@@ -15,8 +15,13 @@
  *    module keeps the value tidy regardless.
  */
 
-/** Below this, a search matches so much that it tells the reader nothing. */
-export const MIN_QUERY_LENGTH = 2;
+/**
+ * Below this, a search matches so much that it tells the reader nothing —
+ * and, for the live search box (components/SearchBox.tsx), is also the
+ * point live-as-you-type querying starts, so it doubles as "how many
+ * characters before a keystroke fires a request".
+ */
+export const MIN_QUERY_LENGTH = 3;
 
 /**
  * Longer than the longest stored club name (Borussia Mönchengladbach, 24)
