@@ -33,32 +33,6 @@ export async function getTrendingNews(limit = 8, leagueIds?: number[]): Promise<
 }
 
 /**
- * Transfer-tagged stories, newest first — the redesign spec's "Transfers
- * rail" (one line per story, competition colour dot, no images). A null
- * `league_id` — a real possibility, not every transfer story is tied to a
- * single top-five club — renders with no invented competition, same "never
- * invent data" rule as everywhere else in this app.
- *
- * `leagueIds` follows the same query-level-narrowing rule as
- * `getTrendingNews` above, for the same reason.
- */
-export async function getTransferNews(limit = 10, leagueIds?: number[]): Promise<NewsRow[]> {
-  if (leagueIds && leagueIds.length === 0) return [];
-
-  let q = readClient()
-    .from('news_items')
-    .select(NEWS_COLUMNS)
-    .contains('categories', ['transfer'])
-    .order('published_at', { ascending: false, nullsFirst: false });
-  if (leagueIds && leagueIds.length > 0) q = q.in('league_id', leagueIds);
-  q = q.limit(limit);
-
-  const { data, error } = await q;
-  if (error) throw new Error(`getTransferNews: ${error.message}`);
-  return (data ?? []) as NewsRow[];
-}
-
-/**
  * One club's news, from the stored tags rather than a render-time match.
  *
  * `news_items.team_ids` is written by the news job

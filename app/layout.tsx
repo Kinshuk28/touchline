@@ -84,7 +84,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <a href="/tables" className="inline-block p-2 -m-2 hover:text-comp-pl hover:drop-shadow-[0_0_6px_rgba(0,255,136,0.8)]">Tables</a>
               <a href="/clubs" className="inline-block p-2 -m-2 hover:text-comp-pl hover:drop-shadow-[0_0_6px_rgba(0,255,136,0.8)]">Clubs</a>
               <a href="/calendar" className="inline-block p-2 -m-2 hover:text-comp-pl hover:drop-shadow-[0_0_6px_rgba(0,255,136,0.8)]">Calendar</a>
-              <a href="/transfers" className="inline-block p-2 -m-2 hover:text-comp-pl hover:drop-shadow-[0_0_6px_rgba(0,255,136,0.8)]">Transfers</a>
               <a href="/fantasy" className="inline-block p-2 -m-2 hover:text-comp-pl hover:drop-shadow-[0_0_6px_rgba(0,255,136,0.8)]">Fantasy</a>
             </nav>
             {/* A live search box, not a link to a search page — typing

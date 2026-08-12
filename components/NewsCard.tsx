@@ -3,10 +3,17 @@ import { relativeTime } from '@/lib/site/format';
 import { upgradeImageUrl } from '@/lib/site/imageUrl';
 import type { NewsRow } from '@/lib/site/rows';
 
-// News cards render at a fraction of the hero's footprint (at most a
-// quarter of the viewport width at desktop), so 800px is plenty — see
-// lib/site/imageUrl.ts for the measured BBC ichef renditions this maps to.
-const CARD_IMAGE_WIDTH = 800;
+// A regular card renders at roughly a quarter of the viewport width at
+// desktop (~480px at 1920), so 1024 clears 2x-DPI sharpness with real
+// headroom rather than sitting right at the edge of it — see
+// lib/site/imageUrl.ts for the measured BBC ichef renditions this maps to
+// (240/480/800/1024/1536, all verified non-error).
+const CARD_IMAGE_WIDTH = 1024;
+// The lead card (the first story on /news — see app/news/page.tsx) spans
+// roughly half the grid at desktop, well over double a regular card's
+// footprint, so it earns the largest verified rendition rather than
+// reusing the regular card's.
+const LEAD_IMAGE_WIDTH = 1536;
 
 type Category = 'transfer' | 'injury';
 
@@ -55,8 +62,7 @@ function CategoryPill({ category }: { category: Category }) {
  *
  * The type-only variant is deliberately *not* the image block's frame with
  * an empty middle: that read as a failed image load, the exact impression
- * the fallback exists to avoid. Instead — same cue as the hero's own
- * type-only fallback (components/Hero.tsx) — the headline itself becomes
+ * the fallback exists to avoid. Instead the headline itself becomes
  * the card's dominant element, set larger than the image variant's
  * headline since it has the whole card to fill rather than sharing it with
  * a photo. `h-full` (the `<a>` is a CSS grid item, stretched to its row's
@@ -66,7 +72,9 @@ function CategoryPill({ category }: { category: Category }) {
  * establish, or a sane minimum when a whole row is type-only cards, rather
  * than stopping short and leaving a blank strip of `bg-surface` underneath.
  */
-export function NewsCard({ item, now, lead = false }: { item: NewsRow; now: Date; lead?: boolean }) {
+export function NewsCard({
+  item, now, lead = false, className = '',
+}: { item: NewsRow; now: Date; lead?: boolean; className?: string }) {
   const age = relativeTime(item.published_at, now);
   const category = categoryOf(item);
   const sourceLine = `${item.source}${age ? ` · ${age}` : ''}`;
@@ -76,18 +84,24 @@ export function NewsCard({ item, now, lead = false }: { item: NewsRow; now: Date
       href={item.url}
       target="_blank"
       rel="noopener noreferrer"
-      className="group block h-full overflow-hidden rounded-xl border border-border bg-surface transition-colors hover:border-muted"
+      className={`group block h-full overflow-hidden rounded-xl border border-border bg-surface transition-colors hover:border-muted ${className}`}
     >
       {item.image_url ? (
         <>
           <div className="relative aspect-video w-full overflow-hidden bg-surface-2">
             <Image
-              src={upgradeImageUrl(item.image_url, CARD_IMAGE_WIDTH)}
+              src={upgradeImageUrl(item.image_url, lead ? LEAD_IMAGE_WIDTH : CARD_IMAGE_WIDTH)}
               alt=""
               fill
+              // Matches the grid slot a lead card actually occupies
+              // (`sm:col-span-2` on a `grid-cols-1 sm:grid-cols-2
+              // lg:grid-cols-4` grid — see app/news/page.tsx): half the row
+              // from `lg:` up, the full row below it, never the stale 62vw
+              // guess this used to carry with nothing in the actual layout
+              // to back that number.
               sizes={
                 lead
-                  ? '(min-width: 1024px) 62vw, 100vw'
+                  ? '(min-width: 1024px) 50vw, 100vw'
                   : '(min-width: 1024px) 25vw, (min-width: 640px) 50vw, 100vw'
               }
               className="object-cover transition-transform duration-300 group-hover:scale-[1.03] motion-reduce:transition-none motion-reduce:group-hover:scale-100"

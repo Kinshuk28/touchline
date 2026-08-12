@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { getTrendingNews, getTransferNews } from '@/lib/site/queries/news';
+import { getTrendingNews } from '@/lib/site/queries/news';
 import { countUpcoming, getLiveAndRecent, getUpcoming } from '@/lib/site/queries/fixtures';
 import { getNextKickoffPerLeague, getLeagues } from '@/lib/site/queries/leagues';
 import { getStandings } from '@/lib/site/queries/standings';
@@ -21,7 +21,6 @@ import { MatchdaySpine } from '@/components/MatchdaySpine';
 import { MiniTable } from '@/components/MiniTable';
 import { NewsRail } from '@/components/NewsRail';
 import { Ticker, type PendingKickoff } from '@/components/Ticker';
-import { TransfersRail } from '@/components/TransfersRail';
 import type { LeagueRow } from '@/lib/site/rows';
 
 /*
@@ -34,11 +33,12 @@ import type { LeagueRow } from '@/lib/site/rows';
  * palette work didn't fix it because composition was the problem.
  *
  * So: no hero, nothing full-bleed, three asymmetric columns of real data.
- * Fixtures widest because they are the most information, the table and
- * transfers in the middle, news narrowest — someone checking in for ten
- * seconds sees the weekend, the table and the headlines at once, without
- * scrolling. The acceptance test is that everything meaningful fits above
- * the fold at 1440x900.
+ * Fixtures widest because they are the most information, the table in the
+ * middle, news narrowest — someone checking in for ten seconds sees the
+ * weekend, the table and the headlines (transfer stories included — see
+ * the note above `railNews` below) at once, without scrolling. The
+ * acceptance test is that everything meaningful fits above the fold at
+ * 1440x900.
  */
 
 // Fetch sizes. News is fetched well above what the rail shows so
@@ -47,8 +47,6 @@ import type { LeagueRow } from '@/lib/site/rows';
 // newest ones (see lib/site/newsRelevance.ts).
 const NEWS_FETCH = 24;
 const NEWS_RAIL_COUNT = 8;
-const TRANSFER_FETCH = 18;
-const TRANSFER_RAIL_COUNT = 6;
 // The next 14 fixtures, in kickoff order, across every competition.
 //
 // This panel used to run `selectMarqueeFixtures` — an editorial pick of 22
@@ -85,9 +83,8 @@ export default async function Home({
   const following = await getFollowingLeagues();
   const session = await getSession();
 
-  const [news, transfers, live, upcoming, upcomingTotal, seasons, leagues, clubNames, mySeasonScore] = await Promise.all([
+  const [news, live, upcoming, upcomingTotal, seasons, leagues, clubNames, mySeasonScore] = await Promise.all([
     getTrendingNews(NEWS_FETCH),
-    getTransferNews(TRANSFER_FETCH),
     getLiveAndRecent(now),
     getUpcoming(now, BOARD_FIXTURE_COUNT),
     countUpcoming(now),
@@ -97,26 +94,17 @@ export default async function Home({
     session ? getMySeasonScoreSafely(session.accessToken, session.userId) : Promise.resolve(null),
   ]);
 
-  // A transfer story is also, honestly, "the latest news" — it has no
-  // separate identity in `news_items`, just a `transfer` tag alongside
-  // whatever else is stored. Fetched independently for two different panels
-  // on the *same* page, the newest transfer stories routinely land in both:
-  // the Transfers rail by construction, and the Latest rail because they are
-  // also simply recent. Excluding anything already shown in Transfers is
-  // page-level, not query-level, on purpose — `getTrendingNews` is also used
-  // on /news and /team/[slug], neither of which has a competing Transfers
-  // panel to duplicate against, so the query itself has no reason to exclude
-  // transfer stories.
-  const transferIds = new Set(transfers.map((t) => t.id));
-  const nonTransferNews = news.filter((n) => !transferIds.has(n.id));
-
+  // One feed, transfer stories included — there is no separate Transfers
+  // tab or panel any more (a transfer story has no identity of its own in
+  // `news_items`, just a `transfer` tag alongside whatever else is stored,
+  // so splitting it into a second panel was always somewhat artificial).
+  //
   // Relevance, the spec's worst-content-bug fix: the feeds are global
   // football, this site is the top five leagues. Ordering, not filtering —
   // when nothing in the feed names a stored club the rail still fills, with
   // the newest items, rather than going empty.
   const clubIndex = buildClubIndex(clubNames);
-  const railNews = orderByRelevance(nonTransferNews, clubIndex, NEWS_RAIL_COUNT);
-  const railTransfers = orderByRelevance(transfers, clubIndex, TRANSFER_RAIL_COUNT);
+  const railNews = orderByRelevance(news, clubIndex, NEWS_RAIL_COUNT);
 
   const pending = seasons.filter(hasKickoff);
   // Following supplies the ticker's default scope. Following nothing
@@ -216,16 +204,6 @@ export default async function Home({
                 )}
               </p>
               <MiniTable league={selectedLeague} rows={tableRows} limit={TABLE_ROW_COUNT} />
-            </BoardPanel>
-          )}
-
-          {railTransfers.length > 0 && (
-            <BoardPanel
-              order={2}
-              label="Transfers"
-              action={<Link href="/transfers" className="group/link inline-flex items-center gap-1 hover:text-text">More <span className="transition-transform group-hover/link:translate-x-0.5 motion-reduce:transition-none" aria-hidden="true">→</span></Link>}
-            >
-              <TransfersRail items={railTransfers} leagues={leagues} now={now} chromeless stacked />
             </BoardPanel>
           )}
         </div>
