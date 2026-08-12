@@ -1,3 +1,4 @@
+import Image from 'next/image';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
@@ -5,8 +6,9 @@ import { getPlayerBySlug, getPlayerStats } from '@/lib/site/queries/players';
 import { getTeamById } from '@/lib/site/queries/teams';
 import { getFixturesForTeam } from '@/lib/site/queries/fixtures';
 import { getLeagues } from '@/lib/site/queries/leagues';
+import { getNewsForTeam } from '@/lib/site/queries/news';
 import { getFantasySeason, getFantasyPlayerCard, isMissingTable, type FantasyPlayerCard } from '@/lib/site/queries/fantasy';
-import { ageFrom, displayStats } from '@/lib/site/playerPage';
+import { ageFrom, displayStats, playerNewsFirst, mentionsPlayer } from '@/lib/site/playerPage';
 import { splitTeamFixtures } from '@/lib/site/teamPage';
 import { squadGroupOf } from '@/lib/site/squad';
 import { seasonLabel } from '@/lib/site/standingsDisplay';
@@ -16,6 +18,7 @@ import { formatPrice } from '@/lib/fantasy/squadRules';
 import { BoardPanel } from '@/components/BoardPanel';
 import { Crest } from '@/components/Crest';
 import { MatchdaySpine } from '@/components/MatchdaySpine';
+import { NewsRail } from '@/components/NewsRail';
 import { PositionBadge } from '@/components/fantasy/badges';
 import { PlayerFormChart } from '@/components/fantasy/charts';
 
@@ -37,6 +40,8 @@ import { PlayerFormChart } from '@/components/fantasy/charts';
 export const revalidate = 300;
 
 const CLUB_FIXTURE_COUNT = 5;
+const CLUB_NEWS_FETCH = 20;
+const PLAYER_NEWS_COUNT = 6;
 
 // Column definitions once, so the header and every row cannot drift apart.
 const STAT_COLUMNS = [
@@ -82,6 +87,17 @@ export default async function PlayerPage({ params }: { params: Promise<{ slug: s
   const clubFixtures = club ? await getFixturesForTeam(club.id, 20) : [];
   const { upcoming } = splitTeamFixtures(clubFixtures, now, { upcoming: CLUB_FIXTURE_COUNT });
 
+  // Stories naming this player first, the rest of their club's news after —
+  // there is no per-player tag in `news_items` (only `team_ids`), so this
+  // reads the same club feed /team/[slug] already fetches via
+  // `getNewsForTeam` and reorders it by surname mention
+  // (`lib/site/playerPage.ts#playerNewsFirst`), rather than a query of its
+  // own. Never empty because of the player specifically — a club with any
+  // news at all always has something to show here.
+  const clubNews = club ? await getNewsForTeam(club.id, CLUB_NEWS_FETCH) : [];
+  const playerNews = playerNewsFirst(clubNews, player.name, PLAYER_NEWS_COUNT);
+  const hasPlayerSpecificNews = playerNews.length > 0 && mentionsPlayer(playerNews[0]!.title, player.name);
+
   const fantasyCard = await getFantasyCardSafely(player.id);
 
   const stats = displayStats(rawStats);
@@ -94,11 +110,24 @@ export default async function PlayerPage({ params }: { params: Promise<{ slug: s
     <div className="space-y-3">
       <header className="overflow-hidden rounded-xl border border-border bg-surface p-4 sm:p-5">
         <div className="flex flex-wrap items-center gap-4">
-          {/* The club crest stands in for a portrait. `players.photo_url` is
-              null for nearly every row, and a grid of blank avatars is the
-              placeholder imagery this project refuses — a crest is real,
-              stored, and tells you who they play for. */}
-          {club && <Crest team={{ ...club, fd_id: club.fd_id }} size={48} eager />}
+          {/* A real photo when one is stored (Premier League players merged
+              against an FPL identity — see lib/site/queries/players.ts —
+              which is most, but not all, of them), the club crest standing
+              in for a portrait otherwise. Never a blank placeholder either
+              way; this is one player, not the grid of mostly-empty avatars
+              the same "photo_url is usually null" fact rules out on a
+              squad list. */}
+          {player.photo_url ? (
+            <Image
+              src={player.photo_url}
+              alt=""
+              width={72}
+              height={72}
+              className="shrink-0 rounded-full border border-border object-cover"
+            />
+          ) : club && (
+            <Crest team={{ ...club, fd_id: club.fd_id }} size={48} eager />
+          )}
           <div className="min-w-0">
             <h1 className="font-display text-24 font-extrabold leading-tight tracking-[-0.02em] sm:text-32">
               {player.name}
@@ -180,7 +209,7 @@ export default async function PlayerPage({ params }: { params: Promise<{ slug: s
           )}
         </BoardPanel>
 
-        {(club && upcoming.length > 0) || fantasyCard ? (
+        {(club && upcoming.length > 0) || fantasyCard || playerNews.length > 0 ? (
           <div className="space-y-3">
             {fantasyCard && (
               <BoardPanel order={1} label="Fantasy" meta={`${fantasyCard.seasonPoints} pts`}>
@@ -214,6 +243,20 @@ export default async function PlayerPage({ params }: { params: Promise<{ slug: s
                     database knows, so the panel is labelled by the club, not
                     the player. */}
                 <MatchdaySpine days={groupFixturesByDay(upcoming)} leagues={leagues} now={now} variant="compact" chromeless />
+              </BoardPanel>
+            )}
+
+            {playerNews.length > 0 && club && (
+              <BoardPanel
+                order={3}
+                // Honest about which of the two this actually is: stories
+                // that name the player by surname read differently from a
+                // club's general news feed shown because nothing did.
+                label={hasPlayerSpecificNews ? 'News' : `${club.short_name ?? club.name} news`}
+                meta={hasPlayerSpecificNews ? undefined : `nothing recent names ${player.name.split(' ').at(-1)}`}
+                action={<Link href="/news" className="hover:text-text">More →</Link>}
+              >
+                <NewsRail items={playerNews} now={now} />
               </BoardPanel>
             )}
           </div>

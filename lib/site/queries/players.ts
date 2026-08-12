@@ -41,9 +41,18 @@ export async function getSquad(teamId: number): Promise<SquadPlayer[]> {
  * `SquadPlayer`: the player page has room for a birth date, and it needs
  * `team_id` to link back to the club.
  *
- * `photo_url` is deliberately still absent. The column exists and is null
- * for the overwhelming majority of rows; a page built around a portrait
- * that usually isn't there would be a page built around a placeholder.
+ * `photo_url` is included here — unlike `SquadPlayer`, which deliberately
+ * excludes it — because this is a single player, not a grid of them. A
+ * squad list of fifteen names where a handful carry a photo and the rest
+ * don't is the "placeholder imagery" problem this project refuses; one
+ * player's own page choosing between a real photo and the existing crest
+ * fallback is the opposite of that, the same "show it when it's real, fall
+ * back honestly when it's not" rule `components/Crest.tsx` and
+ * `components/NewsCard.tsx`'s type-only variant already follow. It stays
+ * `null` for the great majority of rows regardless — `scripts/ingest/
+ * players.ts` only ever sets it via an FPL identity match, and FPL covers
+ * the Premier League alone, so a La Liga or Serie A player's page falls
+ * back to the crest exactly as it always has.
  */
 export interface PlayerRow {
   id: number;
@@ -53,6 +62,7 @@ export interface PlayerRow {
   nationality: string | null;
   date_of_birth: string | null;
   team_id: number | null;
+  photo_url: string | null;
 }
 
 /**
@@ -62,7 +72,7 @@ export interface PlayerRow {
 export async function getPlayerBySlug(slug: string): Promise<PlayerRow | null> {
   const { data, error } = await readClient()
     .from('players')
-    .select('id,slug,name,position,nationality,date_of_birth,team_id')
+    .select('id,slug,name,position,nationality,date_of_birth,team_id,photo_url')
     .eq('slug', slug)
     .maybeSingle();
   if (error) throw new Error(`getPlayerBySlug: ${error.message}`);
