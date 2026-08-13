@@ -1,6 +1,19 @@
-export type LeagueCode = 'PL' | 'PD' | 'SA' | 'BL1' | 'FL1';
+export type LeagueCode = 'PL' | 'PD' | 'SA' | 'BL1' | 'FL1' | 'CL';
 
 export const LEAGUE_CODES: LeagueCode[] = ['PL', 'PD', 'SA', 'BL1', 'FL1'];
+
+/**
+ * Codes that are genuinely one club-per-competition (a domestic league) vs.
+ * a continental competition a club enters *in addition to* its domestic
+ * league. `LEAGUE_CODES` deliberately excludes 'CL': every ingest path that
+ * writes `teams.league_id` (a single, domestic-only column — see
+ * lib/db/repositories/teams.ts) iterates `LEAGUE_CODES`, and Real Madrid
+ * being both a La Liga and a Champions League club must never make one
+ * ingest run overwrite the other. `CONTINENTAL_LEAGUE_CODES` is the
+ * separate list for competitions handled through `league_teams`
+ * (many-to-many) instead.
+ */
+export const CONTINENTAL_LEAGUE_CODES: LeagueCode[] = ['CL'];
 
 /** football-data.org match statuses, verbatim. */
 export type FixtureStatus =

@@ -3,7 +3,7 @@ import { loadIngestEnv } from '@/lib/config/env';
 import { RateLimiter } from '@/lib/ingest/rateLimiter';
 import { FootballDataClient } from '@/lib/providers/footballData';
 import { isMatchWindowOpen, isLiveRelevant } from '@/lib/ingest/matchWindow';
-import { LEAGUE_SEEDS, CURRENT_SEASON } from '@/lib/ingest/leagueSeed';
+import { LEAGUE_SEEDS, CONTINENTAL_SEEDS, CURRENT_SEASON } from '@/lib/ingest/leagueSeed';
 import { getLeagueIdMap } from '@/lib/db/repositories/leagues';
 import { getTeamIdMap } from '@/lib/db/repositories/teams';
 import { upsertFixtures, getWindowFixtures } from '@/lib/db/repositories/fixtures';
@@ -39,7 +39,13 @@ try {
 
   const leagueIds = await getLeagueIdMap();
   const teamIds = await getTeamIdMap();
-  const codes = LEAGUE_SEEDS.map((s) => s.code);
+  // Continental competitions (Champions League) included alongside the five
+  // domestic leagues: this call only ever writes fixtures, which already
+  // carry their own per-row league_id resolved from each match's own
+  // `competition.code` below — never `teams.league_id` — so it's safe to
+  // fold in without the domestic/continental separation
+  // scripts/ingest/continental.ts otherwise keeps strict for team writes.
+  const codes = [...LEAGUE_SEEDS, ...CONTINENTAL_SEEDS].map((s) => s.code);
 
   const now = new Date();
   const dateFrom = dateOnly(new Date(now.getTime() - WINDOW_DAYS * 86_400_000));

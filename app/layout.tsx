@@ -15,8 +15,8 @@ const orbitron = Orbitron({ subsets: ['latin'], weight: ['700', '900'], variable
 const jetbrainsMono = JetBrains_Mono({ subsets: ['latin'], weight: ['400', '500'], variable: '--font-jetbrains-mono', display: 'swap' });
 
 export const metadata: Metadata = {
-  title: 'Touchline — Europe\'s top five leagues',
-  description: 'Live scores, fixtures, tables and news for the Premier League, La Liga, Serie A, Bundesliga and Ligue 1.',
+  title: 'Touchline — Europe\'s top five leagues + Champions League',
+  description: 'Live scores, fixtures, tables and news for the Premier League, La Liga, Serie A, Bundesliga, Ligue 1 and the Champions League.',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

@@ -6,8 +6,8 @@
  * AA-checked light-theme equivalents in the light overrides), not inline
  * styles, so the correct value is always picked up per-theme for free.
  *
- * An `fd_code` outside the top five falls back to `--muted` — never an
- * invented colour — per the redesign spec.
+ * An `fd_code` outside the six covered competitions falls back to
+ * `--muted` — never an invented colour — per the redesign spec.
  */
 export interface CompetitionMeta {
   /** The `fd_code` this meta was resolved for (echoed back, including unmapped codes). */
@@ -40,6 +40,7 @@ const KNOWN: Record<string, Known> = {
   SA:  { name: 'Serie A',        bgClass: 'bg-comp-sa',  textClass: 'text-comp-sa',  borderClass: 'border-comp-sa',  hoverTextClass: 'hover:text-comp-sa' },
   BL1: { name: 'Bundesliga',     bgClass: 'bg-comp-bl1', textClass: 'text-comp-bl1', borderClass: 'border-comp-bl1', hoverTextClass: 'hover:text-comp-bl1' },
   FL1: { name: 'Ligue 1',        bgClass: 'bg-comp-fl1', textClass: 'text-comp-fl1', borderClass: 'border-comp-fl1', hoverTextClass: 'hover:text-comp-fl1' },
+  CL:  { name: 'Champions League', bgClass: 'bg-comp-cl', textClass: 'text-comp-cl', borderClass: 'border-comp-cl', hoverTextClass: 'hover:text-comp-cl' },
 };
 
 const FALLBACK: Known = {
@@ -52,7 +53,7 @@ const FALLBACK: Known = {
 
 /**
  * Resolves a league's `fd_code` to its colour + display name. Never throws
- * and never invents a colour: any code not in the top five (including an
+ * and never invents a colour: any code not in this set (including an
  * empty string) resolves to the `--muted` fallback.
  */
 export function getCompetitionMeta(fdCode: string): CompetitionMeta {
@@ -60,5 +61,5 @@ export function getCompetitionMeta(fdCode: string): CompetitionMeta {
   return known ? { code: fdCode, ...known } : { code: fdCode, ...FALLBACK };
 }
 
-/** The five codes this module actually has a colour for. */
+/** The codes this module actually has a colour for. */
 export const KNOWN_COMPETITION_CODES = Object.keys(KNOWN);
