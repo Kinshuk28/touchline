@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { getCompetitionMeta, KNOWN_COMPETITION_CODES } from '@/lib/site/competition';
 
 describe('getCompetitionMeta', () => {
-  it('maps every top-five fd_code to its own colour and display name', () => {
+  it('maps every known fd_code to its own colour and display name', () => {
     expect(getCompetitionMeta('PL')).toEqual({
       code: 'PL', name: 'Premier League', bgClass: 'bg-comp-pl', textClass: 'text-comp-pl', borderClass: 'border-comp-pl', hoverTextClass: 'hover:text-comp-pl',
     });
@@ -17,6 +17,9 @@ describe('getCompetitionMeta', () => {
     });
     expect(getCompetitionMeta('FL1')).toEqual({
       code: 'FL1', name: 'Ligue 1', bgClass: 'bg-comp-fl1', textClass: 'text-comp-fl1', borderClass: 'border-comp-fl1', hoverTextClass: 'hover:text-comp-fl1',
+    });
+    expect(getCompetitionMeta('CL')).toEqual({
+      code: 'CL', name: 'Champions League', bgClass: 'bg-comp-cl', textClass: 'text-comp-cl', borderClass: 'border-comp-cl', hoverTextClass: 'hover:text-comp-cl',
     });
   });
 

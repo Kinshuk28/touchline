@@ -69,6 +69,32 @@ export async function getTeamBySlug(slug: string): Promise<ClubRow | null> {
 }
 
 /**
+ * Every club entered in a competition for a season, via the `league_teams`
+ * join table — not `teams.league_id` equality. Champions League clubs keep
+ * their domestic `league_id` (Real Madrid stays a La Liga club there); this
+ * is the only place their Champions League membership is recorded. See
+ * `supabase/migrations/0013_league_teams.sql`.
+ *
+ * Ordered by `name`, matching `getTeams`, so a caller doesn't need its own
+ * sort.
+ */
+export async function getClubsForCompetition(leagueId: number, season: number): Promise<ClubRow[]> {
+  const { data, error } = await readClient()
+    .from('league_teams')
+    .select(`teams!inner(${CLUB_FIELDS})`)
+    .eq('league_id', leagueId)
+    .eq('season', season);
+  if (error) throw new Error(`getClubsForCompetition: ${error.message}`);
+  // Sorted here rather than via a `referencedTable` order clause: this
+  // embed is a single related row per `league_teams` row (a belongs-to,
+  // not a has-many), and ordering client-side avoids relying on how
+  // PostgREST orders across parent rows for that shape.
+  return ((data ?? []) as unknown as Array<{ teams: ClubRow }>)
+    .map((r) => r.teams)
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/**
  * One club by internal id — what `/player/[slug]` needs to resolve
  * `players.team_id` into a name, crest and link. Same `null`-for-missing
  * contract as `getTeamBySlug`: `team_id` is nullable and can point at a row

@@ -1,0 +1,34 @@
+name: ingest-continental
+on:
+  schedule: [{ cron: '0 */6 * * *' }]
+  workflow_dispatch:
+# Same shared football-data.org key as ingest-core/ingest-live/ingest-squads
+# (10 req/min free-tier ceiling) — this must serialize with them on the same
+# concurrency group, not run in its own, or it risks the exact "matchday 429
+# cascade" ingest-core.yml's comment describes. Every 6 hours rather than
+# hourly: Champions League fixtures/standings/scorers don't move fast enough
+# to justify the extra requests core.ts's five leagues already spend the
+# budget on.
+concurrency:
+  group: football-data-api
+  cancel-in-progress: false
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '24', cache: 'npm' }
+      - run: npm ci
+      - run: npx tsx scripts/preflight-env.ts ingest
+        continue-on-error: false
+        env:
+          FOOTBALL_DATA_KEY: ${{ secrets.FOOTBALL_DATA_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      - run: npx tsx scripts/ingest/continental.ts
+        env:
+          FOOTBALL_DATA_KEY: ${{ secrets.FOOTBALL_DATA_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}

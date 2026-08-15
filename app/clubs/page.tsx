@@ -1,9 +1,20 @@
 import { getLeagues } from '@/lib/site/queries/leagues';
-import { getTeams } from '@/lib/site/queries/teams';
+import { getTeams, getClubsForCompetition } from '@/lib/site/queries/teams';
 import { getCompetitionMeta } from '@/lib/site/competition';
+import { CONTINENTAL_LEAGUE_CODES } from '@/lib/providers/types';
 import { CompetitionTabs } from '@/components/CompetitionTabs';
 import { ClubCard } from '@/components/ClubCard';
 import type { ClubRow, LeagueRow } from '@/lib/site/rows';
+
+/**
+ * Continental competitions (Champions League) don't own their clubs through
+ * `teams.league_id` — a club there also has a domestic `league_id` it must
+ * keep. Their club list comes from the `league_teams` join table instead
+ * (`getClubsForCompetition`); see supabase/migrations/0013_league_teams.sql.
+ */
+function isContinental(league: LeagueRow): boolean {
+  return (CONTINENTAL_LEAGUE_CODES as string[]).includes(league.fd_code);
+}
 
 // Reading `searchParams` forces dynamic rendering (same reasoning as
 // app/tables/page.tsx) — the season/league toggle these pages share is
@@ -110,16 +121,25 @@ export default async function ClubsPage({
   const selectedLeague = showingAll ? null : leagues.find((l) => l.fd_code === leagueParam) ?? leagues[0] ?? null;
   const leaguesToShow = showingAll ? leagues : selectedLeague ? [selectedLeague] : [];
 
-  const groups = leaguesToShow
-    .map((league) => ({ league, clubs: current.filter((c) => c.league_id === league.id) }))
-    .filter((g) => g.clubs.length > 0);
+  // Continental competitions source their club list from `league_teams`
+  // (a club there also keeps its own domestic `league_id`), so their group
+  // needs its own query rather than the plain `current.filter` every
+  // domestic league uses — see `isContinental` above.
+  const groups = (
+    await Promise.all(leaguesToShow.map(async (league) => ({
+      league,
+      clubs: isContinental(league)
+        ? await getClubsForCompetition(league.id, league.current_season)
+        : current.filter((c) => c.league_id === league.id),
+    })))
+  ).filter((g) => g.clubs.length > 0);
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-extrabold tracking-tight">Clubs</h1>
         <p className="mt-1 text-sm text-muted">
-          {teams.length} clubs across Europe&rsquo;s top five leagues.
+          {teams.length} clubs across Europe&rsquo;s top competitions.
         </p>
       </div>
 

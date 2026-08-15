@@ -58,6 +58,7 @@
   --comp-sa:  #FF00FF;   /* Serie A — magenta */
   --comp-bl1: #FFB300;   /* Bundesliga — amber */
   --comp-fl1: #C77DFF;   /* Ligue 1 — violet */
+  --comp-cl:  #2979FF;   /* Champions League — electric blue, 5.05:1 on --bg, the sixth hue the five-competition family didn't need until now */
 }
 
 @theme inline {
@@ -76,6 +77,7 @@
   --color-comp-sa:  var(--comp-sa);
   --color-comp-bl1: var(--comp-bl1);
   --color-comp-fl1: var(--comp-fl1);
+  --color-comp-cl:  var(--comp-cl);
 
   /* Orbitron for display — unchanged from the previous system, it already
      fit this brief's "geometric, futuristic, robotic" heading spec exactly.

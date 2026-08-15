@@ -1,7 +1,7 @@
 import { readClient } from '@/lib/site/supabase';
 import type { LeagueRow } from '@/lib/site/rows';
 
-const ORDER: Record<string, number> = { PL: 0, PD: 1, SA: 2, BL1: 3, FL1: 4 };
+const ORDER: Record<string, number> = { PL: 0, PD: 1, SA: 2, BL1: 3, FL1: 4, CL: 5 };
 
 /** Presentation order is the conventional one, not alphabetical or by id. */
 export async function getLeagues(): Promise<LeagueRow[]> {

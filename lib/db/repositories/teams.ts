@@ -4,7 +4,13 @@ import { dedupeByKey } from '@/lib/db/dedupe';
 
 export interface TeamRow {
   fd_id: number;
-  league_id: number;
+  // Nullable: a club with no *domestic* league on file — either a
+  // historical club dropped out of every tracked competition
+  // (scripts/backfill.ts phase 3), or a Champions League club whose
+  // domestic league this project doesn't track at all
+  // (scripts/ingest/continental.ts). Its continental membership, if any,
+  // lives in `league_teams` instead — see supabase/migrations/0013_league_teams.sql.
+  league_id: number | null;
   slug: string;
   name: string;
   short_name: string | null;
