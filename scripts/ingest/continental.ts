@@ -25,9 +25,16 @@ import { startRun, finishRun } from '@/lib/db/repositories/runs';
 // script only ever writes continental membership to `league_teams`, never
 // to `teams.league_id`.
 
-function is403(err: unknown): boolean {
+// 403 ("this club/data isn't reachable on the free tier") and 404 both mean
+// "nothing to write yet, not a real failure" for a continental competition:
+// confirmed live 2026-08-21 that /competitions/CL/matches 404s for the
+// 2026-27 season while /competitions/CL/teams for the same season already
+// lists the 36 confirmed clubs — the league-phase fixture list is simply
+// published later than the roster (after the August draw), unlike a
+// domestic league where both exist from the moment the season starts.
+function isSkippable(err: unknown): boolean {
   const message = err instanceof Error ? err.message : String(err);
-  return /football-data\.org 403 /.test(message);
+  return /football-data\.org (403|404) /.test(message);
 }
 
 const env = loadIngestEnv();
@@ -89,30 +96,38 @@ try {
 
     // Phase 3: fixtures. Same shape as scripts/ingest/core.ts — fixtures
     // already carry their own `league_id` per row, independent of
-    // `teams.league_id`, so no special handling is needed here.
-    requests++;
-    const matches = await fd.getMatches(s.code, CURRENT_SEASON);
-    await upsertFixtures(matches.map((m) => ({
-      fd_id: m.fdId, league_id: leagueId,
-      home_team_id: teamIds.get(m.homeTeamFdId) ?? null,
-      away_team_id: teamIds.get(m.awayTeamFdId) ?? null,
-      season: CURRENT_SEASON, kickoff_utc: m.kickoffUtc, status: m.status,
-      matchday: m.matchday, home_goals: m.homeGoals, away_goals: m.awayGoals,
-      half_time_home: m.halfTimeHome, half_time_away: m.halfTimeAway,
-      last_updated: m.lastUpdated, updated_at: now(),
-    })));
-    console.log(`${s.code}: ${matches.length} fixtures`);
+    // `teams.league_id`, so no special handling is needed here beyond the
+    // same 404-tolerant treatment every data type in this competition needs
+    // (see `isSkippable`) — a season whose league-phase draw hasn't
+    // happened yet has confirmed clubs but no fixture list at all.
+    try {
+      requests++;
+      const matches = await fd.getMatches(s.code, CURRENT_SEASON);
+      await upsertFixtures(matches.map((m) => ({
+        fd_id: m.fdId, league_id: leagueId,
+        home_team_id: teamIds.get(m.homeTeamFdId) ?? null,
+        away_team_id: teamIds.get(m.awayTeamFdId) ?? null,
+        season: CURRENT_SEASON, kickoff_utc: m.kickoffUtc, status: m.status,
+        matchday: m.matchday, home_goals: m.homeGoals, away_goals: m.awayGoals,
+        half_time_home: m.halfTimeHome, half_time_away: m.halfTimeAway,
+        last_updated: m.lastUpdated, updated_at: now(),
+      })));
+      console.log(`${s.code}: ${matches.length} fixtures`);
+    } catch (err) {
+      if (!isSkippable(err)) throw err;
+      console.warn(`${s.code}: fixtures not published yet — skipped`);
+    }
 
     // Phase 4: standings — only meaningful during the league phase (UEFA's
     // single 36-team table, since the 2024-25 reshape); the provider
     // returns an empty or absent table before it starts and during the
     // knockout rounds after it ends, which upsertStandings simply writes as
-    // zero rows, not an error. A 403 here (some free-tier keys may not
-    // carry standings access for this competition even though matches/teams
-    // are granted) must not abort fixtures/scorers below — same
-    // don't-abort-on-403 rule scripts/backfill.ts phase 5 and
-    // scripts/ingest/squads.ts already apply per-club, applied here per
-    // data type instead.
+    // zero rows, not an error. A 403 (some free-tier keys may not carry
+    // standings access for this competition even though matches/teams are
+    // granted) or 404 (no table published yet — see `isSkippable`) here
+    // must not abort scorers below — same don't-abort rule
+    // scripts/backfill.ts phase 5 and scripts/ingest/squads.ts already
+    // apply per-club, applied here per data type instead.
     try {
       requests++;
       const table = await fd.getStandings(s.code, CURRENT_SEASON);
@@ -133,11 +148,11 @@ try {
       await upsertStandings(standingsRows);
       console.log(`${s.code}: ${standingsRows.length} standings rows`);
     } catch (err) {
-      if (!is403(err)) throw err;
-      console.warn(`${s.code}: standings not available on this plan (403) — skipped`);
+      if (!isSkippable(err)) throw err;
+      console.warn(`${s.code}: standings not available yet — skipped`);
     }
 
-    // Phase 5: top scorers, same 403-tolerant treatment as standings.
+    // Phase 5: top scorers, same 403/404-tolerant treatment as standings.
     try {
       requests++;
       const scorers = await fd.getScorers(s.code, CURRENT_SEASON);
@@ -157,8 +172,8 @@ try {
       }));
       console.log(`${s.code}: ${scorers.length} scorers, ${newPlayers} players created`);
     } catch (err) {
-      if (!is403(err)) throw err;
-      console.warn(`${s.code}: scorers not available on this plan (403) — skipped`);
+      if (!isSkippable(err)) throw err;
+      console.warn(`${s.code}: scorers not available yet — skipped`);
     }
   }
 
