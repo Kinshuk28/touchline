@@ -86,7 +86,7 @@ describe('teamRecord', () => {
       played(3, ARSENAL, SPURS, 1, 1),     // draw
       played(4, CHELSEA, ARSENAL, 2, 0),   // away loss
     ];
-    expect(teamRecord(list, ARSENAL.id)).toEqual({
+    expect(teamRecord(list, ARSENAL.id, 2026)).toEqual({
       played: 4, won: 2, drawn: 1, lost: 1, goalsFor: 6, goalsAgainst: 4,
     });
   });
@@ -96,16 +96,47 @@ describe('teamRecord', () => {
       played(1, ARSENAL, CHELSEA, 2, 0),
       fixture({ id: 2, kickoff_utc: '2026-08-24T14:00:00Z' }),
     ];
-    expect(teamRecord(list, ARSENAL.id)?.played).toBe(1);
+    expect(teamRecord(list, ARSENAL.id, 2026)?.played).toBe(1);
   });
 
   it('returns null when nothing has been played, rather than a record of zeros', () => {
-    expect(teamRecord([fixture({ id: 1, kickoff_utc: '2026-08-24T14:00:00Z' })], ARSENAL.id)).toBeNull();
-    expect(teamRecord([], ARSENAL.id)).toBeNull();
+    expect(teamRecord([fixture({ id: 1, kickoff_utc: '2026-08-24T14:00:00Z' })], ARSENAL.id, 2026)).toBeNull();
+    expect(teamRecord([], ARSENAL.id, 2026)).toBeNull();
   });
 
   it('ignores a fixture the club is not in', () => {
-    expect(teamRecord([played(1, CHELSEA, SPURS, 1, 0)], ARSENAL.id)).toBeNull();
+    expect(teamRecord([played(1, CHELSEA, SPURS, 1, 0)], ARSENAL.id, 2026)).toBeNull();
+  });
+
+  // The bug this parameter exists to make impossible: getFixturesForTeam
+  // (the only real caller) returns every season this project has ever
+  // stored for a club, not just one. Confirmed live on /team/liverpool-fc-64
+  // showing "Played 40" a few matchdays into a new season — every one of
+  // last season's 38 games summed in alongside this season's handful,
+  // because the record used to have no season filter at all.
+  it('never mixes another season\'s results into the count, even a full one', () => {
+    const lastSeason = (id: number, hg: number, ag: number) =>
+      fixture({
+        id, kickoff_utc: '2025-09-01T14:00:00Z', season: 2025, status: 'FINISHED',
+        home: ARSENAL, away: CHELSEA, home_goals: hg, away_goals: ag,
+      });
+    const list = [
+      ...Array.from({ length: 38 }, (_, i) => lastSeason(100 + i, 2, 0)), // a full, finished 2025 season
+      played(1, ARSENAL, CHELSEA, 1, 0), // one 2026 result
+    ];
+    expect(teamRecord(list, ARSENAL.id, 2026)).toEqual({
+      played: 1, won: 1, drawn: 0, lost: 0, goalsFor: 1, goalsAgainst: 0,
+    });
+  });
+
+  it('returns null for the current season even when a past season has a full record', () => {
+    const list = [
+      fixture({
+        id: 1, kickoff_utc: '2025-09-01T14:00:00Z', season: 2025, status: 'FINISHED',
+        home: ARSENAL, away: CHELSEA, home_goals: 2, away_goals: 0,
+      }),
+    ];
+    expect(teamRecord(list, ARSENAL.id, 2026)).toBeNull();
   });
 });
 
