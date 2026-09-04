@@ -90,7 +90,15 @@ export default async function TeamPage({ params }: { params: Promise<{ slug: str
     results: RESULTS_COUNT,
     upcoming: UPCOMING_COUNT,
   });
-  const record = teamRecord(fixtures, team.id);
+  // Always the current season specifically, never a fallback to last
+  // season's — `getFixturesForTeam` returns every season this project has
+  // stored for the club, and summing across more than one produced exactly
+  // the bug this comment now prevents (see teamRecord's doc comment): a
+  // "Played" figure that silently added last season's games to this one's.
+  // Before a ball is kicked this season, `teamRecord` simply returns `null`
+  // and the page says "No matches played yet" — never last season's record
+  // standing in for it with no season label to say so.
+  const record = league ? teamRecord(fixtures, team.id, league.current_season) : null;
   const squadGroups = groupSquadByPosition(squad);
 
   // Club news comes from the stored tags now (`news_items.team_ids`,
@@ -146,35 +154,47 @@ export default async function TeamPage({ params }: { params: Promise<{ slug: str
             </p>
           </div>
 
-          {/* Season record and league position, when either is real. */}
-          <dl className="ml-auto flex flex-wrap items-center gap-x-5 gap-y-2 font-mono text-13">
-            {standing && !usingLast && (
-              <div>
-                <dt className="text-11 uppercase tracking-wider text-muted">Position</dt>
-                <dd className="text-18 font-bold tabular-nums">{position + 1}</dd>
-              </div>
+          {/* Season record and league position, when either is real. Both
+              are always the current season specifically — see the
+              `record` comment above for why that is load-bearing, not
+              decorative — so the block is labelled with the season these
+              numbers actually describe rather than leaving a reader to
+              assume it covers the club's whole history. */}
+          <div className="ml-auto flex flex-col items-end gap-1">
+            {league && (
+              <span className="font-mono text-11 uppercase tracking-wider text-muted">
+                {seasonLabel(league.current_season)} season
+              </span>
             )}
-            {record ? (
-              <>
+            <dl className="flex flex-wrap items-center gap-x-5 gap-y-2 font-mono text-13">
+              {standing && !usingLast && (
                 <div>
-                  <dt className="text-11 uppercase tracking-wider text-muted">Played</dt>
-                  <dd className="text-18 font-bold tabular-nums">{record.played}</dd>
+                  <dt className="text-11 uppercase tracking-wider text-muted">Position</dt>
+                  <dd className="text-18 font-bold tabular-nums">{position + 1}</dd>
                 </div>
-                <div>
-                  <dt className="text-11 uppercase tracking-wider text-muted">W / D / L</dt>
-                  <dd className="text-18 font-bold tabular-nums">{record.won}/{record.drawn}/{record.lost}</dd>
-                </div>
-                <div>
-                  <dt className="text-11 uppercase tracking-wider text-muted">Goals</dt>
-                  <dd className="text-18 font-bold tabular-nums">
-                    {record.goalsFor}:{record.goalsAgainst}
-                  </dd>
-                </div>
-              </>
-            ) : (
-              <div className="text-11 uppercase tracking-wider text-muted">No matches played yet</div>
-            )}
-          </dl>
+              )}
+              {record ? (
+                <>
+                  <div>
+                    <dt className="text-11 uppercase tracking-wider text-muted">Played</dt>
+                    <dd className="text-18 font-bold tabular-nums">{record.played}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-11 uppercase tracking-wider text-muted">W / D / L</dt>
+                    <dd className="text-18 font-bold tabular-nums">{record.won}/{record.drawn}/{record.lost}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-11 uppercase tracking-wider text-muted">Goals</dt>
+                    <dd className="text-18 font-bold tabular-nums">
+                      {record.goalsFor}:{record.goalsAgainst}
+                    </dd>
+                  </div>
+                </>
+              ) : (
+                <div className="text-11 uppercase tracking-wider text-muted">No matches played yet</div>
+              )}
+            </dl>
+          </div>
         </div>
       </header>
 

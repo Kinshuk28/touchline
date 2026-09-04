@@ -36,18 +36,31 @@ export function splitTeamFixtures(
 }
 
 /**
- * A club's own record from its fixtures — played, won, drawn, lost, goals
- * for and against — computed only from matches that actually have a score.
+ * A club's own record for one season — played, won, drawn, lost, goals for
+ * and against — computed only from matches that actually have a score.
  *
  * Deliberately derived here rather than read from `standings`: the
  * standings table is a competition-scoped snapshot from the provider, and a
- * club page's fixture list is the club's whole season including anything
- * the table doesn't cover. Where both exist they should agree; where they
- * disagree the table is authoritative for the league position, and this is
- * only ever presented as a summary of the matches listed directly below it.
+ * club page's fixture list is the club's own record of the same season,
+ * including anything the table doesn't cover. Where both exist they should
+ * agree; where they disagree the table is authoritative for the league
+ * position, and this is only ever presented as a summary of the matches
+ * listed directly below it.
  *
- * Returns `null` when nothing has been played — a record of zeros is not a
- * record, it is preseason, and the page says so in words instead.
+ * `season` is required, not optional: `fixtures` (from
+ * `getFixturesForTeam`) spans every season this project has ever stored for
+ * the club, not just one — confirmed live on /team/liverpool-fc-64, which
+ * showed "Played 40" a few matchdays into a new season because this
+ * function used to sum every scored fixture it was handed with no season
+ * filter at all, silently adding last season's 38 games to this season's
+ * handful. Scoping here, inside the one function every caller must go
+ * through, is what makes that bug impossible to reintroduce by accident —
+ * a caller that forgets to filter its own fixture list first still gets a
+ * single season's record out of this.
+ *
+ * Returns `null` when nothing has been played in that season — a record of
+ * zeros is not a record, it is preseason, and the page says so in words
+ * instead.
  */
 export interface TeamRecord {
   played: number;
@@ -58,10 +71,11 @@ export interface TeamRecord {
   goalsAgainst: number;
 }
 
-export function teamRecord(fixtures: readonly FixtureWithTeams[], teamId: number): TeamRecord | null {
+export function teamRecord(fixtures: readonly FixtureWithTeams[], teamId: number, season: number): TeamRecord | null {
   const record: TeamRecord = { played: 0, won: 0, drawn: 0, lost: 0, goalsFor: 0, goalsAgainst: 0 };
 
   for (const f of fixtures) {
+    if (f.season !== season) continue;
     if (f.home_goals === null || f.away_goals === null) continue;
     const isHome = f.home?.id === teamId;
     const isAway = f.away?.id === teamId;
