@@ -17,7 +17,17 @@ import { startRun, finishRun } from '@/lib/db/repositories/runs';
 // at once. Fetching only this many per run spreads the cost across several
 // runs instead of spending the whole shared budget here.
 const MAX_PER_RUN = 8;
-const LOOKBACK_HOURS = 48;
+// Generous on purpose — this job started running well into the season, so
+// its first weeks of runs have a real backlog of already-finished matches
+// to work through, not just the day's newest results. A tight window (48h)
+// looked right for "keep up going forward" but meant every match that
+// finished before this job existed could never become a candidate at all,
+// no matter how many times the job ran — confirmed live: a fixture from
+// eight days earlier had no goal rows and never would have got any.
+// 4800h (200 days) comfortably spans a full season; MAX_PER_RUN above is
+// what actually protects the shared API budget, not this window — widening
+// it only grows the (free) candidate query, never the request count.
+const LOOKBACK_HOURS = 4800;
 
 // A placeholder scorer name, never a real one, written when a fixture has
 // been checked and either genuinely has no goals to list (a real 0-0) or
