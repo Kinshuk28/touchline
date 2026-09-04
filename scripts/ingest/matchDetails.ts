@@ -47,9 +47,20 @@ const LOOKBACK_HOURS = 4800;
 // filters this placeholder out before it ever reaches a page.
 const CHECKED_SENTINEL = '__checked_no_goals__';
 
+// Any per-match failure from the provider — never a Supabase or auth error,
+// which won't match this "football-data.org <status>" shape and will still
+// throw through to abort the run loudly, as it should. Originally just
+// 403/404 ("this data isn't available"), widened after a live 500 for one
+// specific match (confirmed: /matches/542697, after the client's own 3
+// retries were already exhausted) took down an entire run — and worse,
+// since that match was never marked checked, every subsequent run hit the
+// exact same wall at the exact same queue position, permanently stalling
+// the whole backlog rather than just skipping the one broken match. A
+// persistent 5xx for a single match is the provider's problem, not a
+// reason to let it block every other match behind it.
 function isSkippable(err: unknown): boolean {
   const message = err instanceof Error ? err.message : String(err);
-  return /football-data\.org (403|404) /.test(message);
+  return /football-data\.org (403|404|5\d\d) /.test(message);
 }
 
 const env = loadIngestEnv();
