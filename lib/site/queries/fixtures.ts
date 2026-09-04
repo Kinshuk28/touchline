@@ -48,7 +48,7 @@ const TEAM_FIELDS = 'id,fd_id,slug,name,short_name,tla,crest_url,club_colors,ven
 export function buildFixtureSelect(): string {
   return [
     'id', 'league_id', 'season', 'kickoff_utc', 'status', 'matchday',
-    'home_goals', 'away_goals', 'updated_at',
+    'home_goals', 'away_goals', 'half_time_home', 'half_time_away', 'updated_at',
     `home:home_team_id(${TEAM_FIELDS})`,
     `away:away_team_id(${TEAM_FIELDS})`,
   ].join(',');
@@ -232,6 +232,21 @@ export async function getFixturesInRange(
   const { data, error } = await q;
   if (error) throw new Error(`getFixturesInRange: ${error.message}`);
   return (data ?? []) as unknown as FixtureWithTeams[];
+}
+
+/**
+ * One fixture by internal id, or `null` when nothing matches — a
+ * `/match/123` that isn't a real fixture is a 404, not an error page, same
+ * `maybeSingle()` contract as `getTeamBySlug`/`getPlayerBySlug`.
+ */
+export async function getFixtureById(id: number): Promise<FixtureWithTeams | null> {
+  const { data, error } = await readClient()
+    .from('fixtures')
+    .select(buildFixtureSelect())
+    .eq('id', id)
+    .maybeSingle();
+  if (error) throw new Error(`getFixtureById: ${error.message}`);
+  return (data as unknown as FixtureWithTeams | null) ?? null;
 }
 
 /**

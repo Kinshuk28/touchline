@@ -2,7 +2,7 @@ import type { RateLimiter } from '@/lib/ingest/rateLimiter';
 import {
   LEAGUE_CODES,
   type LeagueCode, type FixtureStatus, type RawFixture, type RawStanding,
-  type RawSquadMember, type RawScorer, type RawTeam,
+  type RawSquadMember, type RawScorer, type RawTeam, type RawMatchGoal,
 } from '@/lib/providers/types';
 
 const BASE = 'https://api.football-data.org/v4';
@@ -251,6 +251,25 @@ export class FootballDataClient {
       shirtNumber: s.player.shirtNumber ?? null,
     }));
   }
+
+  /**
+   * Goal-by-goal detail for one match — "who scored," which the fixtures
+   * this project already ingests can't answer (they carry only the final
+   * score). Whether the free tier actually populates the `goals` array here
+   * is untested by this project's own research; a 403/404 is the caller's
+   * signal to treat this match as "no detail available," same as every
+   * other free-tier gap this client surfaces rather than papering over.
+   */
+  async getMatchGoals(fdId: number): Promise<RawMatchGoal[]> {
+    const data = await this.get<{ goals?: FdGoal[] }>(`/matches/${fdId}`);
+    return (data.goals ?? []).map((g) => ({
+      minute: g.minute ?? null,
+      scorerName: g.scorer?.name ?? 'Unknown',
+      assistName: g.assist?.name ?? null,
+      type: g.type ?? null,
+      teamFdId: g.team?.id ?? null,
+    }));
+  }
 }
 
 function mapFixture(m: FdMatch, code: LeagueCode, season: number): RawFixture {
@@ -305,4 +324,11 @@ interface FdScorer {
   };
   team: { id: number };
   goals?: number | null; assists?: number | null; playedMatches?: number | null;
+}
+interface FdGoal {
+  minute?: number | null;
+  type?: string | null;
+  team?: { id: number } | null;
+  scorer?: { id: number; name: string } | null;
+  assist?: { id: number; name: string } | null;
 }

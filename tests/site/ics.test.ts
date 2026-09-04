@@ -5,6 +5,7 @@ import type { FixtureWithTeams } from '@/lib/site/rows';
 const f: FixtureWithTeams = {
   id: 7, league_id: 1, season: 2026, kickoff_utc: '2026-08-16T19:00:00Z',
   status: 'SCHEDULED', matchday: 1, home_goals: null, away_goals: null,
+  half_time_home: null, half_time_away: null,
   updated_at: '2026-08-04T00:00:00Z',
   home: { id: 1, fd_id: 86, slug: 'rm', name: 'Real Madrid CF', short_name: 'Real Madrid', tla: 'RMA', crest_url: null, club_colors: null, venue: null },
   away: { id: 2, fd_id: 81, slug: 'fcb', name: 'FC Barcelona', short_name: 'Barça', tla: 'FCB', crest_url: null, club_colors: null, venue: null },

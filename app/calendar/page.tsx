@@ -37,7 +37,7 @@ export default async function CalendarPage({
       </div>
 
       <div className="flex flex-wrap items-center gap-3 text-11">
-        <span className="text-muted">Showing the next {weeks} week{weeks === 1 ? '' : 's'} (UTC)</span>
+        <span className="text-muted">Showing the next {weeks} week{weeks === 1 ? '' : 's'} (IST)</span>
         <a href={icsHref} className="rounded border border-border px-2 py-1 font-semibold uppercase tracking-wider text-muted hover:text-text">
           Subscribe (.ics)
         </a>
@@ -50,7 +50,7 @@ export default async function CalendarPage({
       <MatchdaySpine days={days} leagues={leagues} now={now} />
 
       <p className="text-11 text-muted">
-        All times shown in UTC. <Link href="/scores" className="underline">Scores</Link>
+        All times shown in IST. <Link href="/scores" className="underline">Scores</Link>
       </p>
     </div>
   );

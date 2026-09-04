@@ -5,6 +5,7 @@ import type { FixtureWithTeams } from '@/lib/site/rows';
 const base: FixtureWithTeams = {
   id: 1, league_id: 1, season: 2026, kickoff_utc: '2026-08-16T14:00:00Z',
   status: 'IN_PLAY', matchday: 1, home_goals: 0, away_goals: 0,
+  half_time_home: 0, half_time_away: 0,
   updated_at: '2026-08-16T14:30:00Z',
   home: { id: 10, fd_id: 100, slug: 'a', name: 'A', short_name: 'A', tla: 'AAA', crest_url: null, club_colors: null, venue: null },
   away: { id: 11, fd_id: 101, slug: 'b', name: 'B', short_name: 'B', tla: 'BBB', crest_url: null, club_colors: null, venue: null },

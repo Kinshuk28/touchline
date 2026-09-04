@@ -7,7 +7,7 @@ import { dayRailParts, spineCenterText, spineRowKind, spineStateLabel } from '@/
 import type { FixtureWithTeams, LeagueRow } from '@/lib/site/rows';
 
 export interface SpineDay {
-  /** `YYYY-MM-DD`, UTC — the day this group's fixtures kick off on. */
+  /** `YYYY-MM-DD`, IST — the day this group's fixtures kick off on (see lib/site/spine.ts#groupFixturesByDay). */
   date: string;
   fixtures: FixtureWithTeams[];
 }
@@ -176,9 +176,12 @@ export function MatchdaySpine({
                         )}
                       </span>
 
-                      <span className={`shrink-0 text-center font-mono font-semibold tabular-nums ${compact ? 'w-6 text-14' : 'w-8 text-15'}`}>
+                      <Link
+                        href={`/match/${fixture.id}`}
+                        className={`shrink-0 text-center font-mono font-semibold tabular-nums hover:underline ${compact ? 'w-6 text-14' : 'w-8 text-15'}`}
+                      >
                         {center}
-                      </span>
+                      </Link>
 
                       <span className={`flex min-w-0 flex-1 items-center gap-2 ${compact ? 'max-w-[8.5rem]' : 'max-w-[13rem]'}`}>
                         <span className={`shrink-0 ${compact ? 'hidden sm:block' : ''}`}>

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { dayRailParts, spineCenterText, spineRowKind, spineStateLabel } from '@/lib/site/spine';
+import { dayRailParts, groupFixturesByDay, spineCenterText, spineRowKind, spineStateLabel } from '@/lib/site/spine';
 import type { FixtureStatus } from '@/lib/providers/types';
+import type { FixtureWithTeams } from '@/lib/site/rows';
 
 function fixture(overrides: { status: FixtureStatus; home_goals?: number | null; away_goals?: number | null }) {
   return { status: overrides.status, home_goals: overrides.home_goals ?? null, away_goals: overrides.away_goals ?? null };
@@ -70,6 +71,42 @@ describe('spineStateLabel', () => {
   it('is null for an upcoming fixture, so no state column is reserved for it', () => {
     expect(spineStateLabel({ status: 'SCHEDULED' })).toBeNull();
     expect(spineStateLabel({ status: 'TIMED' })).toBeNull();
+  });
+});
+
+function stubFixture(id: number, kickoffUtc: string): FixtureWithTeams {
+  return {
+    id, league_id: 1, season: 2026, kickoff_utc: kickoffUtc, status: 'SCHEDULED',
+    matchday: 1, home_goals: null, away_goals: null,
+    half_time_home: null, half_time_away: null, updated_at: kickoffUtc,
+    home: null, away: null,
+  };
+}
+
+describe('groupFixturesByDay', () => {
+  it('buckets by the IST calendar date, not the raw UTC one', () => {
+    // 2026-08-16T19:00:00Z is 2026-08-17T00:30 IST — the next day.
+    const groups = groupFixturesByDay([stubFixture(1, '2026-08-16T19:00:00Z')]);
+    expect(groups).toEqual([{ date: '2026-08-17', fixtures: [expect.objectContaining({ id: 1 })] }]);
+  });
+
+  it('keeps two fixtures on the same UTC date but different IST dates apart', () => {
+    // 10:00Z stays on the 16th in IST (15:30); 19:00Z rolls to the 17th (00:30).
+    const groups = groupFixturesByDay([
+      stubFixture(1, '2026-08-16T10:00:00Z'),
+      stubFixture(2, '2026-08-16T19:00:00Z'),
+    ]);
+    expect(groups.map((g) => g.date)).toEqual(['2026-08-16', '2026-08-17']);
+  });
+
+  it('preserves insertion order across day groups', () => {
+    const groups = groupFixturesByDay([
+      stubFixture(1, '2026-08-16T10:00:00Z'),
+      stubFixture(2, '2026-08-17T10:00:00Z'),
+      stubFixture(3, '2026-08-16T11:00:00Z'),
+    ]);
+    expect(groups.map((g) => g.date)).toEqual(['2026-08-16', '2026-08-17']);
+    expect(groups[0]!.fixtures.map((f) => f.id)).toEqual([1, 3]);
   });
 });
 

@@ -23,6 +23,8 @@ function fixture(overrides: Partial<FixtureWithTeams> & { id: number; kickoff_ut
     matchday: 1,
     home_goals: null,
     away_goals: null,
+    half_time_home: null,
+    half_time_away: null,
     updated_at: '2026-08-06T00:00:00Z',
     home: ARSENAL,
     away: CHELSEA,

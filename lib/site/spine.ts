@@ -1,5 +1,6 @@
 import { IN_PLAY_STATUSES } from '@/lib/providers/types';
 import type { FixtureWithTeams } from '@/lib/site/rows';
+import { toIST } from '@/lib/site/timezone';
 
 export type SpineRowKind = 'upcoming' | 'played' | 'live' | 'postponed';
 
@@ -96,7 +97,7 @@ export interface DayRailParts {
   weekday: string;
 }
 
-/** The day rail's day number / month / weekday, parsed from a `YYYY-MM-DD` group key (UTC, matching every other date-grouping in this app). */
+/** The day rail's day number / month / weekday, parsed from a `YYYY-MM-DD` group key (an IST calendar date — see `groupFixturesByDay` below — read via UTC getters since the key itself already carries the correct day). */
 export function dayRailParts(dateIso: string): DayRailParts {
   const d = new Date(`${dateIso}T00:00:00Z`);
   return {
@@ -115,13 +116,20 @@ export function dayRailParts(dateIso: string): DayRailParts {
  * `getFixturesInRange`) — and preserves that order both across day groups
  * (via `Map`'s insertion-order iteration) and within each group. Used by the
  * landing page's spine section and by `/calendar`.
+ *
+ * The day key is the fixture's IST calendar date, not its raw UTC date —
+ * every kickoff time this app displays is in IST (lib/site/timezone.ts), so
+ * a fixture at, say, 22:00 UTC (03:30 IST the next day) must be grouped
+ * under the day its own displayed time actually falls on, or the row would
+ * sit under a day-of-week/date heading that disagrees with the time next to
+ * it.
  */
 export function groupFixturesByDay(
   fixtures: FixtureWithTeams[],
 ): Array<{ date: string; fixtures: FixtureWithTeams[] }> {
   const byDay = new Map<string, FixtureWithTeams[]>();
   for (const f of fixtures) {
-    const day = f.kickoff_utc.slice(0, 10);
+    const day = toIST(new Date(f.kickoff_utc)).toISOString().slice(0, 10);
     byDay.set(day, [...(byDay.get(day) ?? []), f]);
   }
   return [...byDay.entries()].map(([date, dayFixtures]) => ({ date, fixtures: dayFixtures }));

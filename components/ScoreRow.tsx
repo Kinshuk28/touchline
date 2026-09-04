@@ -62,9 +62,13 @@ function ScoreRowImpl({ fixture, scoreText }: { fixture: FixtureWithTeams; score
     >
       <Side team={fixture.home} align="end" />
 
-      <span className="shrink-0 px-1 text-center text-sm font-bold tabular-nums" data-role="score">
+      <Link
+        href={`/match/${fixture.id}`}
+        className="shrink-0 px-1 text-center text-sm font-bold tabular-nums hover:underline"
+        data-role="score"
+      >
         {scoreText}
-      </span>
+      </Link>
 
       <Side team={fixture.away} />
 

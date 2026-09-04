@@ -1,0 +1,34 @@
+name: ingest-match-details
+on:
+  schedule: [{ cron: '0 */2 * * *' }]
+  workflow_dispatch:
+# Same shared football-data.org key as ingest-core/ingest-live/ingest-squads/
+# ingest-continental (10 req/min free-tier ceiling) — this must serialize
+# with them on the same concurrency group, not run in its own. Every 2
+# hours, bounded to 8 fixtures per run (see scripts/ingest/matchDetails.ts):
+# frequent enough that a match's goal detail shows up within a couple of
+# hours of full time, without ever competing hard for the shared budget on
+# a busy matchday.
+concurrency:
+  group: football-data-api
+  cancel-in-progress: false
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '24', cache: 'npm' }
+      - run: npm ci
+      - run: npx tsx scripts/preflight-env.ts ingest
+        continue-on-error: false
+        env:
+          FOOTBALL_DATA_KEY: ${{ secrets.FOOTBALL_DATA_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      - run: npx tsx scripts/ingest/matchDetails.ts
+        env:
+          FOOTBALL_DATA_KEY: ${{ secrets.FOOTBALL_DATA_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
