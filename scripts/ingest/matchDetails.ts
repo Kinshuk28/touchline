@@ -11,12 +11,21 @@ import { startRun, finishRun } from '@/lib/db/repositories/runs';
 // supabase/migrations/0014_fixture_goals.sql for why this is a separate,
 // gracefully-degrading table rather than a guaranteed feature.
 
-// Bounded per run: this shares the 10 req/min free-tier budget with
-// core/live/squads/continental (see ingest-core.yml's concurrency-group
-// comment), and a single busy matchday can have dozens of finished matches
-// at once. Fetching only this many per run spreads the cost across several
-// runs instead of spending the whole shared budget here.
-const MAX_PER_RUN = 8;
+// Bounded per run, but not by the shared 10 req/min budget itself — the
+// RateLimiter this script constructs is a fresh, in-process instance per
+// run (it holds no state across separate GitHub Actions invocations), so
+// what actually keeps this safe alongside core/live/squads/continental is
+// the `football-data-api` concurrency group serializing them: only one of
+// these scripts is ever mid-run at a time, so this one's own pacing at
+// <=10/min is the real, true shared rate regardless of how many requests
+// it makes in total. Raising this cap just makes one run take longer
+// (60 requests <=6 min at that pace, comfortably inside the job's 20-minute
+// timeout), delaying whatever's queued behind it — not exceeding the
+// provider's real limit. Set generously (40, up from an initial 8) after
+// confirming live that the season-start backlog widening the lookback
+// window uncovered (supabase/migrations/0014_fixture_goals.sql's first
+// runs) was in the hundreds, not the handful a steady-state day produces.
+const MAX_PER_RUN = 40;
 // Generous on purpose — this job started running well into the season, so
 // its first weeks of runs have a real backlog of already-finished matches
 // to work through, not just the day's newest results. A tight window (48h)
