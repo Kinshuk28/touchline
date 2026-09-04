@@ -47,6 +47,10 @@ export interface FixtureWithTeams {
   matchday: number | null;
   home_goals: number | null;
   away_goals: number | null;
+  /** Half-time score — stored since the earliest ingest but never selected
+   * or shown anywhere until the match detail page (/match/[id]). */
+  half_time_home: number | null;
+  half_time_away: number | null;
   updated_at: string;
   home: TeamLite | null;
   away: TeamLite | null;

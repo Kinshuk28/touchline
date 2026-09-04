@@ -3,15 +3,21 @@ import { formatKickoff, formatKickoffTime, relativeTime, dataAge, checkedAge } f
 
 const now = new Date('2026-08-16T12:00:00Z');
 
+// Every kickoff literal here is 5:30 earlier in UTC than the IST time the
+// expected string names (e.g. 13:30 UTC = 19:00 IST) — times are displayed
+// in IST (lib/site/timezone.ts), so a naive UTC literal at ":19:00:00Z"
+// would actually roll over past midnight into the next IST calendar day.
+// See the "crosses midnight in IST" describe block below, which tests that
+// rollover deliberately instead of accidentally.
 describe('formatKickoff', () => {
   it('shows only a time for a fixture later today', () => {
-    expect(formatKickoff('2026-08-16T19:00:00Z', now)).toBe('19:00');
+    expect(formatKickoff('2026-08-16T13:30:00Z', now)).toBe('19:00');
   });
   it('shows a weekday and time within the coming week', () => {
-    expect(formatKickoff('2026-08-18T19:00:00Z', now)).toBe('Tue 19:00');
+    expect(formatKickoff('2026-08-18T13:30:00Z', now)).toBe('Tue 19:00');
   });
   it('shows a date for anything further out', () => {
-    expect(formatKickoff('2026-10-01T19:00:00Z', now)).toBe('1 Oct');
+    expect(formatKickoff('2026-10-01T13:30:00Z', now)).toBe('1 Oct');
   });
 });
 
@@ -22,18 +28,18 @@ describe('formatKickoff', () => {
 // never dropped.
 describe('formatKickoffTime', () => {
   it('shows only a time for a fixture later today (same as formatKickoff)', () => {
-    expect(formatKickoffTime('2026-08-16T19:00:00Z', now)).toBe('19:00');
+    expect(formatKickoffTime('2026-08-16T13:30:00Z', now)).toBe('19:00');
   });
   it('shows a weekday and time within the coming week (same as formatKickoff)', () => {
-    expect(formatKickoffTime('2026-08-18T19:00:00Z', now)).toBe('Tue 19:00');
+    expect(formatKickoffTime('2026-08-18T13:30:00Z', now)).toBe('Tue 19:00');
   });
   it('keeps the time for anything further out, unlike formatKickoff', () => {
-    expect(formatKickoffTime('2026-10-01T19:00:00Z', now)).toBe('1 Oct 19:00');
+    expect(formatKickoffTime('2026-10-01T13:30:00Z', now)).toBe('1 Oct 19:00');
   });
   it('this is the real preseason case: every fixture starts out more than 7 days from now', () => {
     // Season starts 2026-08-16; "now" here stands in for today (2026-08-04).
     const preseason = new Date('2026-08-04T00:00:00Z');
-    expect(formatKickoffTime('2026-08-16T19:00:00Z', preseason)).toBe('16 Aug 19:00');
+    expect(formatKickoffTime('2026-08-16T13:30:00Z', preseason)).toBe('16 Aug 19:00');
   });
 
   // /calendar already states the date via its day-grouping heading — asking
@@ -42,13 +48,25 @@ describe('formatKickoffTime', () => {
   // column's width requirement at "Tue 19:00" rather than "16 Aug 19:00".
   describe('with dateContext: true', () => {
     it('still shows only a time for later today', () => {
-      expect(formatKickoffTime('2026-08-16T19:00:00Z', now, { dateContext: true })).toBe('19:00');
+      expect(formatKickoffTime('2026-08-16T13:30:00Z', now, { dateContext: true })).toBe('19:00');
     });
     it('shows weekday and time within the coming week, same as without the option', () => {
-      expect(formatKickoffTime('2026-08-18T19:00:00Z', now, { dateContext: true })).toBe('Tue 19:00');
+      expect(formatKickoffTime('2026-08-18T13:30:00Z', now, { dateContext: true })).toBe('Tue 19:00');
     });
     it('stays at weekday+time even far out, unlike the default (no repeated date)', () => {
-      expect(formatKickoffTime('2026-10-01T19:00:00Z', now, { dateContext: true })).toBe('Thu 19:00');
+      expect(formatKickoffTime('2026-10-01T13:30:00Z', now, { dateContext: true })).toBe('Thu 19:00');
+    });
+  });
+
+  // A UTC kickoff late in the evening lands after midnight IST — the whole
+  // reason `groupFixturesByDay` (lib/site/spine.ts) buckets by the IST
+  // calendar date rather than the raw UTC one, and worth a dedicated case
+  // here rather than leaving it as an accidental side effect of some other
+  // literal.
+  describe('a kickoff that crosses midnight in IST', () => {
+    it('rolls over to the next IST day and shows that weekday, not the UTC one', () => {
+      // 2026-08-16T19:00:00Z is 2026-08-17T00:30 IST — the next calendar day.
+      expect(formatKickoffTime('2026-08-16T19:00:00Z', now)).toBe('Mon 00:30');
     });
   });
 });

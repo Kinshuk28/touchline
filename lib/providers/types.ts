@@ -82,6 +82,23 @@ export interface RawSquadMember {
   dateOfBirth: string | null;
 }
 
+/**
+ * One goal event from `/v4/matches/{id}`'s `goals` array — "who scored,"
+ * the detail `RawFixture`'s bare score numbers can't answer. Whether the
+ * free tier actually populates this array for a given match is not
+ * something this project's own research ever tested (see
+ * supabase/migrations/0014_fixture_goals.sql); `teamFdId` is nullable
+ * because the provider's own sample response allows a null `team`, and
+ * `assistName` because most goals have no assist.
+ */
+export interface RawMatchGoal {
+  minute: number | null;
+  scorerName: string;
+  assistName: string | null;
+  type: string | null;
+  teamFdId: number | null;
+}
+
 export interface RawScorer {
   playerFdId: number;
   playerName: string;

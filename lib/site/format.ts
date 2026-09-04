@@ -1,8 +1,12 @@
+import { toIST } from '@/lib/site/timezone';
+
 const DAY_MS = 86_400_000;
 
-function utc(iso: string): Date { return new Date(iso); }
+function ist(iso: string): Date { return toIST(new Date(iso)); }
 
-/** Times are rendered in UTC so server and client agree and hydration is stable. */
+/** Times are rendered in IST (see lib/site/timezone.ts): reading the shifted
+ * instant's UTC fields gives IST wall-clock values while keeping server and
+ * client output identical, so hydration never disagrees. */
 function hhmm(d: Date): string {
   return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
 }
@@ -11,10 +15,11 @@ const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 export function formatKickoff(iso: string, now: Date): string {
-  const d = utc(iso);
-  const sameDay = d.toISOString().slice(0, 10) === now.toISOString().slice(0, 10);
+  const d = ist(iso);
+  const nowD = toIST(now);
+  const sameDay = d.toISOString().slice(0, 10) === nowD.toISOString().slice(0, 10);
   if (sameDay) return hhmm(d);
-  const delta = d.getTime() - now.getTime();
+  const delta = new Date(iso).getTime() - now.getTime();
   if (delta > 0 && delta < 7 * DAY_MS) return `${DAYS[d.getUTCDay()]} ${hhmm(d)}`;
   return `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]}`;
 }
@@ -39,11 +44,12 @@ export function formatKickoff(iso: string, now: Date): string {
  * upcoming rows), where the date is the only clue a reader has.
  */
 export function formatKickoffTime(iso: string, now: Date, opts: { dateContext?: boolean } = {}): string {
-  const d = utc(iso);
-  const sameDay = d.toISOString().slice(0, 10) === now.toISOString().slice(0, 10);
+  const d = ist(iso);
+  const nowD = toIST(now);
+  const sameDay = d.toISOString().slice(0, 10) === nowD.toISOString().slice(0, 10);
   if (sameDay) return hhmm(d);
   if (opts.dateContext) return `${DAYS[d.getUTCDay()]} ${hhmm(d)}`;
-  const delta = d.getTime() - now.getTime();
+  const delta = new Date(iso).getTime() - now.getTime();
   if (delta > 0 && delta < 7 * DAY_MS) return `${DAYS[d.getUTCDay()]} ${hhmm(d)}`;
   return `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${hhmm(d)}`;
 }
@@ -51,7 +57,7 @@ export function formatKickoffTime(iso: string, now: Date, opts: { dateContext?: 
 /** Null in, null out — a missing timestamp is never guessed at. */
 export function relativeTime(iso: string | null, now: Date): string | null {
   if (iso === null) return null;
-  const diff = now.getTime() - utc(iso).getTime();
+  const diff = now.getTime() - new Date(iso).getTime();
   if (Number.isNaN(diff)) return null;
   if (diff < 0) return null;
   const mins = Math.floor(diff / 60_000);

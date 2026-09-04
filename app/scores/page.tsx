@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { getLeagues } from '@/lib/site/queries/leagues';
 import { getLiveAndRecent, getUpcoming } from '@/lib/site/queries/fixtures';
 import { parseLeagueCodes, resolveLeagueIds } from '@/lib/site/leagueFilter';
@@ -105,7 +106,7 @@ function CompetitionGroup({
                   <span className="truncate text-15 font-medium">{f.home?.short_name ?? f.home?.name ?? 'TBC'}</span>
                   <Crest team={f.home} size={28} eager={eager} />
                 </span>
-                <span className="shrink-0 px-1 text-center font-mono text-15 font-semibold tabular-nums">{center}</span>
+                <Link href={`/match/${f.id}`} className="shrink-0 px-1 text-center font-mono text-15 font-semibold tabular-nums hover:underline">{center}</Link>
                 <span className="flex min-w-0 flex-1 items-center gap-1 sm:w-40 sm:flex-none sm:gap-2">
                   <Crest team={f.away} size={28} eager={eager} />
                   <span className="truncate text-15 font-medium">{f.away?.short_name ?? f.away?.name ?? 'TBC'}</span>
@@ -168,7 +169,7 @@ function NextFixtureCard({ fixture, now }: { fixture: FixtureWithTeams; now: Dat
         </span>
         <Crest team={fixture.away} size={36} eager />
       </div>
-      <p className="mt-2 font-mono text-13 text-muted">{formatKickoffTime(fixture.kickoff_utc, now)}</p>
+      <p className="mt-2 font-mono text-13 text-muted">{formatKickoffTime(fixture.kickoff_utc, now)} IST</p>
       <p className="mt-5 font-mono text-32 font-extrabold tabular-nums sm:text-44">
         {parts ? (parts.days > 0 ? `${parts.days}d ${parts.hours}h` : `${parts.hours}h`) : 'Under way'}
       </p>
