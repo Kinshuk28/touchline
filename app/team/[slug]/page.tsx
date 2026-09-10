@@ -198,7 +198,7 @@ export default async function TeamPage({ params }: { params: Promise<{ slug: str
         </div>
       </header>
 
-      <div className="grid gap-3 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)] lg:items-start">
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)] lg:items-start">
         <div className="space-y-3">
           <BoardPanel
             order={0}
